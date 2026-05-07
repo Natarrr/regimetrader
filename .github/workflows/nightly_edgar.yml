@@ -153,7 +153,27 @@ jobs:
             --min-coverage "${{ github.event.inputs.min_coverage || '0.80' }}" \
             --max-errors   5
 
-      # ── 8. Job summary (visible in GitHub Actions UI) ─────────────────────────
+      # ── 8. Minsky insider stress alert ───────────────────────────────────────
+      #
+      # Reads marketintel_events.json and evaluates three EDGAR-native conditions:
+      #   1. Bearish universe     : universe avg insider score < 0.40
+      #   2. Sell concentration   : >50% tickers with score < 0.35
+      #   3. No buy conviction    : zero CEO/CFO open-market purchases in universe
+      #
+      # Levels:  CLEAR (0/3) → exit 0
+      #          WATCH (1/3) → exit 0
+      #          WARNING (2/3) → exit 0  [current market typical]
+      #          CRITICAL (3/3) → Slack + exit 1 (job fails)
+      #
+      # Graceful: missing / malformed marketintel_events.json → exit 0 (no-op).
+      - name: Check Minsky insider stress
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python -m monitoring.minsky_alert --log-dir logs
+
+      # ── 9. Job summary (visible in GitHub Actions UI) ─────────────────────────
       - name: Write job summary
         if: always()
         run: |
