@@ -7,29 +7,27 @@ values — no live network calls in tests.
 """
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
 import pytest
 
 
 # ── 2008 GFC SPY daily log-returns (Oct 2008 = peak volatility) ────────────────
 
 @pytest.fixture(scope="session")
-def spy_oct2008_returns() -> np.ndarray:
+def spy_oct2008_returns():
     """GFC peak: SPY fell ~27% in October 2008. Returns should produce GARCH
     persistence well above 0.90 given the extreme volatility clustering."""
+    import numpy as np
     rng = np.random.default_rng(42)
-    # Simulate a fat-tailed crash: base vol 0.025 with periodic spikes
     base = rng.normal(-0.003, 0.025, 500)
-    # Inject Oct 2008-style clusters (days 400–460)
     base[400:460] += rng.normal(-0.01, 0.045, 60)
     base[420:440] += rng.normal(-0.015, 0.06, 20)
     return base
 
 
 @pytest.fixture(scope="session")
-def spy_2020_crash_returns() -> np.ndarray:
+def spy_2020_crash_returns():
     """COVID crash: Feb-Mar 2020. Returns exhibit extreme clustering."""
+    import numpy as np
     rng = np.random.default_rng(123)
     base = rng.normal(0.0005, 0.010, 600)
     base[550:580] += rng.normal(-0.025, 0.06, 30)
@@ -40,10 +38,10 @@ def spy_2020_crash_returns() -> np.ndarray:
 # ── FRED series fixtures ───────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
-def yield_data_pre_gfc() -> tuple[pd.Series, pd.Series]:
+def yield_data_pre_gfc():
     """Historical 10Y and 2Y yields 2005-2008: yield curve inverted 2006-07."""
+    import pandas as pd
     dates = pd.date_range("2005-01-01", "2008-12-31", freq="MS")
-    # 10Y drifted from 4.5 → 3.5, 2Y was above 10Y during 2006-2007 (inversion)
     gs10 = pd.Series(
         [4.5, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.9, 4.8,
          4.7, 4.6, 4.5, 4.7, 4.8, 4.9, 5.0, 5.1, 5.1,
@@ -68,17 +66,20 @@ def yield_data_pre_gfc() -> tuple[pd.Series, pd.Series]:
 
 
 @pytest.fixture(scope="session")
-def m2v_series() -> pd.Series:
+def m2v_series():
     """M2 velocity 2000-2023: declining trend post-GFC (liquidity trap evidence)."""
+    import numpy as np
+    import pandas as pd
     dates = pd.date_range("2000-01-01", "2023-12-31", freq="QS")
-    # Velocity was ~2.0 in 2000, declined to ~1.1 post-2020 QE
     vals = np.linspace(2.0, 1.1, len(dates)) + np.random.default_rng(7).normal(0, 0.02, len(dates))
     return pd.Series(vals, index=dates, name="M2V")
 
 
 @pytest.fixture(scope="session")
-def gdp_series() -> pd.Series:
+def gdp_series():
     """Real GDP quarterly 1980-2023 (approximation for HP filter test)."""
+    import numpy as np
+    import pandas as pd
     dates = pd.date_range("1980-01-01", "2023-12-31", freq="QS")
     trend = np.linspace(3000, 22000, len(dates))
     cycle = 200 * np.sin(np.linspace(0, 12 * np.pi, len(dates)))
@@ -86,10 +87,11 @@ def gdp_series() -> pd.Series:
 
 
 @pytest.fixture(scope="session")
-def cape_series_historical() -> pd.Series:
+def cape_series_historical():
     """Approximate Shiller CAPE 1980-2023 for percentile ranking tests."""
+    import numpy as np
+    import pandas as pd
     dates = pd.date_range("1980-01-01", "2023-12-31", freq="MS")
-    # CAPE: ~7 at 1980 trough → ~44 at 2000 peak → ~13 at 2009 trough → ~38 at 2021 peak
     base = np.interp(
         np.linspace(0, 1, len(dates)),
         [0, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 1.0],
