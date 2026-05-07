@@ -1,0 +1,7 @@
+# Minimal dependencies for the CI test suite.
+# Does NOT include ML, dashboard, or broker packages — none are needed for tests.
+# Full stack: requirements.txt
+
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+requests>=2.31.0
