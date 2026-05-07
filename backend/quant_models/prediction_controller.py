@@ -87,7 +87,7 @@ def classify_regime(
     # ── CRASH ─────────────────────────────────────────────────────────────────
     # Requires price-action stress AND at least one macro confirmation.
     # Prevents Bear + NEUTRAL + STABLE from triggering CRASH.
-    if _risk_off and _tight and _stressed:
+    if _risk_off and (_tight or _stressed):
         return "CRASH"
 
     # ── OVERHEATED ────────────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ def minsky_moment(
     Returns:
         MinskyStatusOut with triggered flag, alert_level, conditions_met, and narrative.
     """
-    cond_garch = garch_persistence >= 0.98
+    cond_garch = garch_persistence > 0.98
     cond_cape  = cape_percentile   >= 95.0
     cond_yield = yield_spread_bps  < 0.0
     conditions_met = int(cond_garch) + int(cond_cape) + int(cond_yield)

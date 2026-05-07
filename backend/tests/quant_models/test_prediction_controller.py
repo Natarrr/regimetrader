@@ -12,10 +12,18 @@ from backend.data.schemas import MinskyStatusOut
 
 
 class TestClassifyRegime:
-    def test_bear_hmm_always_crash(self):
-        """Lucas (1995 Nobel) — Any Bear/Crash HMM label → CRASH regime."""
+    def test_bear_hmm_with_macro_stress_is_crash(self):
+        """Lucas (1995 Nobel) — Risk-off HMM + macro confirmation → CRASH.
+
+        Per the docstring: CRASH requires risk-off price action AND at least one
+        macro stress (TIGHTENING or CLUSTERING). Bear alone with NEUTRAL + STABLE
+        maps to FRAGILE (early deterioration, not full systemic stress).
+        """
         for label in ("Bear", "Crash", "Panic"):
-            assert classify_regime(label, "NEUTRAL", "STABLE") == "CRASH"
+            assert classify_regime(label, "TIGHTENING", "CLUSTERING") == "CRASH"
+            assert classify_regime(label, "TIGHTENING", "STABLE") == "CRASH"
+            assert classify_regime(label, "NEUTRAL", "CLUSTERING") == "CRASH"
+            assert classify_regime(label, "NEUTRAL", "STABLE") == "FRAGILE"
 
     def test_bull_easing_stable_is_bull(self):
         assert classify_regime("Bull", "EASING", "STABLE") == "BULL"
