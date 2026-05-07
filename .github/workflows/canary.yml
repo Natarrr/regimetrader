@@ -1,0 +1,114 @@
+name: canary
+
+on:
+  schedule:
+    # 3× per day: 06:00, 12:00, 18:00 UTC (weekdays + weekends)
+    - cron: "0 6,12,18 * * *"
+  workflow_dispatch:
+    inputs:
+      tickers_file:
+        description: "Tickers CSV (relative to repo root)"
+        required: false
+        default: "config/canary_top10.csv"
+      min_coverage:
+        description: "Minimum EDGAR coverage ratio (0.0 – 1.0)"
+        required: false
+        default: "0.6"
+      limit_forms:
+        description: "Max filings fetched per form type"
+        required: false
+        default: "5"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Never run two canaries in parallel — SEC rate-limits per IP
+    concurrency:
+      group: edgar_canary
+      cancel-in-progress: false
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup with pip cache ──────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. EDGAR-first pipeline ─────────────────────────────────────────────
+      - name: Run EDGAR pipeline
+        env:
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          FMP_API_KEY:      ${{ secrets.FMP_API_KEY }}
+          EDGAR_FIRST:      "true"
+        run: |
+          set -euo pipefail
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/canary_top10.csv' }}"
+          LIMIT="${{ github.event.inputs.limit_forms || '5' }}"
+          START=$(date +%s)
+          python -m backend.market_intel.run_pipeline \
+            --tickers-file "$TICKERS_FILE" \
+            --limit-forms "$LIMIT" \
+            --verbose
+          END=$(date +%s)
+          echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+
+      # ── 5. Export metrics ────────────────────────────────────────────────────
+      - name: Export metrics
+        run: |
+          set -euo pipefail
+          python -m monitoring.metrics_exporter \
+            --log-dir logs \
+            --duration-seconds "${DURATION_SECONDS}"
+
+      # ── 6. Print metrics to run log (always visible, never fails the job) ───
+      - name: Show metrics
+        if: always()
+        run: |
+          if [ -f logs/metrics.json ]; then
+            echo "=== metrics.json ==="
+            cat logs/metrics.json
+          else
+            echo "metrics.json not found"
+          fi
+
+      # ── 7. Threshold gate — alerts on failure ──────────────────────────────
+      - name: Check thresholds
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          python -m monitoring.check_metrics \
+            --log-dir logs \
+            --min-coverage "${{ github.event.inputs.min_coverage || '0.6' }}" \
+            --max-errors 0
+
+      # ── 8. Upload artifacts (even on failure so you can debug) ──────────────
+      - name: Upload canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-${{ github.run_id }}
+          path: |
+            logs/metrics.json
+            logs/intel_source_status.json
+            logs/edgar_debug_summary.json
+            logs/form4_summary.csv
+            logs/marketintel_events.json
+            logs/market_intel.log
+            .monitoring/edgar_cb.json
+            .monitoring/alert_state.json
+          retention-days: 14
+          if-no-files-found: warn

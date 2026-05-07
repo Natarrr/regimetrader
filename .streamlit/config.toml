@@ -1,0 +1,6 @@
+[theme]
+primaryColor             = "#00FFA3"   # neon green — buy signals, success
+backgroundColor          = "#050505"   # deep black
+secondaryBackgroundColor = "#121212"   # anthracite — cards, sidebars
+textColor                = "#E0E0E0"   # off-white — readable body text
+font                     = "monospace" # terminal look

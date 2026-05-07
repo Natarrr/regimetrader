@@ -1,0 +1,116 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# regime_trader — .gitignore
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Secrets & credentials — NEVER commit these ────────────────────────────────
+.env
+credentials.yaml
+credentials.yml
+*.pem
+*.key
+secrets/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.installed.cfg
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.whl
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+.venv_old/
+.venv_test/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+.next/
+.nuxt/
+out/
+dist/
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+test-results/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Logs & runtime artifacts ──────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+
+# ── Trading runtime files ─────────────────────────────────────────────────────
+# (manual deletion required to resume after HALT_ALL)
+trading_halted.lock
+# (session recovery snapshot — machine-generated)
+state_snapshot.json
+# (serialised HMM model files — regenerated on retrain)
+models/
+
+# ── Canary runtime state (CB + alert streak) ──────────────────────────────────
+# (edgar_cb.json, alert_state.json — regenerated each run)
+.monitoring/
+
+# ── Reports ───────────────────────────────────────────────────────────────────
+reports/
+*.html
+*.pdf
+
+# ── Data cache ────────────────────────────────────────────────────────────────
+data_cache/
+*.parquet
+*.feather
+*.h5
+*.hdf5
+
+# ── IDE & OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── mypy / type checkers ──────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# ── Ruff / linters ────────────────────────────────────────────────────────────
+.ruff_cache/
