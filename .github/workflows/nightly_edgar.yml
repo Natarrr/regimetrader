@@ -1,0 +1,192 @@
+name: nightly_edgar
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Nightly full-universe EDGAR backfill (50 tickers, 00:00 UTC).
+# Distinct from canary (10 tickers, 3×/day health check) and market_intel
+# (push/PR unit tests + scheduled partial fetch).
+#
+# Concurrency group "nightly_edgar" is separate from "edgar_canary" so the
+# canary and this workflow never block each other at the SEC rate-limit level.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 00:00 UTC every night
+  workflow_dispatch:
+    inputs:
+      tickers_file:
+        description: "Tickers CSV (path relative to repo root)"
+        required: false
+        default: "backend/market_intel/top50.csv"
+      limit_forms:
+        description: "Max filings fetched per form type per ticker"
+        required: false
+        default: "20"
+      min_coverage:
+        description: "Min EDGAR coverage ratio that passes threshold gate (0–1)"
+        required: false
+        default: "0.80"
+
+jobs:
+  nightly-edgar:
+    runs-on: ubuntu-latest
+    # 50 tickers × ~5s each at 7 req/s SEC rate limit ≈ 6 min nominal.
+    # 45-min ceiling absorbs SEC throttling, slow nights, and up to 2 retries.
+    timeout-minutes: 45
+
+    # SEC rate-limits per IP — never run two fetches in parallel.
+    concurrency:
+      group: nightly_edgar
+      cancel-in-progress: false
+
+    steps:
+
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3a. Lightweight CI deps first (fast, cached) ─────────────────────────
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      # ── 3b. Full pipeline deps (yfinance, hmmlearn, pydantic, loguru …) ──────
+      - name: Install full pipeline deps
+        run: pip install -r requirements.txt
+
+      # ── 4. EDGAR full-universe fetch — 3-attempt retry with linear backoff ───
+      #
+      # Exit codes from run_pipeline.py:
+      #   0 — all tickers processed successfully
+      #   1 — partial failure (some tickers errored, pipeline completed)
+      #   2 — fatal failure (no data returned at all)
+      #
+      # Strategy: treat exit 1 as a soft failure and retry; treat exit 2 as hard.
+      # Backoff: attempt 1 → immediate, attempt 2 → 30s, attempt 3 → 60s.
+      - name: EDGAR full-universe fetch
+        env:
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          FMP_API_KEY:       ${{ secrets.FMP_API_KEY }}
+          EDGAR_FIRST:       "true"
+        run: |
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}"
+          LIMIT_FORMS="${{ github.event.inputs.limit_forms || '20' }}"
+          LOG_DIR="logs"
+          mkdir -p "$LOG_DIR" .monitoring
+
+          SUCCESS=false
+          for ATTEMPT in 1 2 3; do
+            echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
+            START=$(date +%s)
+
+            if python -m backend.market_intel.run_pipeline \
+              --tickers-file "$TICKERS_FILE" \
+              --limit-forms  "$LIMIT_FORMS" \
+              --max-workers  4 \
+              --log-dir      "$LOG_DIR" \
+              --verbose; then
+              END=$(date +%s)
+              echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+              SUCCESS=true
+              echo "::endgroup::"
+              break
+            fi
+
+            echo "::endgroup::"
+            if [ "$ATTEMPT" -lt 3 ]; then
+              WAIT=$((ATTEMPT * 30))
+              echo "::warning::Attempt $ATTEMPT failed — retrying in ${WAIT}s"
+              sleep "$WAIT"
+            fi
+          done
+
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error::All 3 EDGAR fetch attempts failed — SEC unreachable or data unavailable"
+            exit 1
+          fi
+
+      # ── 5. Export metrics from _edgar_meta block ─────────────────────────────
+      #
+      # Reads logs/intel_source_status.json and writes logs/metrics.json with
+      # the six canonical keys: edgar_count, fmp_count, none_count, error_count,
+      # coverage_ratio, duration_seconds.
+      - name: Export metrics
+        if: always()
+        run: |
+          python -m monitoring.metrics_exporter \
+            --log-dir logs \
+            --duration-seconds "${DURATION_SECONDS:-0}"
+
+      # ── 6. Print metrics to run log (diagnostic, never fails the job) ─────────
+      - name: Show metrics
+        if: always()
+        run: |
+          if [ -f logs/metrics.json ]; then
+            echo "=== metrics.json ==="
+            cat logs/metrics.json
+          else
+            echo "metrics.json not found — pipeline may have failed before writing outputs"
+          fi
+
+      # ── 7. Coverage threshold gate + Slack alert on breach ────────────────────
+      #
+      # Exits 0 if: coverage_ratio >= min_coverage AND error_count <= max_errors.
+      # Exits 2 on breach and fires a Slack message via SLACK_WEBHOOK_URL.
+      # max-errors: 5 allows up to 5 tickers to fail (10% of 50) before alert.
+      - name: Check coverage thresholds
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python -m monitoring.check_metrics \
+            --log-dir      logs \
+            --min-coverage "${{ github.event.inputs.min_coverage || '0.80' }}" \
+            --max-errors   5
+
+      # ── 8. Job summary (visible in GitHub Actions UI) ─────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## EDGAR Nightly — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tickers file | \`${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Limit forms  | \`${{ github.event.inputs.limit_forms || '20' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Min coverage | \`${{ github.event.inputs.min_coverage || '0.80' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f logs/metrics.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat logs/metrics.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No metrics.json — pipeline failed before producing outputs._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 9. Upload artifacts (90-day retention — nightly data is long-lived) ───
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-edgar-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: warn
+          path: |
+            logs/form4_summary.csv
+            logs/edgar_debug_summary.json
+            logs/marketintel_events.json
+            logs/intel_source_status.json
+            logs/metrics.json
+            logs/*.log
+            .monitoring/edgar_cb.json
+            .monitoring/alert_state.json
