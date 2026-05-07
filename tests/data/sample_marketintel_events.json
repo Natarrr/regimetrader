@@ -1,0 +1,126 @@
+[
+  {
+    "ticker": "AAPL",
+    "source": "EDGAR",
+    "presence": true,
+    "is_authoritative": true,
+    "activity_count": 3,
+    "events": [
+      {
+        "type": "Form-4",
+        "issuer_ticker": "AAPL",
+        "reporting_person": "Cook Timothy D",
+        "reporting_role": "CEO",
+        "transaction_date": "2026-05-01",
+        "transaction_code": "P",
+        "shares": 50000.0,
+        "price": 195.0,
+        "value": 9750000.0,
+        "acquired_disposed": "A",
+        "source": "EDGAR"
+      }
+    ],
+    "score": 0.82,
+    "score_breakdown": {
+      "score": 0.82,
+      "buy_value": 9750000.0,
+      "sell_value": 0.0,
+      "net_value": 9750000.0,
+      "buy_count": 1,
+      "sell_count": 0,
+      "events_in_window": 3,
+      "ceo_buy": true,
+      "amendment_count": 0
+    },
+    "last_updated": "2026-05-07T19:10:00+00:00",
+    "errors": []
+  },
+  {
+    "ticker": "NVDA",
+    "source": "EDGAR",
+    "presence": true,
+    "is_authoritative": true,
+    "activity_count": 11,
+    "events": [],
+    "score": 0.1529,
+    "score_breakdown": {
+      "score": 0.1529,
+      "buy_value": 0.0,
+      "sell_value": 42803017.31,
+      "net_value": -42803017.31,
+      "buy_count": 0,
+      "sell_count": 11,
+      "events_in_window": 14,
+      "ceo_buy": false,
+      "amendment_count": 1
+    },
+    "last_updated": "2026-05-07T19:10:00+00:00",
+    "errors": []
+  },
+  {
+    "ticker": "MSFT",
+    "source": "EDGAR",
+    "presence": true,
+    "is_authoritative": true,
+    "activity_count": 2,
+    "events": [],
+    "score": 0.5,
+    "score_breakdown": {
+      "score": 0.5,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "net_value": 0.0,
+      "buy_count": 0,
+      "sell_count": 0,
+      "events_in_window": 2,
+      "ceo_buy": false,
+      "amendment_count": 0
+    },
+    "last_updated": "2026-05-07T19:10:00+00:00",
+    "errors": []
+  },
+  {
+    "ticker": "JPM",
+    "source": "EDGAR",
+    "presence": true,
+    "is_authoritative": true,
+    "activity_count": 5,
+    "events": [],
+    "score": 0.3887,
+    "score_breakdown": {
+      "score": 0.3887,
+      "buy_value": 0.0,
+      "sell_value": 11319642.45,
+      "net_value": -11319642.45,
+      "buy_count": 0,
+      "sell_count": 5,
+      "events_in_window": 5,
+      "ceo_buy": false,
+      "amendment_count": 0
+    },
+    "last_updated": "2026-05-07T19:10:00+00:00",
+    "errors": []
+  },
+  {
+    "ticker": "INTC",
+    "source": "EDGAR",
+    "presence": false,
+    "is_authoritative": false,
+    "activity_count": 0,
+    "events": [],
+    "score": 0.5,
+    "score_breakdown": {
+      "score": 0.5,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "net_value": 0.0,
+      "buy_count": 0,
+      "sell_count": 0,
+      "events_in_window": 0,
+      "ceo_buy": false,
+      "amendment_count": 0
+    },
+    "last_updated": "2026-05-07T19:10:00+00:00",
+    "errors": []
+  }
+]

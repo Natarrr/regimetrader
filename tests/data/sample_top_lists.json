@@ -1,0 +1,144 @@
+{
+  "generated_at": "2026-05-07T13:00:00+00:00",
+  "source_run_id": "12345678",
+  "weights": {
+    "edgar": 0.30,
+    "insider": 0.25,
+    "congress": 0.20,
+    "news": 0.15,
+    "macro": 0.10
+  },
+  "ticker_count": 5,
+  "top_buys": [
+    {
+      "ticker": "AAPL",
+      "final_score": 0.7840,
+      "badge": "TACTICAL BUY",
+      "factors": {
+        "edgar": 0.82,
+        "insider": 0.80,
+        "congress": 0.52,
+        "news": 0.60,
+        "macro": 0.65
+      },
+      "market_cap": 4222000000000,
+      "activity_count": 3,
+      "source": "EDGAR",
+      "ceo_buy": true,
+      "net_value": 9750000.0,
+      "cap_tier": "large"
+    },
+    {
+      "ticker": "MSFT",
+      "final_score": 0.5500,
+      "badge": "WATCHLIST",
+      "factors": {
+        "edgar": 0.50,
+        "insider": 0.50,
+        "congress": 0.50,
+        "news": 0.65,
+        "macro": 0.65
+      },
+      "market_cap": 3126000000000,
+      "activity_count": 2,
+      "source": "EDGAR",
+      "ceo_buy": false,
+      "net_value": 0.0,
+      "cap_tier": "large"
+    },
+    {
+      "ticker": "JPM",
+      "final_score": 0.4625,
+      "badge": "WATCHLIST",
+      "factors": {
+        "edgar": 0.39,
+        "insider": 0.45,
+        "congress": 0.50,
+        "news": 0.55,
+        "macro": 0.65
+      },
+      "market_cap": 821000000000,
+      "activity_count": 5,
+      "source": "EDGAR",
+      "ceo_buy": false,
+      "net_value": -11319642.45,
+      "cap_tier": "mid"
+    },
+    {
+      "ticker": "INTC",
+      "final_score": 0.5350,
+      "badge": "WATCHLIST",
+      "factors": {
+        "edgar": 0.50,
+        "insider": 0.50,
+        "congress": 0.50,
+        "news": 0.60,
+        "macro": 0.65
+      },
+      "market_cap": 95000000000,
+      "activity_count": 0,
+      "source": "EDGAR",
+      "ceo_buy": false,
+      "net_value": 0.0,
+      "cap_tier": "small"
+    },
+    {
+      "ticker": "NVDA",
+      "final_score": 0.3600,
+      "badge": "WATCHLIST",
+      "factors": {
+        "edgar": 0.15,
+        "insider": 0.25,
+        "congress": 0.50,
+        "news": 0.55,
+        "macro": 0.65
+      },
+      "market_cap": 5141000000000,
+      "activity_count": 11,
+      "source": "EDGAR",
+      "ceo_buy": false,
+      "net_value": -42803017.31,
+      "cap_tier": "large"
+    }
+  ],
+  "mid_caps": [
+    {
+      "ticker": "JPM",
+      "final_score": 0.4625,
+      "badge": "WATCHLIST",
+      "factors": {
+        "edgar": 0.39,
+        "insider": 0.45,
+        "congress": 0.50,
+        "news": 0.55,
+        "macro": 0.65
+      },
+      "market_cap": 821000000000,
+      "activity_count": 5,
+      "source": "EDGAR",
+      "ceo_buy": false,
+      "net_value": -11319642.45,
+      "cap_tier": "mid"
+    }
+  ],
+  "small_caps": [
+    {
+      "ticker": "INTC",
+      "final_score": 0.5350,
+      "badge": "WATCHLIST",
+      "factors": {
+        "edgar": 0.50,
+        "insider": 0.50,
+        "congress": 0.50,
+        "news": 0.60,
+        "macro": 0.65
+      },
+      "market_cap": 95000000000,
+      "activity_count": 0,
+      "source": "EDGAR",
+      "ceo_buy": false,
+      "net_value": 0.0,
+      "cap_tier": "small"
+    }
+  ]
+}

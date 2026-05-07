@@ -1,0 +1,202 @@
+name: edgar_3x
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EDGAR data pipeline — 3× daily at 00:00, 08:00, 16:00 UTC.
+# Each run fetches full 50-ticker universe, generates top_lists.json,
+# and uploads it as artifact "top-lists" for the daily Discord workflow.
+#
+# SEC rate-limit note: concurrency group "edgar_data_fetch" prevents two runs
+# from hitting the SEC simultaneously. If a run is still in progress when the
+# next schedule fires, the new run waits (cancel-in-progress: false).
+#
+# Relation to other workflows:
+#   canary.yml        — 10-ticker health check 3×/day (separate group)
+#   nightly_edgar.yml — deep backfill at 00:00 UTC (kept for compatibility)
+#   market_intel.yml  — CI unit tests (push/PR triggered)
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 0 * * *"    # 00:00 UTC — post-Asia close
+    - cron: "0 8 * * *"    # 08:00 UTC — London open
+    - cron: "0 16 * * *"   # 16:00 UTC — NYC mid-session
+  workflow_dispatch:
+    inputs:
+      tickers_file:
+        description: "Tickers CSV (relative to repo root)"
+        required: false
+        default: "backend/market_intel/top50.csv"
+      limit_forms:
+        description: "Max filings per form type per ticker"
+        required: false
+        default: "20"
+      force_regen:
+        description: "Force top_lists regeneration even if fresh"
+        required: false
+        default: "false"
+        type: choice
+        options: [true, false]
+
+jobs:
+  fetch-and-rank:
+    runs-on: ubuntu-latest
+    # 50 tickers at 7 req/s ≈ 6 min nominal + retries + scoring ≈ 20 min max
+    timeout-minutes: 30
+
+    concurrency:
+      group: edgar_data_fetch
+      cancel-in-progress: false
+
+    steps:
+
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────────
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Install full pipeline deps
+        run: pip install -r requirements.txt
+
+      # ── 4. EDGAR fetch — 3-attempt retry with 30s/60s backoff ───────────────
+      - name: EDGAR full-universe fetch
+        id: edgar_fetch
+        env:
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          FMP_API_KEY:       ${{ secrets.FMP_API_KEY }}
+          EDGAR_FIRST:       "true"
+        run: |
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}"
+          LIMIT="${{ github.event.inputs.limit_forms || '20' }}"
+          LOG_DIR="logs"
+          mkdir -p "$LOG_DIR" .monitoring
+
+          SUCCESS=false
+          for ATTEMPT in 1 2 3; do
+            echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
+            START=$(date +%s)
+            if python -m backend.market_intel.run_pipeline \
+              --tickers-file "$TICKERS_FILE" \
+              --limit-forms  "$LIMIT" \
+              --max-workers  4 \
+              --log-dir      "$LOG_DIR" \
+              --verbose; then
+              END=$(date +%s)
+              echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+              SUCCESS=true
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+            if [ "$ATTEMPT" -lt 3 ]; then
+              WAIT=$((ATTEMPT * 30))
+              echo "::warning::Attempt $ATTEMPT failed — retrying in ${WAIT}s"
+              sleep "$WAIT"
+            fi
+          done
+
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error::All 3 EDGAR fetch attempts failed"
+            exit 1
+          fi
+
+      # ── 5. Export metrics ────────────────────────────────────────────────────
+      - name: Export metrics
+        if: always()
+        run: |
+          python -m monitoring.metrics_exporter \
+            --log-dir logs \
+            --duration-seconds "${DURATION_SECONDS:-0}"
+
+      # ── 6. Generate top_lists.json ───────────────────────────────────────────
+      #
+      # Five-factor scoring: edgar(0.30) insider(0.25) congress(0.20) news(0.15) macro(0.10)
+      # Congress/institutional fetched from FMP if FMP_API_KEY is set.
+      # Market cap tiers assigned relative to the 50-ticker universe.
+      - name: Generate top lists
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          FORCE=""
+          if [ "${{ github.event.inputs.force_regen }}" = "true" ]; then
+            FORCE="--force"
+          fi
+          python -m backend.market_intel.generate_top_lists \
+            --log-dir logs \
+            --run-id  "$GITHUB_RUN_ID" \
+            --verbose \
+            $FORCE
+
+      # ── 7. Check Minsky insider stress ──────────────────────────────────────
+      - name: Check Minsky insider stress
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python -m monitoring.minsky_alert --log-dir logs
+
+      # ── 8. Write job summary ─────────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## EDGAR 3× Run — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f logs/top_lists.json ]; then
+            echo "### Top 5 Buys" >> "$GITHUB_STEP_SUMMARY"
+            python -c "
+          import json, sys
+          d = json.load(open('logs/top_lists.json'))
+          print('| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Macro |')
+          print('|---|---|---|---|---|---|---|---|---|')
+          for i, t in enumerate(d.get('top_buys', [])[:5], 1):
+              f = t.get('factors', {})
+              print(f'| {i} | **{t[\"ticker\"]}** | {t[\"final_score\"]:.4f} | {t[\"badge\"]} |'
+                    f' {f.get(\"edgar\",0):.2f} | {f.get(\"insider\",0):.2f} |'
+                    f' {f.get(\"congress\",0):.2f} | {f.get(\"news\",0):.2f} | {f.get(\"macro\",0):.2f} |')
+          " >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_top_lists.json not produced — check generate step._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 9. Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload top-lists artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: top-lists
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            logs/top_lists.json
+            logs/top5.csv
+
+      - name: Upload pipeline debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edgar-3x-debug-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            logs/metrics.json
+            logs/edgar_debug_summary.json
+            logs/form4_summary.csv
+            logs/marketintel_events.json
+            logs/intel_source_status.json
+            logs/*.log
+            .monitoring/edgar_cb.json
+            .monitoring/alert_state.json

@@ -1,0 +1,94 @@
+name: daily_toplists_discord
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Daily 14:00 London market checkup delivered to Discord.
+#
+# Schedule: 13:00 UTC = 14:00 BST (British Summer Time, UTC+1).
+# DST note: from the last Sunday in October through the last Sunday in March,
+# London is on GMT (UTC+0). During winter, 13:00 UTC = 13:00 London.
+# For strict year-round 14:00 London, use an external scheduler (e.g. Zapier,
+# Inngest, or a cron VM) that converts local time to UTC before triggering
+# workflow_dispatch. See README → Operation Daily Checkup → DST.
+#
+# Artifact download: uses dawidd6/action-download-artifact@v3 to fetch the
+# "top-lists" artifact from the most recent successful edgar_3x run.
+# If no artifact is found (edgar_3x never ran), sends an alert embed instead.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 13 * * *"   # 13:00 UTC = 14:00 BST (adjust to 14:00 UTC in winter)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print Discord payload without sending"
+        required: false
+        default: "false"
+        type: choice
+        options: [true, false]
+
+jobs:
+  send-discord:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+
+      # ── 1. Checkout (needed for scripts/) ─────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 ───────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install send deps (requests only — lightweight) ───────────────────
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests>=2.31.0
+
+      # ── 4. Download latest top-lists artifact from edgar_3x ─────────────────
+      #
+      # dawidd6/action-download-artifact@v3 searches across workflow runs and
+      # downloads the most recent artifact with the given name.
+      # "if_no_artifact_found: warn" prevents the step from failing — instead,
+      # the send step detects the missing file and sends an alert.
+      - name: Download top-lists artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: edgar_3x.yml
+          name: top-lists
+          path: logs/
+          if_no_artifact_found: warn
+          # Allow artifacts up to 2 days old (3 runs/day → always fresh)
+          workflow_conclusion: success
+
+      # ── 5. Send to Discord (3 retries, 30s/60s backoff) ──────────────────────
+      - name: Send daily market checkup
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python scripts/send_toplists_discord.py \
+            --input   logs/top_lists.json \
+            --log-dir logs \
+            $DRY_RUN_FLAG
+
+      # ── 6. Upload send log on failure (always, for debugging) ────────────────
+      - name: Upload Discord send log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discord-send-log-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: logs/discord_send.log
