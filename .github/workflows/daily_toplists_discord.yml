@@ -25,7 +25,7 @@ on:
         required: false
         default: "false"
         type: choice
-        options: [true, false]
+        options: ["true", "false"]
       source_run_id:
         description: "Caller identifier (e.g. gcf-20260507T1400)"
         required: false
