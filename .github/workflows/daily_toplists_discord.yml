@@ -81,7 +81,7 @@ jobs:
       # ── 5. Send to Discord (3 retries, 30s/60s backoff) ──────────────────────
       - name: Send daily market checkup
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then

@@ -50,9 +50,9 @@ jobs:
       # ── 4. EDGAR-first pipeline ─────────────────────────────────────────────
       - name: Run EDGAR pipeline
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
-          FMP_API_KEY:      ${{ secrets.FMP_API_KEY }}
-          EDGAR_FIRST:      "true"
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+          EDGAR_FIRST: "true"
         run: |
           set -euo pipefail
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/canary_top10.csv' }}"
@@ -87,7 +87,7 @@ jobs:
       # ── 7. Threshold gate — alerts on failure ──────────────────────────────
       - name: Check thresholds
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
         run: |
           set -euo pipefail
           python -m monitoring.check_metrics \

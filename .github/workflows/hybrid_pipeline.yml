@@ -96,8 +96,8 @@ jobs:
 
       - name: Run EDGAR pipeline (shortlist generation)
         env:
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           MARKET_INTEL_DATA_DIR: ${{ github.workspace }}/data/raw/edgar
           SHORTLIST_QUINTILE_FLOOR: ${{ env.SHORTLIST_QUINTILE_FLOOR }}
         run: |
@@ -124,7 +124,7 @@ jobs:
       - name: Detect regime
         id: regime
         env:
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
         run: |
           python - <<'EOF'
           import sys, json, os
@@ -168,8 +168,6 @@ jobs:
     needs: quant
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -192,9 +190,9 @@ jobs:
 
       - name: Run Claude analysis on shortlist
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
           CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
           REGIME: ${{ needs.quant.outputs.regime }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}

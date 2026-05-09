@@ -1,0 +1,118 @@
+name: test_daily_toplists_absence
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Integration test: verify that when the top-lists artifact is absent,
+# send_toplists_discord.py sends a DATA UNAVAILABLE alert embed to Discord.
+#
+# Uses a mock webhook server (scripts/mock_webhook_server.py) that:
+#   1. Listens on localhost:9999
+#   2. Captures the POST body to /tmp/captured.json
+#   3. Asserts the captured embed contains "DATA UNAVAILABLE"
+#
+# Triggered manually or on push to paths that touch the send script.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/send_toplists_discord.py"
+      - "scripts/mock_webhook_server.py"
+      - ".github/workflows/test_daily_toplists_absence.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-absent-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+
+      # ── 1. Checkout ───────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python ─────────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install deps ───────────────────────────────────────────────────
+      - name: Install deps
+        run: pip install requests>=2.31.0
+
+      # ── 4. Start mock webhook server in background ─────────────────────────
+      - name: Start mock webhook server
+        run: |
+          python scripts/mock_webhook_server.py \
+            --port 9999 \
+            --out /tmp/captured.json \
+            --count 1 &
+          # Give the server a moment to bind
+          sleep 1
+          echo "Mock server PID=$!"
+
+      # ── 5. Run send script against missing top_lists.json ─────────────────
+      #   DISCORD_WEBHOOK_URL points to the mock server.
+      #   --input points to a path that does NOT exist → alert path triggered.
+      - name: Trigger alert path (no top_lists.json)
+        env:
+          DISCORD_WEBHOOK_URL: "http://localhost:9999"
+        run: |
+          python scripts/send_toplists_discord.py \
+            --input /tmp/nonexistent_top_lists.json \
+            --log-dir /tmp
+          echo "Exit code: $?"
+
+      # ── 6. Wait for mock server to shut down ──────────────────────────────
+      - name: Wait for mock server
+        run: sleep 2
+
+      # ── 7. Assert the captured embed ──────────────────────────────────────
+      - name: Assert DATA UNAVAILABLE embed captured
+        run: |
+          if [ ! -f /tmp/captured.json ]; then
+            echo "FAIL: /tmp/captured.json not found — mock server received no requests"
+            exit 1
+          fi
+
+          cat /tmp/captured.json
+
+          # Check that at least one embed title contains DATA UNAVAILABLE
+          python - <<'EOF'
+          import json, sys
+
+          data = json.load(open("/tmp/captured.json"))
+          if not isinstance(data, list) or not data:
+              print("FAIL: captured.json is empty or not a list")
+              sys.exit(1)
+
+          payload = data[0]
+          embeds  = payload.get("embeds", [])
+          if not embeds:
+              print("FAIL: no embeds in payload")
+              sys.exit(1)
+
+          title = embeds[0].get("title", "")
+          if "DATA UNAVAILABLE" not in title:
+              print(f"FAIL: expected 'DATA UNAVAILABLE' in title, got: {title!r}")
+              sys.exit(1)
+
+          print(f"PASS: alert embed captured with title: {title!r}")
+          EOF
+
+      # ── 8. Upload captured payload (always, for debugging) ─────────────────
+      - name: Upload captured payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-webhook-capture-${{ github.run_id }}
+          path: /tmp/captured.json
+          if-no-files-found: ignore
+          retention-days: 7

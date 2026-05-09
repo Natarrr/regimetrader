@@ -75,8 +75,8 @@ jobs:
       # Backoff: attempt 1 → immediate, attempt 2 → 30s, attempt 3 → 60s.
       - name: EDGAR full-universe fetch
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}"
@@ -146,7 +146,7 @@ jobs:
       - name: Check coverage thresholds
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.check_metrics \
             --log-dir      logs \
@@ -169,7 +169,7 @@ jobs:
       - name: Check Minsky insider stress
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 

@@ -75,8 +75,8 @@ jobs:
       - name: EDGAR full-universe fetch
         id: edgar_fetch
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}"
@@ -128,7 +128,7 @@ jobs:
       # Market cap tiers assigned relative to the 50-ticker universe.
       - name: Generate top lists
         env:
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           FORCE=""
@@ -145,7 +145,7 @@ jobs:
       - name: Check Minsky insider stress
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 

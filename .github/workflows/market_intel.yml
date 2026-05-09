@@ -95,8 +95,8 @@ jobs:
           pip install -r requirements.txt
       - name: Run market_intel fetch
         env:
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           MARKET_INTEL_DATA_DIR: ${{ github.workspace }}/data/raw/edgar
         run: |
           python -m backend.market_intel.run_pipeline --tickers-file=backend/market_intel/top50.csv --limit-forms=5
