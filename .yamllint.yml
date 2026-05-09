@@ -1,0 +1,18 @@
+---
+extends: default
+rules:
+  document-start: disable
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+    check-keys: false
+  line-length:
+    max: 200
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: -1   # allow alignment in env: blocks
+  comments:
+    min-spaces-from-content: 1
+  new-lines:
+    type: unix

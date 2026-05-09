@@ -35,7 +35,7 @@ on:
         required: false
         default: "false"
         type: choice
-        options: [true, false]
+        options: ["true", "false"]
 
 jobs:
   fetch-and-rank:
@@ -76,8 +76,8 @@ jobs:
         id: edgar_fetch
         env:
           EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
-          FMP_API_KEY:       ${{ secrets.FMP_API_KEY }}
-          EDGAR_FIRST:       "true"
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          EDGAR_FIRST: "true"
         run: |
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}"
           LIMIT="${{ github.event.inputs.limit_forms || '20' }}"

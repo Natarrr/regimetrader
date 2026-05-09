@@ -1,0 +1,363 @@
+name: hybrid_pipeline
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hybrid Quant + Claude pipeline
+#
+# Flow:
+#   1. [quant]         Run EDGAR/FMP scoring → produce shortlist JSON artifact
+#   2. [regime]        Fit regime detector → tag current regime in shortlist
+#   3. [claude]        Run Claude analysis on shortlist (gated by FMP_KEY + ANTHROPIC_KEY)
+#   4. [gate]          Validate JSON schema; apply auto-execution thresholds
+#   5. [audit]         Upload full audit bundle (cache, schema report, cost summary)
+#
+# Triggers:
+#   - schedule: 08:30 ET on trading days (12:30 UTC)
+#   - workflow_dispatch with optional overrides
+#
+# Secrets required:
+#   ANTHROPIC_API_KEY, FMP_API_KEY, SEC_USER_AGENT
+#   DISCORD_WEBHOOK_URL (optional — for run summary notification)
+#
+# Cost controls:
+#   CLAUDE_COST_CAP_USD  (default $2.00 per run)
+#   SHORTLIST_QUINTILE_FLOOR (default 80 — top 20%)
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "30 12 * * 1-5"   # 12:30 UTC = 08:30 ET, weekdays
+  workflow_dispatch:
+    inputs:
+      force_refresh:
+        description: "Bypass discovery cache"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      cost_cap_usd:
+        description: "Claude cost cap per run (USD)"
+        required: false
+        default: "2.00"
+        type: string
+      shortlist_floor:
+        description: "Min quant score for shortlist (0–100)"
+        required: false
+        default: "80"
+        type: string
+      dry_run:
+        description: "Print payloads without executing trades"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hybrid_pipeline
+  cancel-in-progress: false   # never kill a live trading run
+
+env:
+  PYTHON_VERSION: "3.11"
+  CLAUDE_COST_CAP_USD: ${{ github.event.inputs.cost_cap_usd || '2.00' }}
+  SHORTLIST_QUINTILE_FLOOR: ${{ github.event.inputs.shortlist_floor || '80' }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── 1. Quant scoring ────────────────────────────────────────────────────────
+  quant:
+    name: Quant Scoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      shortlist_artifact: ${{ steps.export.outputs.artifact_name }}
+      regime: ${{ steps.regime.outputs.regime }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install quant deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          pip install hmmlearn>=0.3.0 scikit-learn>=1.4.0
+
+      - name: Run EDGAR pipeline (shortlist generation)
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          MARKET_INTEL_DATA_DIR: ${{ github.workspace }}/data/raw/edgar
+          SHORTLIST_QUINTILE_FLOOR: ${{ env.SHORTLIST_QUINTILE_FLOOR }}
+        run: |
+          python - <<'EOF'
+          import json, sys, os, logging
+          logging.basicConfig(level=logging.INFO)
+          sys.path.insert(0, ".")
+
+          from regime_trader.discovery_scanner import get_top_alpha_picks_sync
+          from analysis.earnings_analyzer import build_shortlist
+
+          payload = get_top_alpha_picks_sync(limit=20)
+          results = payload.get("results", [])
+          shortlist = build_shortlist(results, watchlist=[])
+
+          output = {"shortlist": shortlist, "candidates": results}
+          os.makedirs("data/pipeline", exist_ok=True)
+          with open("data/pipeline/shortlist.json", "w") as f:
+              json.dump(output, f, indent=2)
+
+          print(f"Shortlist ({len(shortlist)} symbols): {shortlist}")
+          EOF
+
+      - name: Detect regime
+        id: regime
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          python - <<'EOF'
+          import sys, json, os
+          sys.path.insert(0, ".")
+          import yfinance as yf
+          import numpy as np
+          import pandas as pd
+          from regime.regime_detector import vix_rule
+
+          # Quick VIX rule for regime tagging (HMM/ML require fit — use rule in CI)
+          vix_df = yf.download("^VIX", period="5d", interval="1d",
+                               progress=False, auto_adjust=True)
+          if vix_df.empty:
+              regime = "Unknown"
+          else:
+              latest_vix = float(vix_df["Close"].squeeze().dropna().iloc[-1])
+              regime = vix_rule(latest_vix)
+              print(f"VIX={latest_vix:.1f} → regime={regime}")
+
+          with open("data/pipeline/regime.txt", "w") as f:
+              f.write(regime)
+          EOF
+          REGIME=$(cat data/pipeline/regime.txt)
+          echo "regime=$REGIME" >> $GITHUB_OUTPUT
+          echo "Current regime: $REGIME"
+
+      - name: Export artifact name
+        id: export
+        run: echo "artifact_name=quant-shortlist-${{ github.run_id }}" >> $GITHUB_OUTPUT
+
+      - name: Upload shortlist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quant-shortlist-${{ github.run_id }}
+          path: data/pipeline/
+          retention-days: 7
+
+  # ── 2. Claude analysis ──────────────────────────────────────────────────────
+  claude:
+    name: Claude Analysis
+    needs: quant
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install analysis deps
+        run: |
+          pip install anthropic>=0.28.0 requests>=2.31.0 python-dotenv>=1.0.0
+
+      - name: Download shortlist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.quant.outputs.shortlist_artifact }}
+          path: data/pipeline/
+
+      - name: Run Claude analysis on shortlist
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
+          REGIME: ${{ needs.quant.outputs.regime }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+        run: |
+          python - <<'EOF'
+          import json, sys, os, logging
+          logging.basicConfig(level=logging.INFO)
+          sys.path.insert(0, ".")
+
+          from analysis.claude_client import ClaudeClient, validate_analysis_schema
+          from analysis.earnings_analyzer import (
+              build_prompt, cross_check_citations, should_auto_execute
+          )
+
+          regime = os.getenv("REGIME", "Unknown")
+          dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+          run_id = f"gh-{os.getenv('GITHUB_RUN_ID', 'local')}"
+
+          with open("data/pipeline/shortlist.json") as f:
+              pipeline_data = json.load(f)
+
+          shortlist = pipeline_data["shortlist"]
+          quant_map = {r["symbol"]: r for r in pipeline_data.get("candidates", [])}
+
+          if not shortlist:
+              print("Empty shortlist — nothing to analyse")
+              sys.exit(0)
+
+          client = ClaudeClient(run_id=run_id)
+          results = []
+
+          for symbol in shortlist:
+              quant_data = quant_map.get(symbol, {})
+              prompt = build_prompt(symbol, quant_data, [], regime)
+
+              if dry_run:
+                  print(f"[DRY RUN] Would analyse {symbol} — skipping API call")
+                  results.append({
+                      "symbol": symbol,
+                      "dry_run": True,
+                      "prompt_preview": prompt[:200] + "...",
+                  })
+                  continue
+
+              try:
+                  analysis = client.analyze(
+                      symbol=symbol,
+                      prompt=prompt,
+                      prompt_version="v1.2",
+                  )
+                  violations = cross_check_citations(analysis, [])
+                  auto_exec = should_auto_execute(
+                      quant_data.get("smart_money_score", 0) * 100,
+                      analysis,
+                      violations,
+                  )
+                  results.append({
+                      "symbol": symbol,
+                      "analysis": analysis,
+                      "citation_violations": violations,
+                      "auto_execute": auto_exec,
+                  })
+                  print(f"{symbol}: score={analysis['score']} conf={analysis['confidence']:.2f} action={analysis['recommended_action']} auto_exec={auto_exec}")
+              except Exception as exc:
+                  print(f"ERROR {symbol}: {exc}")
+                  results.append({"symbol": symbol, "error": str(exc)})
+
+          os.makedirs("data/pipeline", exist_ok=True)
+          with open("data/pipeline/claude_results.json", "w") as f:
+              json.dump(results, f, indent=2, default=str)
+
+          cost = client.cost_summary()
+          print(f"\nCost summary: {json.dumps(cost, indent=2)}")
+          with open("data/pipeline/cost_summary.json", "w") as f:
+              json.dump(cost, f, indent=2)
+          EOF
+
+      - name: Validate Claude JSON schema
+        run: |
+          python - <<'EOF'
+          import json, sys
+          sys.path.insert(0, ".")
+          from analysis.claude_client import validate_analysis_schema, SchemaValidationError
+
+          try:
+              with open("data/pipeline/claude_results.json") as f:
+                  results = json.load(f)
+          except FileNotFoundError:
+              print("No claude_results.json (dry run) — schema validation skipped")
+              sys.exit(0)
+
+          errors = []
+          for r in results:
+              if r.get("dry_run") or r.get("error"):
+                  continue
+              try:
+                  validate_analysis_schema(r["analysis"])
+              except (SchemaValidationError, Exception) as exc:
+                  errors.append(f"{r['symbol']}: {exc}")
+
+          if errors:
+              print(f"SCHEMA FAILURES ({len(errors)}):")
+              for e in errors:
+                  print(f"  {e}")
+              sys.exit(1)
+
+          print(f"Schema validation passed for {len(results)} results")
+          EOF
+
+      - name: Upload Claude audit bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-audit-${{ github.run_id }}
+          path: |
+            data/pipeline/claude_results.json
+            data/pipeline/cost_summary.json
+            logs/claude_audit.ndjson
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── 3. Gate & human review summary ─────────────────────────────────────────
+  gate:
+    name: Gate & Audit Summary
+    needs: [quant, claude]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-audit-${{ github.run_id }}
+          path: data/pipeline/
+        continue-on-error: true
+
+      - name: Print audit summary
+        run: |
+          echo "## Hybrid Pipeline Run ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Regime | ${{ needs.quant.outputs.regime }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cost cap | \$${CLAUDE_COST_CAP_USD} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Shortlist floor | ${SHORTLIST_QUINTILE_FLOOR} |" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f data/pipeline/claude_results.json ]; then
+            python3 - <<'EOF'
+          import json, os
+          with open("data/pipeline/claude_results.json") as f:
+              results = json.load(f)
+          approved = [r for r in results if r.get("auto_execute")]
+          violations = [r for r in results if r.get("citation_violations")]
+          errors = [r for r in results if r.get("error")]
+          print(f"- Analysed: {len(results)}")
+          print(f"- Auto-execute approved: {len(approved)}")
+          print(f"- Citation violations: {len(violations)}")
+          print(f"- Errors: {len(errors)}")
+          if approved:
+              print("### Auto-execute candidates")
+              for r in approved:
+                  a = r.get("analysis", {})
+                  print(f"| {r['symbol']} | {a.get('score')} | {a.get('recommended_action')} |")
+          EOF
+          else
+            echo "No Claude results (dry run or skipped)"
+          fi
