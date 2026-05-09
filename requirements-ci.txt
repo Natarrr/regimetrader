@@ -33,5 +33,8 @@ pydantic>=2.5.0
 # ── Claude / Anthropic SDK ────────────────────────────────────────────────────
 anthropic>=0.28.0
 
+# ── Dashboard (needed by smoke tests: regime_trader.ui.streamlit_app) ────────
+streamlit>=1.35.0
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0
