@@ -86,7 +86,7 @@ def test_check_metrics_passes_escalate_true_at_threshold(
 
     monkeypatch.setattr(as_mod, "_STATE_PATH", tmp_path / "alert_state.json")
     monkeypatch.setenv("ALERT_ESCALATE_AFTER", "2")
-    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack/x")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://hooks.slack/x")
 
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
@@ -122,7 +122,7 @@ def test_check_metrics_resets_after_success(
 
     monkeypatch.setattr(as_mod, "_STATE_PATH", tmp_path / "alert_state.json")
     monkeypatch.setenv("ALERT_ESCALATE_AFTER", "2")
-    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack/x")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://hooks.slack/x")
 
     log_dir = tmp_path / "logs"
     log_dir.mkdir()

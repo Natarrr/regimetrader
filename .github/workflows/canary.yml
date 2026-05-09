@@ -87,7 +87,7 @@ jobs:
       # ── 7. Threshold gate — alerts on failure ──────────────────────────────
       - name: Check thresholds
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
         run: |
           set -euo pipefail
           python -m monitoring.check_metrics \

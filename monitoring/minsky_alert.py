@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .slack_notifier import send_slack_alert
+from .slack_notifier import send_discord_alert as send_slack_alert
 
 log = logging.getLogger("monitoring.minsky_alert")
 
@@ -203,7 +203,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--webhook", type=str, default=None,
-        help="Slack webhook URL (overrides env SLACK_WEBHOOK_URL)",
+        help="Slack webhook URL (overrides env DISCORD_WEBHOOK_URL)",
     )
     parser.add_argument(
         "--no-slack", action="store_true",
@@ -263,14 +263,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # ── Slack alert (CRITICAL only) ────────────────────────────────────────────
     if level == "CRITICAL" and not args.no_slack:
-        webhook: Optional[str] = args.webhook or os.getenv("SLACK_WEBHOOK_URL")
+        webhook: Optional[str] = args.webhook or os.getenv("DISCORD_WEBHOOK_URL")
         sent = send_slack_alert(
             webhook=webhook,
             title="EDGAR Insider Stress CRITICAL",
             body=_slack_body(result),
             escalate=True,
         )
-        log.info("Slack alert sent=%s", sent)
+        log.info("Discord alert sent=%s", sent)
 
     # ── Exit code ──────────────────────────────────────────────────────────────
     if level == "CRITICAL":

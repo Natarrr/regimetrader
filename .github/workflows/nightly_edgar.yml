@@ -141,12 +141,12 @@ jobs:
       # ── 7. Coverage threshold gate + Slack alert on breach ────────────────────
       #
       # Exits 0 if: coverage_ratio >= min_coverage AND error_count <= max_errors.
-      # Exits 2 on breach and fires a Slack message via SLACK_WEBHOOK_URL.
+      # Exits 2 on breach and fires a Discord message via DISCORD_WEBHOOK_URL.
       # max-errors: 5 allows up to 5 tickers to fail (10% of 50) before alert.
       - name: Check coverage thresholds
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.check_metrics \
             --log-dir      logs \
@@ -169,7 +169,7 @@ jobs:
       - name: Check Minsky insider stress
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 

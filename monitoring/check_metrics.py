@@ -4,7 +4,7 @@ Reads `<log-dir>/metrics.json` and exits:
     0 — all thresholds passed
     2 — ALERT (errors > 0  OR  edgar_count / ticker_count < min_coverage)
 
-On a failed gate, posts to Slack via SLACK_WEBHOOK_URL when set.
+On a failed gate, posts to Discord via DISCORD_WEBHOOK_URL when set.
 
 Defaults match the canary spec:
     --min-coverage  0.6   (≥60% of tickers must come back from EDGAR)
@@ -26,7 +26,7 @@ from typing import List, Optional
 
 from .alert_state import update_after_evaluation
 from .evaluate import evaluate
-from .slack_notifier import send_slack_alert
+from .slack_notifier import send_discord_alert as send_slack_alert
 
 log = logging.getLogger("monitoring.check_metrics")
 
@@ -51,9 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-errors", type=int, default=0,
                         help="Maximum tolerated error_count (default: 0)")
     parser.add_argument("--webhook", type=str, default=None,
-                        help="Slack webhook URL (defaults to env SLACK_WEBHOOK_URL)")
+                        help="Discord webhook URL (defaults to env DISCORD_WEBHOOK_URL)")
     parser.add_argument("--no-slack", action="store_true",
-                        help="Do not send Slack alert even if a webhook is set")
+                        help="Do not send Discord alert even if a webhook is set")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     log.error("ALERT — %s (consecutive_failures=%d, escalate=%s)",
               "; ".join(reasons), decision.consecutive_failures, decision.escalate)
     if not args.no_slack:
-        webhook: Optional[str] = args.webhook or os.getenv("SLACK_WEBHOOK_URL")
+        webhook: Optional[str] = args.webhook or os.getenv("DISCORD_WEBHOOK_URL")
         if webhook:
             sent = send_slack_alert(
                 webhook=webhook,
@@ -89,9 +89,9 @@ def main(argv: list[str] | None = None) -> int:
                 body=_format_alert_body(metrics, reasons),
                 escalate=decision.escalate,
             )
-            log.info("slack alert sent=%s", sent)
+            log.info("discord alert sent=%s", sent)
         else:
-            log.warning("SLACK_WEBHOOK_URL not set — skipping notification")
+            log.warning("DISCORD_WEBHOOK_URL not set — skipping notification")
     return 2
 
 

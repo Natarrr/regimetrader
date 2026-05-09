@@ -145,7 +145,7 @@ jobs:
       - name: Check Minsky insider stress
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL || '' }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 

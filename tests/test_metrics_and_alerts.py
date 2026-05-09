@@ -1,4 +1,4 @@
-"""tests/test_metrics_and_alerts.py — exercise metrics_exporter + slack_notifier.
+"""tests/test_metrics_and_alerts.py — exercise metrics_exporter + discord_notifier.
 
 Markowitz frame: the canary's coverage ratio is the share of the target asset
 universe that EDGAR returns — analogous to the realised diversification of a
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from monitoring import metrics_exporter as me
-from monitoring.slack_notifier import send_slack_alert
+from monitoring.slack_notifier import send_discord_alert as send_slack_alert
 
 
 # ── metrics_exporter.export_metrics ──────────────────────────────────────────
@@ -73,7 +73,7 @@ def test_export_metrics_missing_meta_yields_zeros(tmp_path: Path) -> None:
     assert metrics["error_count"]  == 0
 
 
-# ── slack_notifier.send_slack_alert ──────────────────────────────────────────
+# ── slack_notifier.send_discord_alert ────────────────────────────────────────
 
 class _FakeResp:
     def __init__(self, status_code: int, text: str = "") -> None:
