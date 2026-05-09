@@ -1,0 +1,162 @@
+name: CI
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Full test suite gate — runs on every push / PR to main.
+#
+# Jobs:
+#   sanity  — import probe + secrets presence check (< 30 s)
+#   smoke   — fast Streamlit / service smoke tests (needs: sanity)
+#   test    — full pytest run: tests/ + backend/tests/ (needs: smoke)
+#
+# Requirements: requirements-ci.txt (no dashboard/broker packages)
+# Secrets:      FMP_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY injected
+#               from GitHub Actions secrets store (never printed).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true   # cancel stale PR runs
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ── 1. Sanity: import probe + secrets presence check ─────────────────────────
+  sanity:
+    name: Import Sanity + Secret Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Sanity import check
+        run: python scripts/check_imports.py
+
+      # Inject secrets into environment for presence check only.
+      # Values are masked by GitHub Actions and never echoed to logs.
+      - name: Secrets presence check
+        env:
+          FMP_API_KEY:       ${{ secrets.FMP_API_KEY       || '' }}
+          ALPACA_API_KEY:    ${{ secrets.ALPACA_API_KEY    || '' }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY || '' }}
+          POLYGON_API_KEY:   ${{ secrets.POLYGON_API_KEY   || '' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
+        # Allow the check to fail without blocking the pipeline when secrets
+        # are intentionally absent (e.g. fork PRs with no secrets access).
+        # Change `continue-on-error: true` to `false` to enforce hard gate.
+        continue-on-error: true
+        run: python scripts/check_secrets.py
+
+  # ── 2. Smoke tests — fast gate before the full suite ─────────────────────────
+  smoke:
+    name: Smoke Tests
+    needs: sanity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Smoke — Streamlit app + service imports
+        run: |
+          pytest tests/test_streamlit_app_smoke.py \
+                 tests/test_logging_cfg.py \
+                 -q --tb=short
+
+  # ── 3. Full test suite ────────────────────────────────────────────────────────
+  test:
+    name: pytest (${{ matrix.os }})
+    needs: smoke
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]   # extend to windows-latest if needed
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Run test suite — tests/
+        run: |
+          pytest tests/ -q --tb=short
+
+      - name: Run test suite — backend/tests/
+        # backend/tests/ is optional — skip gracefully if directory absent
+        run: |
+          if [ -d backend/tests ]; then
+            pytest backend/tests/ -q --tb=short
+          else
+            echo "backend/tests/ not found — skipping"
+          fi
+
+      - name: Upload coverage / junit (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.os }}
+          path: |
+            .coverage
+            junit.xml
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## CI Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Suite | Path |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Core + Regime + Analysis | \`tests/\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend quant models | \`backend/tests/\` |" >> $GITHUB_STEP_SUMMARY
