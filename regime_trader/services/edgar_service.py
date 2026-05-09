@@ -49,10 +49,11 @@ _COMPANY_SEARCH_TPL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompan
 _CACHE_ROOT = Path(__file__).parent.parent.parent / ".cache" / "edgar"
 _TTL_INDEX = 24 * 3600       # 24 h — quarterly index files are stable
 _TTL_FILING = 7 * 24 * 3600  # 7 days — individual filings don't change
-_DEFAULT_RATE = 0.2           # req/sec (SEC guidance: max ~10 req/sec but be polite)
+# req/sec (SEC guidance: max ~10 req/sec but be polite)
+_DEFAULT_RATE = 0.2
 
 _HEADERS = {
-    "User-Agent": "regime-trader-research contact@example.com",
+    "User-Agent": "regime-trader-research n.tardy@hotmail.fr",
     "Accept-Encoding": "gzip, deflate",
     "Host": "www.sec.gov",
 }
@@ -211,11 +212,13 @@ class EdgarService:
         rate_per_sec: Optional[float] = None,
         cache_root: Optional[Path] = None,
     ) -> None:
-        rate = rate_per_sec or float(os.getenv("EDGAR_RATE_LIMIT", str(_DEFAULT_RATE)))
+        rate = rate_per_sec or float(
+            os.getenv("EDGAR_RATE_LIMIT", str(_DEFAULT_RATE)))
         self._limiter = _RateLimiter(rate_per_sec=rate)
         self._session = _make_session()
         self._cache_root = cache_root or _CACHE_ROOT
-        log.debug("EdgarService initialised — %.2f req/s, cache=%s", rate, self._cache_root)
+        log.debug("EdgarService initialised — %.2f req/s, cache=%s",
+                  rate, self._cache_root)
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -264,7 +267,8 @@ class EdgarService:
             return []
 
         _cache_write("index", cache_key, raw)
-        log.info("quarterly_index: fetched %d bytes for %s", len(raw), cache_key)
+        log.info("quarterly_index: fetched %d bytes for %s",
+                 len(raw), cache_key)
         return _parse_company_idx(raw)
 
     def list_filings(
@@ -306,7 +310,8 @@ class EdgarService:
         results = self._parse_atom_feed(raw, form_type)
         import json as _json
         _cache_write("filings", cache_key, _json.dumps(results))
-        log.info("list_filings(%s, %s): %d results", cik, form_type, len(results))
+        log.info("list_filings(%s, %s): %d results",
+                 cik, form_type, len(results))
         return results
 
     def fetch_filing(self, url: str, timeout: int = 30) -> Optional[str]:
@@ -359,8 +364,10 @@ class EdgarService:
                     if len(parts) > 1:
                         cik = parts[1].split("&")[0]
 
-                title = (title_el.text or "").strip() if title_el is not None else ""
-                date = (updated_el.text or "")[:10] if updated_el is not None else ""
+                title = (title_el.text or "").strip(
+                ) if title_el is not None else ""
+                date = (updated_el.text or "")[
+                    :10] if updated_el is not None else ""
 
                 results.append({
                     "cik": cik,
