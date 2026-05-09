@@ -46,6 +46,11 @@ st.set_page_config(
 _FMP_KEY = os.getenv("FMP_API_KEY", "")
 _HAS_FMP = bool(_FMP_KEY)
 
+_ALPACA_KEY    = os.getenv("ALPACA_API_KEY", "")
+_ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
+_ALPACA_PAPER  = "paper" in os.getenv("ALPACA_BASE_URL", "paper").lower()
+_HAS_ALPACA    = bool(_ALPACA_KEY and _ALPACA_SECRET)
+
 # ── Optional import: generate_macro_synthesis (graceful fallback) ─────────────
 try:
     from regime_trader.market_intel_macro import generate_macro_synthesis as _generate_macro_synthesis
@@ -173,6 +178,67 @@ def _load_macro_indicators() -> Dict[str, Optional[Dict]]:
     return indicators
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_alpaca_account() -> Dict[str, Any]:
+    """Fetch Alpaca account + positions. TTL 60 s for near-real-time data."""
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(_ALPACA_KEY, _ALPACA_SECRET, paper=_ALPACA_PAPER)
+        acct = client.get_account()
+        positions = client.get_all_positions()
+
+        equity      = float(acct.equity)
+        last_equity = float(acct.last_equity)
+        daily_pnl   = equity - last_equity
+        daily_pnl_pct = (daily_pnl / last_equity * 100) if last_equity else 0.0
+
+        pos_rows = []
+        for p in sorted(positions, key=lambda x: float(x.market_value or 0), reverse=True):
+            pos_rows.append({
+                "Symbol":    p.symbol,
+                "Side":      p.side.value.capitalize(),
+                "Qty":       float(p.qty),
+                "Entry":     float(p.avg_entry_price),
+                "Price":     float(p.current_price),
+                "Mkt Value": float(p.market_value),
+                "Unreal. P&L": float(p.unrealized_pl),
+                "Unreal. %": float(p.unrealized_plpc) * 100,
+                "Day P&L":   float(p.unrealized_intraday_pl),
+                "Day %":     float(p.unrealized_intraday_plpc) * 100,
+            })
+
+        return {
+            "equity":          equity,
+            "buying_power":    float(acct.buying_power),
+            "portfolio_value": float(acct.portfolio_value),
+            "daily_pnl":       daily_pnl,
+            "daily_pnl_pct":   daily_pnl_pct,
+            "positions":       pos_rows,
+            "status":          acct.status.value,
+            "paper":           _ALPACA_PAPER,
+        }
+    except Exception as exc:
+        log.warning("Alpaca account load failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_regime() -> Dict[str, Any]:
+    """Fetch latest VIX and derive market regime label. TTL 5 min."""
+    try:
+        import yfinance as yf
+        from regime.regime_detector import vix_rule
+        df = yf.download("^VIX", period="2d", interval="1d",
+                         progress=False, auto_adjust=True)
+        if df.empty:
+            return {"regime": "Unknown", "vix": None}
+        vix = float(df["Close"].squeeze().dropna().iloc[-1])
+        return {"regime": vix_rule(vix), "vix": vix}
+    except Exception as exc:
+        log.warning("Regime load failed: %s", exc)
+        return {"regime": "Unknown", "vix": None}
+
+
 # ── Helper: API key warning banner ────────────────────────────────────────────
 
 def _require_fmp() -> bool:
@@ -194,14 +260,81 @@ def _require_fmp() -> bool:
 # ── Tab renderers ─────────────────────────────────────────────────────────────
 
 def _render_live_monitor() -> None:
-    """Render the Live Monitor tab (regime / portfolio metrics)."""
-    st.header("Live Monitor")
-    st.info("Regime · Portfolio · Positions · Risk stubs — connect Alpaca API for live data.")
+    """Render the Live Monitor tab — live regime + Alpaca account."""
+    hdr, btn = st.columns([8, 1])
+    hdr.header("Live Monitor")
+    if btn.button("↻", key="live_refresh", help="Refresh account data"):
+        _load_alpaca_account.clear()
+        _load_regime.clear()
+
+    # ── Regime ────────────────────────────────────────────────────────────────
+    regime_data = _load_regime()
+    regime      = regime_data.get("regime", "Unknown")
+    vix         = regime_data.get("vix")
+
+    _REGIME_COLOR = {
+        "Crash": "🔴", "Panic": "🟠", "Bear": "🟡",
+        "Neutral": "⚪", "Bull": "🟢", "Euphoria": "💹",
+    }
+    regime_icon = _REGIME_COLOR.get(regime, "❓")
+
+    # ── Account ───────────────────────────────────────────────────────────────
+    if not _HAS_ALPACA:
+        st.warning(
+            "**ALPACA_API_KEY / ALPACA_SECRET_KEY not set.** "
+            "Add them to `.env` and restart the app.",
+            icon="⚠️",
+        )
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Regime", f"{regime_icon} {regime}",
+                    f"VIX {vix:.1f}" if vix else None)
+        col2.metric("Portfolio Value", "—")
+        col3.metric("Open Positions", "—")
+        col4.metric("Daily P&L", "—")
+        return
+
+    with st.spinner("Loading account…"):
+        acct = _load_alpaca_account()
+
+    if "error" in acct:
+        st.error(f"Alpaca connection failed: {acct['error']}")
+        return
+
+    paper_tag = " · Paper trading" if acct["paper"] else ""
+    pnl     = acct["daily_pnl"]
+    pnl_pct = acct["daily_pnl_pct"]
+
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Regime", "—", help="Requires HMM engine data")
-    col2.metric("Portfolio Value", "—", help="Requires Alpaca credentials")
-    col3.metric("Open Positions", "—")
-    col4.metric("Daily P&L", "—")
+    col1.metric("Regime", f"{regime_icon} {regime}",
+                f"VIX {vix:.1f}" if vix else None)
+    col2.metric("Portfolio Value", f"${acct['portfolio_value']:,.2f}")
+    col3.metric("Open Positions",  len(acct["positions"]))
+    col4.metric("Daily P&L",       f"${pnl:+,.2f}", f"{pnl_pct:+.2f}%")
+
+    st.caption(
+        f"Alpaca · Status: **{acct['status']}**{paper_tag} · "
+        f"Buying power: **${acct['buying_power']:,.2f}**"
+    )
+
+    # ── Positions table ───────────────────────────────────────────────────────
+    st.subheader(f"Positions ({len(acct['positions'])})")
+    positions = acct["positions"]
+    if not positions:
+        st.info("No open positions.")
+        return
+
+    import pandas as pd
+
+    df = pd.DataFrame(positions)
+    df["Entry"]       = df["Entry"].map("${:,.2f}".format)
+    df["Price"]       = df["Price"].map("${:,.2f}".format)
+    df["Mkt Value"]   = df["Mkt Value"].map("${:,.2f}".format)
+    df["Unreal. P&L"] = df["Unreal. P&L"].map("${:+,.2f}".format)
+    df["Unreal. %"]   = df["Unreal. %"].map("{:+.2f}%".format)
+    df["Day P&L"]     = df["Day P&L"].map("${:+,.2f}".format)
+    df["Day %"]       = df["Day %"].map("{:+.2f}%".format)
+
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 def _render_market_intel() -> None:
