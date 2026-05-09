@@ -61,7 +61,7 @@ st.subheader("Shock Simulation")
 col_s, col_p, col_b = st.columns([2, 2, 1])
 sector    = col_s.selectbox("Shocked Sector", SECTORS, index=SECTORS.index("Energy"))
 shock_pct = col_p.slider("Demand Shock (%)", min_value=-100, max_value=-1, value=-20, step=1)
-run       = col_b.button("▶ Simulate", type="primary", use_container_width=True)
+run       = col_b.button("▶ Simulate", type="primary", width="stretch")
 
 if run or "contagion_result" in st.session_state:
     if run:
@@ -115,7 +115,7 @@ if run or "contagion_result" in st.session_state:
             height=420,
             margin=dict(l=120, r=80, t=50, b=30),
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
 
     # ── Leontief matrix heatmap ────────────────────────────────────────────────
     with col_heat:
@@ -136,7 +136,7 @@ if run or "contagion_result" in st.session_state:
             xaxis=dict(tickfont=dict(size=8)),
             yaxis=dict(tickfont=dict(size=8)),
         )
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, width="stretch")
 
 else:
     # ── Pre-run: show critical nodes by default ────────────────────────────────
@@ -172,7 +172,7 @@ fig_nodes.update_layout(
     height=320,
     showlegend=False,
 )
-st.plotly_chart(fig_nodes, use_container_width=True)
+st.plotly_chart(fig_nodes, width="stretch")
 
 col_n1, col_n2, col_n3 = st.columns(3)
 for i, col in enumerate([col_n1, col_n2, col_n3]):

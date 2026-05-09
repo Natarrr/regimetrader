@@ -125,7 +125,7 @@ fig_yield.update_layout(
     height=370,
     hovermode="x unified",
 )
-st.plotly_chart(fig_yield, use_container_width=True)
+st.plotly_chart(fig_yield, width="stretch")
 
 # ── M2 Velocity + HP Cycle ─────────────────────────────────────────────────────
 col_m2, col_gdp = st.columns(2)
@@ -145,7 +145,7 @@ with col_m2:
         yaxis=dict(title="Velocity", gridcolor=_GRID),
         height=300,
     )
-    st.plotly_chart(fig_m2, use_container_width=True)
+    st.plotly_chart(fig_m2, width="stretch")
 
 with col_gdp:
     cycle_pos = d["cycle"].clip(lower=0)
@@ -178,7 +178,7 @@ with col_gdp:
         height=300,
         showlegend=False,
     )
-    st.plotly_chart(fig_gdp, use_container_width=True)
+    st.plotly_chart(fig_gdp, width="stretch")
 
 # ── Interpretation ─────────────────────────────────────────────────────────────
 with st.expander("Model notes"):

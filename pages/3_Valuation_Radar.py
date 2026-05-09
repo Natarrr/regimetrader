@@ -165,7 +165,7 @@ with col_chart:
         height=420,
         hovermode="x unified",
     )
-    st.plotly_chart(fig_cape, use_container_width=True)
+    st.plotly_chart(fig_cape, width="stretch")
 
 # ── CAPE percentile gauge ──────────────────────────────────────────────────────
 with col_gauge:
@@ -197,7 +197,7 @@ with col_gauge:
         paper_bgcolor=_CHART_BG, font=dict(color="#E0E0E0"),
         height=280, margin=dict(t=30, b=10, l=10, r=10),
     )
-    st.plotly_chart(fig_pct, use_container_width=True)
+    st.plotly_chart(fig_pct, width="stretch")
 
     # ECY bar
     ecy_val = d["ecy"] * 100
@@ -216,7 +216,7 @@ with col_gauge:
         height=280,
         margin=dict(t=40, b=20),
     )
-    st.plotly_chart(fig_ecy, use_container_width=True)
+    st.plotly_chart(fig_ecy, width="stretch")
 
 with st.expander("Model notes"):
     st.markdown("""

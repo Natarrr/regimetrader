@@ -17,7 +17,7 @@ name: daily_toplists_discord
 
 on:
   schedule:
-    - cron: "0 13 * * *"   # 13:00 UTC = 14:00 BST (adjust to 14:00 UTC in winter)
+    - cron: "0 13 * * *"   # fallback — GCF scheduler dispatches at the correct London time
   workflow_dispatch:
     inputs:
       dry_run:
@@ -26,6 +26,15 @@ on:
         default: "false"
         type: choice
         options: [true, false]
+      source_run_id:
+        description: "Caller identifier (e.g. gcf-20260507T1400)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   send-discord:
