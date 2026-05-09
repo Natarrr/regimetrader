@@ -168,7 +168,7 @@ _TICKER_MAP: dict[str, str] = {
 st.markdown("**Quick select**")
 qs_cols = st.columns(len(_TICKER_MAP) + 1)
 for idx, (label, _) in enumerate(_TICKER_MAP.items()):
-    if qs_cols[idx].button(label, use_container_width=True):
+    if qs_cols[idx].button(label, width="stretch"):
         st.session_state["_qs_symbol"] = label
 
 col_sym, col_btn = st.columns([4, 1])
@@ -186,7 +186,7 @@ _display_name = next(
     (k for k, v in _TICKER_MAP.items() if v == symbol), symbol
 )
 
-run = col_btn.button("▶ Analyze", type="primary", use_container_width=True)
+run = col_btn.button("▶ Analyze", type="primary", width="stretch")
 
 if symbol in ("^CRSLDX", "^VIX"):
     st.caption(
@@ -373,7 +373,7 @@ if run or "regime_result" in st.session_state:
             paper_bgcolor=_CHART_BG, font=dict(color="#E0E0E0"),
             height=200, margin=dict(t=20, b=10, l=10, r=10),
         )
-        st.plotly_chart(fig_conds, use_container_width=True)
+        st.plotly_chart(fig_conds, width="stretch")
 
     # ── HMM label history ──────────────────────────────────────────────────────
     with col_regime_hist:
@@ -412,7 +412,7 @@ if run or "regime_result" in st.session_state:
                 legend=dict(bgcolor=_CARD_BG, orientation="h"),
                 margin=dict(t=10, b=40),
             )
-            st.plotly_chart(fig_hist, use_container_width=True)
+            st.plotly_chart(fig_hist, width="stretch")
 
             # Regime probability bar if available
             probs = hmm.get("regime_probs")
@@ -434,7 +434,7 @@ if run or "regime_result" in st.session_state:
                     height=240,
                     margin=dict(t=40, b=20),
                 )
-                st.plotly_chart(fig_probs, use_container_width=True)
+                st.plotly_chart(fig_probs, width="stretch")
         else:
             st.info("HMM regime history will appear here after analysis.")
 

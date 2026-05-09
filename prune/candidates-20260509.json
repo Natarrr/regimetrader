@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-05-09",
+  "branch": "chore/prune-unused-folders-20260509",
+  "methodology": "static import analysis (ast + grep) across all *.py files, excluding .venv/; dynamic validation via pytest with each candidate temporarily excluded",
+  "baseline_tests": "539 passed (excluding slow network tests in test_discovery_scanner.py::TestFmpScreener)",
+  "candidates": [
+    {
+      "path": "frontend/",
+      "size_mb": 325.93,
+      "file_count": 13700,
+      "description": "Next.js / React frontend application",
+      "external_python_importers": [],
+      "ci_references": [],
+      "test_references": [],
+      "justification": "325 MB Node.js app with zero Python imports, no CI pipeline integration, no test references. The production tool runs entirely via Streamlit (regime_trader/ui/streamlit_app.py). No API glue code connects this React app to the Python backend at runtime.",
+      "verdict": "ARCHIVE",
+      "risk": "low"
+    },
+    {
+      "path": "infra/",
+      "size_mb": 0.01,
+      "file_count": 1,
+      "description": "Google Cloud Functions deployment shell script (gcf_deploy.sh)",
+      "external_python_importers": [],
+      "ci_references": ["docs/runbook_scheduler.md (documentation only)"],
+      "test_references": [],
+      "justification": "Single bash script for GCF deployment. Referenced only in documentation prose, not in any CI workflow or test. Cloud scheduler code lives in cloud/ which has active test coverage and is kept.",
+      "verdict": "ARCHIVE",
+      "risk": "low"
+    },
+    {
+      "path": "intelligence/",
+      "size_mb": 0.34,
+      "file_count": 8,
+      "description": "Intelligence engine and sources (LLM / news aggregation)",
+      "external_python_importers": [],
+      "ci_references": [],
+      "test_references": [],
+      "justification": "Module is self-contained with zero external Python importers. Not imported by streamlit_app, discovery_scanner, backend, or any page. README and requirements.txt contain text references only. log_manager/ depends solely on this module.",
+      "verdict": "ARCHIVE",
+      "risk": "low"
+    },
+    {
+      "path": "log_manager/",
+      "size_mb": 0.01,
+      "file_count": 4,
+      "description": "Custom log manager used by intelligence/",
+      "external_python_importers": ["intelligence/engine.py", "intelligence/sources.py"],
+      "ci_references": [],
+      "test_references": [],
+      "justification": "Exclusively depended on by intelligence/ which is itself being archived. After intelligence/ is removed, log_manager/ has no live callers. Archived alongside intelligence/.",
+      "verdict": "ARCHIVE",
+      "risk": "low"
+    }
+  ],
+  "kept": [
+    {"path": "config/", "reason": "Referenced by .github/workflows/canary.yml CI pipeline"},
+    {"path": "cloud/", "reason": "tests/test_gcf_scheduler.py imports cloud.scheduler.gcf_scheduler"},
+    {"path": "hmm_engine/", "reason": "Imported by backend/routers/regime.py and pages/5_Regime_Prediction.py"},
+    {"path": "feature_engineering/", "reason": "Imported by pages/5_Regime_Prediction.py and backend/routers/regime.py"},
+    {"path": "valuation/", "reason": "Imported by backend/main.py (26 refs)"},
+    {"path": "analysis/", "reason": "Imported by core modules and backend"},
+    {"path": "core/", "reason": "Imported by 129+ files across the codebase"},
+    {"path": "data/", "reason": "Imported by 176+ files across the codebase"},
+    {"path": "backend/", "reason": "FastAPI application entrypoint"},
+    {"path": "monitoring/", "reason": "Imported by backend and alert systems"},
+    {"path": "regime_trader/", "reason": "Primary Python package"},
+    {"path": "pages/", "reason": "Streamlit multi-page app pages"},
+    {"path": "tests/", "reason": "Test suite"},
+    {"path": "docs/", "reason": "Documentation"},
+    {"path": "scripts/", "reason": "Operational scripts"}
+  ]
+}

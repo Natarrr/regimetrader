@@ -84,7 +84,7 @@ def _run_merton(sym: str, face_debt: float, rfr: float) -> dict:
 col_sym, col_yrs, col_btn = st.columns([3, 1, 1])
 symbol = col_sym.text_input("Ticker Symbol", value="SPY", placeholder="SPY, AAPL…").upper().strip()
 years  = col_yrs.number_input("Lookback (yrs)", min_value=2, max_value=10, value=5)
-run    = col_btn.button("▶ Run GARCH", type="primary", use_container_width=True)
+run    = col_btn.button("▶ Run GARCH", type="primary", width="stretch")
 
 _cached_sym  = st.session_state.get("garch_symbol", "")
 _cached_yrs  = st.session_state.get("garch_years",  -1)
@@ -135,7 +135,7 @@ if run or ("garch_result" in st.session_state and not _stale):
             height=320,
             margin=dict(t=40, b=20),
         )
-        st.plotly_chart(fig_params, use_container_width=True)
+        st.plotly_chart(fig_params, width="stretch")
 
         # Persistence gauge
         fig_gauge = go.Figure(go.Indicator(
@@ -162,7 +162,7 @@ if run or ("garch_result" in st.session_state and not _stale):
             paper_bgcolor=_CHART_BG, font=dict(color="#E0E0E0"), height=220,
             margin=dict(t=30, b=10, l=20, r=20),
         )
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.plotly_chart(fig_gauge, width="stretch")
 
     # ── Conditional volatility time series ─────────────────────────────────────
     with col_right:
@@ -195,7 +195,7 @@ if run or ("garch_result" in st.session_state and not _stale):
                 height=560,
                 margin=dict(t=40, b=20),
             )
-            st.plotly_chart(fig_cv, use_container_width=True)
+            st.plotly_chart(fig_cv, width="stretch")
 
     # ── Merton D2D (optional) ──────────────────────────────────────────────────
     st.divider()
@@ -206,7 +206,7 @@ if run or ("garch_result" in st.session_state and not _stale):
                                          value=5e10, step=1e9, format="%.0f")
         rfr       = m_col2.number_input("Risk-Free Rate", min_value=0.0, max_value=0.2,
                                          value=0.045, step=0.005, format="%.3f")
-        run_merton = m_col3.button("Compute D2D", use_container_width=True)
+        run_merton = m_col3.button("Compute D2D", width="stretch")
 
         if run_merton:
             with st.spinner("Running Merton model…"):
