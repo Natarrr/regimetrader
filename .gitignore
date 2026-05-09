@@ -96,6 +96,9 @@ data_cache/
 *.h5
 *.hdf5
 
+# ── API response cache (may contain partial key material in URL fragments) ────
+.cache/
+
 # ── IDE & OS ──────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
