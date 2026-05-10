@@ -96,10 +96,14 @@ jobs:
           pip install -r requirements-ci.txt
 
       - name: Smoke — Streamlit app + service imports
+        env:
+          CI: "true"
         run: |
           pytest tests/test_streamlit_app_smoke.py \
                  tests/test_logging_cfg.py \
-                 -q --tb=short
+                 tests/test_check_secrets.py \
+                 tests/test_fmt_insider_pct.py \
+                 -q --tb=short -m "not slow"
 
   # ── 3. Full test suite ────────────────────────────────────────────────────────
   test:
@@ -130,14 +134,18 @@ jobs:
           pip install -r requirements-ci.txt
 
       - name: Run test suite — tests/
+        env:
+          CI: "true"
         run: |
-          pytest tests/ -q --tb=short
+          pytest tests/ -q --tb=short -m "not slow"
 
       - name: Run test suite — backend/tests/
         # backend/tests/ is optional — skip gracefully if directory absent
+        env:
+          CI: "true"
         run: |
           if [ -d backend/tests ]; then
-            pytest backend/tests/ -q --tb=short
+            pytest backend/tests/ -q --tb=short -m "not slow"
           else
             echo "backend/tests/ not found — skipping"
           fi

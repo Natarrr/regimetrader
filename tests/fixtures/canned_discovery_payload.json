@@ -1,0 +1,50 @@
+{
+  "results": [
+    {
+      "symbol": "AAPL",
+      "smart_money_score": 0.812,
+      "insider_score": 0.45,
+      "institutional_score": 0.60,
+      "momentum_score": 0.72,
+      "insider_value_usd": 125000,
+      "insider_value_pct_mcap": 0.0005,
+      "volume_spike": 3.2,
+      "price_change_pct": 1.25,
+      "source_flags": ["EDGAR", "FMP"],
+      "evidence": [
+        {"type": "form4", "id": "F4-0001", "summary": "Insider buy 10k shares 2026-05-01"},
+        {"type": "13f",   "id": "13F-0001", "summary": "Institutional accumulation +0.5%"}
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "smart_money_score": 0.778,
+      "insider_score": 0.62,
+      "institutional_score": 0.55,
+      "momentum_score": 0.68,
+      "insider_value_usd": 98000,
+      "insider_value_pct_mcap": 0.0003,
+      "volume_spike": 2.1,
+      "price_change_pct": 0.87,
+      "source_flags": ["EDGAR"],
+      "evidence": [
+        {"type": "form4", "id": "F4-0002", "summary": "CEO buy 5k shares 2026-05-02"}
+      ]
+    },
+    {
+      "symbol": "TSLA",
+      "smart_money_score": 0.541,
+      "insider_score": 0.30,
+      "institutional_score": 0.48,
+      "momentum_score": 0.61,
+      "insider_value_usd": 45000,
+      "insider_value_pct_mcap": 0.00015,
+      "volume_spike": 1.4,
+      "price_change_pct": -0.33,
+      "source_flags": ["FMP"],
+      "evidence": []
+    }
+  ],
+  "cached": true,
+  "computed_at": "2026-05-10T12:00:00Z"
+}

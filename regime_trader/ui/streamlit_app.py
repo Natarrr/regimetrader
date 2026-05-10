@@ -1,25 +1,31 @@
 """regime_trader/ui/streamlit_app.py
 Streamlit orchestrator for the Regime Trader dashboard.
 
-Tabs:
-  Live Monitor    — regime / portfolio stubs
-  Market Intel    — Smart Money discovery picks
-  Macro Intel     — Commodity conviction + macro shocks
+Pages (sidebar navigation):
+  Dashboard       — regime / portfolio + VIX sparkline + market/macro intel
+  Monetary Pulse  — Friedman/Kuznets/Prescott yield-curve & M2 velocity
+  Volatility Brain— Engle GJR-GARCH + Merton Distance-to-Default
+  Valuation Radar — Shiller CAPE + Excess CAPE Yield
+  Contagion Web   — Leontief I-O shock propagation
+  Regime Prediction — Lucas/Sargent HMM composite regime + Minsky alert
+
+Dashboard tabs:
+  Live Monitor    — regime / portfolio + VIX sparkline
+  Market Intel    — Smart Money discovery picks + explainability panel
+  Macro Intel     — Commodity conviction + macro shocks + partial-data badge
   Trade Log       — stub
   Regime History  — stub
   Portfolio Sync  — stub
-
-All heavy computation is delegated to:
-  regime_trader.discovery_scanner   — get_top_alpha_picks_sync()
-  regime_trader.market_intel_macro  — fetch_commodity_prices(), calc_macro_conviction()
 
 Run:
   streamlit run regime_trader/ui/streamlit_app.py
 """
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,12 +41,15 @@ load_dotenv(_ROOT / ".env", override=False)
 configure_logging()
 log = logging.getLogger(__name__)
 
+# Pages directory (project root / pages/)
+_PAGES_DIR = _ROOT / "pages"
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Regime Trader",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 _FMP_KEY = os.getenv("FMP_API_KEY", "")
@@ -51,6 +60,8 @@ _ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 _ALPACA_PAPER  = "paper" in os.getenv("ALPACA_BASE_URL", "paper").lower()
 _HAS_ALPACA    = bool(_ALPACA_KEY and _ALPACA_SECRET)
 
+_EDGAR_USER_AGENT = os.getenv("EDGAR_USER_AGENT", "regime-trader n.tardy@hotmail.fr")
+
 # ── Optional import: generate_macro_synthesis (graceful fallback) ─────────────
 try:
     from regime_trader.market_intel_macro import generate_macro_synthesis as _generate_macro_synthesis
@@ -58,8 +69,35 @@ except ImportError:
     def _generate_macro_synthesis(  # type: ignore[misc]
         prices: Dict, convictions: Dict, indicators: Dict
     ) -> List[str]:
-        del prices, convictions, indicators  # fallback stub — params unused by design
+        del prices, convictions, indicators
         return ["Macro synthesis unavailable — market_intel_macro not installed."]
+
+
+# ── Page module loader ────────────────────────────────────────────────────────
+
+def _load_page_module(name: str, filename: str):
+    """Load a page module once; cache it in sys.modules so @st.cache_data persists.
+
+    Returns the module or None if the file is missing / imports fail.
+    """
+    key = f"_rt_page_{name}"
+    if key in sys.modules:
+        return sys.modules[key]
+    path = _PAGES_DIR / filename
+    if not path.exists():
+        log.warning("Page file not found: %s", path)
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(key, path)
+        mod  = importlib.util.module_from_spec(spec)
+        sys.modules[key] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as exc:
+        log.warning("Failed to load page %s: %s", filename, exc)
+        # Remove partial entry so next run retries
+        sys.modules.pop(key, None)
+        return None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -239,6 +277,72 @@ def _load_regime() -> Dict[str, Any]:
         return {"regime": "Unknown", "vix": None}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_vix_history() -> Optional[List[float]]:
+    """Fetch 10-day VIX history for the sparkline. Returns None on failure."""
+    try:
+        import yfinance as yf
+        df = yf.download("^VIX", period="10d", interval="1d",
+                         progress=False, auto_adjust=True)
+        if df.empty:
+            return None
+        series = df["Close"].squeeze().dropna()
+        return [float(v) for v in series.tolist()]
+    except Exception as exc:
+        log.debug("VIX history load failed: %s", exc)
+        return None
+
+
+# ── Sidebar: navigation + settings ───────────────────────────────────────────
+
+_NAV_PAGES = [
+    ("📊 Dashboard",          None,                    None),
+    ("💰 Monetary Pulse",     "1_Monetary_Pulse.py",   "monetary_pulse"),
+    ("📈 Volatility Brain",   "2_Volatility_Brain.py", "volatility_brain"),
+    ("🔭 Valuation Radar",    "3_Valuation_Radar.py",  "valuation_radar"),
+    ("🕸️ Contagion Web",      "4_Contagion_Web.py",    "contagion_web"),
+    ("🎯 Regime Prediction",  "5_Regime_Prediction.py","regime_prediction"),
+]
+
+
+def _render_sidebar() -> str:
+    """Render sidebar navigation + settings. Returns selected page label."""
+    with st.sidebar:
+        st.markdown("## 🧭 Navigate")
+        labels = [label for label, _, _ in _NAV_PAGES]
+        selected = st.radio(
+            "page",
+            labels,
+            label_visibility="collapsed",
+            key="_sidebar_nav",
+        )
+
+        st.divider()
+        st.markdown("## ⚙️ Settings")
+
+        with st.expander("Cache controls", expanded=False):
+            if st.button("Clear discovery cache", key="clear_disc"):
+                _load_discovery.clear()
+                st.success("Discovery cache cleared.")
+            if st.button("Clear commodity cache", key="clear_comm"):
+                _load_commodity_prices.clear()
+                _load_macro_indicators.clear()
+                st.success("Commodity / macro cache cleared.")
+            if st.button("Clear account cache", key="clear_acct"):
+                _load_alpaca_account.clear()
+                _load_regime.clear()
+                _load_vix_history.clear()
+                st.success("Account / regime cache cleared.")
+
+        with st.expander("Environment", expanded=False):
+            st.caption(f"FMP key: **{'set' if _HAS_FMP else 'missing'}**")
+            st.caption(f"Alpaca key: **{'set' if _HAS_ALPACA else 'missing'}**")
+            st.caption(f"Paper trading: **{_ALPACA_PAPER}**")
+            st.caption(f"EDGAR User-Agent: `{_EDGAR_USER_AGENT}`")
+
+    return selected
+
+
 # ── Helper: API key warning banner ────────────────────────────────────────────
 
 def _require_fmp() -> bool:
@@ -257,17 +361,17 @@ def _require_fmp() -> bool:
     return _HAS_FMP
 
 
-# ── Tab renderers ─────────────────────────────────────────────────────────────
+# ── Dashboard tab renderers ───────────────────────────────────────────────────
 
 def _render_live_monitor() -> None:
-    """Render the Live Monitor tab — live regime + Alpaca account."""
+    """Render the Live Monitor tab — live regime + Alpaca account + VIX sparkline."""
     hdr, btn = st.columns([8, 1])
     hdr.header("Live Monitor")
     if btn.button("↻", key="live_refresh", help="Refresh account data"):
         _load_alpaca_account.clear()
         _load_regime.clear()
+        _load_vix_history.clear()
 
-    # ── Regime ────────────────────────────────────────────────────────────────
     regime_data = _load_regime()
     regime      = regime_data.get("regime", "Unknown")
     vix         = regime_data.get("vix")
@@ -278,7 +382,6 @@ def _render_live_monitor() -> None:
     }
     regime_icon = _REGIME_COLOR.get(regime, "❓")
 
-    # ── Account ───────────────────────────────────────────────────────────────
     if not _HAS_ALPACA:
         st.warning(
             "**ALPACA_API_KEY / ALPACA_SECRET_KEY not set.** "
@@ -291,6 +394,7 @@ def _render_live_monitor() -> None:
         col2.metric("Portfolio Value", "—")
         col3.metric("Open Positions", "—")
         col4.metric("Daily P&L", "—")
+        _render_vix_sparkline()
         return
 
     with st.spinner("Loading account…"):
@@ -301,8 +405,8 @@ def _render_live_monitor() -> None:
         return
 
     paper_tag = " · Paper trading" if acct["paper"] else ""
-    pnl     = acct["daily_pnl"]
-    pnl_pct = acct["daily_pnl_pct"]
+    pnl       = acct["daily_pnl"]
+    pnl_pct   = acct["daily_pnl_pct"]
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Regime", f"{regime_icon} {regime}",
@@ -316,7 +420,8 @@ def _render_live_monitor() -> None:
         f"Buying power: **${acct['buying_power']:,.2f}**"
     )
 
-    # ── Positions table ───────────────────────────────────────────────────────
+    _render_vix_sparkline()
+
     st.subheader(f"Positions ({len(acct['positions'])})")
     positions = acct["positions"]
     if not positions:
@@ -337,8 +442,22 @@ def _render_live_monitor() -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+def _render_vix_sparkline() -> None:
+    """Render a 10-day VIX sparkline below the regime metrics. No-op on failure."""
+    try:
+        history = _load_vix_history()
+        if not history or len(history) < 2:
+            return
+        import pandas as pd
+        df = pd.DataFrame({"VIX": history})
+        st.caption("VIX — 10-day history")
+        st.line_chart(df, height=100, use_container_width=True)
+    except Exception as exc:
+        log.debug("VIX sparkline render failed: %s", exc)
+
+
 def _render_market_intel() -> None:
-    """Render the Market Intel tab — Smart Money discovery picks."""
+    """Render the Market Intel tab — Smart Money discovery picks + explainability."""
     st.header("Market Intel — Smart Money Discovery")
     _require_fmp()
 
@@ -381,6 +500,11 @@ def _render_market_intel() -> None:
 
     import pandas as pd
 
+    _INSIDER_PCT_HELP = (
+        "Insider % of Market Cap — values ≤ 1.0 from the scanner are raw fractions "
+        "and are multiplied by 100 for display; values > 1.0 are already percentages."
+    )
+
     rows = []
     for r in results:
         rows.append({
@@ -396,7 +520,10 @@ def _render_market_intel() -> None:
             "Sources": ", ".join(r.get("source_flags", [])),
         })
 
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.caption(f"ℹ️ Insider % MktCap: {_INSIDER_PCT_HELP}")
+
+    _render_explainability(results)
 
     with st.expander("Raw payload"):
         import json
@@ -404,6 +531,53 @@ def _render_market_intel() -> None:
             {k: v for k, v in payload.items() if not k.startswith("_")},
             indent=2, default=str,
         ), language="json")
+
+
+def _render_explainability(results: List[Dict]) -> None:
+    """Render per-ticker explainability expanders showing component scores and evidence.
+
+    Reads only from the payload already returned by get_top_alpha_picks_sync() —
+    no additional network calls are made.
+    """
+    _WEIGHTS = {
+        "insider_score":       ("Insider",       0.25),
+        "institutional_score": ("Institutional", 0.20),
+        "momentum_score":      ("Momentum",      0.20),
+        "smart_money_score":   ("Smart Money",   0.35),
+    }
+
+    for r in results:
+        symbol = r.get("symbol", "?")
+        score  = r.get("smart_money_score", 0.0)
+        with st.expander(f"📊 {symbol} — score {score:.3f}  (click to expand)"):
+            st.markdown("**Component scores**")
+            comp_rows = []
+            for field, (label, weight) in _WEIGHTS.items():
+                raw = r.get(field, 0.0)
+                try:
+                    raw = float(raw)
+                except (TypeError, ValueError):
+                    raw = 0.0
+                comp_rows.append({
+                    "Component": label,
+                    "Weight":    f"{weight:.0%}",
+                    "Score":     f"{raw:.3f}",
+                    "Contribution": f"{raw * weight:.4f}",
+                })
+
+            import pandas as pd
+            st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+
+            evidence: List[Dict] = r.get("evidence", []) or []
+            if evidence:
+                st.markdown("**Evidence**")
+                for ev in evidence:
+                    ev_type    = ev.get("type", "—")
+                    ev_id      = ev.get("id", "—")
+                    ev_summary = ev.get("summary", "—")
+                    st.markdown(f"- `[{ev_type}]` **{ev_id}** — {ev_summary}")
+            else:
+                st.caption("No detailed evidence available for this ticker.")
 
 
 def _render_macro_intel() -> None:
@@ -424,10 +598,19 @@ def _render_macro_intel() -> None:
         _load_macro_indicators.clear()
 
     with st.spinner("Fetching commodity prices…"):
-        prices = _load_commodity_prices()
+        prices     = _load_commodity_prices()
         indicators = _load_macro_indicators()
 
-    # Macro shock alerts
+    n_missing_comm = sum(1 for v in prices.values() if v is None)
+    n_missing_ind  = sum(1 for v in indicators.values() if v is None)
+    if n_missing_comm or n_missing_ind:
+        st.warning(
+            f"⚠️ Partial data: {n_missing_comm} commodity feed(s) and "
+            f"{n_missing_ind} macro indicator(s) unavailable. "
+            "Rows show '—' where data is missing.",
+            icon="⚠️",
+        )
+
     alerts = check_macro_shocks(prices)
     for alert in alerts:
         fn = st.error if alert["level"] == "error" else st.warning
@@ -439,7 +622,7 @@ def _render_macro_intel() -> None:
     rows = []
     for c in COMMODITY_UNIVERSE:
         ticker = c["ticker"]
-        data = prices.get(ticker)
+        data   = prices.get(ticker)
         if data is None:
             rows.append({
                 "Name": c["name"], "Ticker": ticker, "Price": "—",
@@ -461,9 +644,8 @@ def _render_macro_intel() -> None:
 
     import pandas as pd
     st.subheader("Commodity Scorecard")
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    # Macro synthesis — guarded at module level; fallback returns a safe string
     st.subheader("Macro Narrative")
     for para in _generate_macro_synthesis(prices, convictions, indicators):
         st.markdown(f"> {para}")
@@ -479,7 +661,7 @@ def _render_macro_intel() -> None:
             "1d": f"{data['ret_1d']:+.2%}" if data else "—",
             "5d": f"{data['ret_5d']:+.2%}" if data else "—",
         })
-    st.dataframe(pd.DataFrame(ind_rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(ind_rows), use_container_width=True, hide_index=True)
 
 
 def _render_trade_log() -> None:
@@ -502,17 +684,11 @@ def _render_portfolio_sync() -> None:
     if uploaded:
         import pandas as pd
         df = pd.read_csv(uploaded)
-        st.dataframe(df.head(20), width="stretch")
+        st.dataframe(df.head(20), use_container_width=True)
 
 
-# ── Main layout ───────────────────────────────────────────────────────────────
-
-def main() -> None:
-    """Entry point for the Streamlit dashboard.
-
-    Renders all tabs. Called by the root-level streamlit_app.py shim on
-    every Streamlit re-run (including interactions).
-    """
+def _render_dashboard() -> None:
+    """Render the main dashboard with all six tabs."""
     st.title("Regime Trader Dashboard")
     tabs = st.tabs([
         "📊 Live Monitor",
@@ -534,6 +710,54 @@ def main() -> None:
         _render_regime_history()
     with tabs[5]:
         _render_portfolio_sync()
+
+
+# ── Main layout ───────────────────────────────────────────────────────────────
+
+def main() -> None:
+    """Entry point: render sidebar navigation then dispatch to selected page.
+
+    Called by Streamlit on every re-run. Quant pages are loaded lazily via
+    importlib so a missing backend dependency only breaks that page, not the
+    whole dashboard.
+    """
+    selected = _render_sidebar()
+
+    # Build lookup from label → (filename, mod_name)
+    _page_map = {label: (fn, mn) for label, fn, mn in _NAV_PAGES}
+
+    if selected == "📊 Dashboard" or selected not in _page_map:
+        _render_dashboard()
+        return
+
+    filename, mod_name = _page_map[selected]
+    if filename is None:
+        _render_dashboard()
+        return
+
+    mod = _load_page_module(mod_name, filename)
+    if mod is None:
+        st.error(
+            f"**{selected}** could not be loaded. "
+            "Check that all backend dependencies are installed and try again."
+        )
+        with st.expander("Troubleshooting"):
+            st.markdown(
+                "This page requires packages from `backend/`. "
+                "Ensure `backend/data/fred_service.py`, `backend/quant_models/`, "
+                "and related modules are present in the project root."
+            )
+        return
+
+    if not hasattr(mod, "render"):
+        st.error(f"Page module `{filename}` has no `render()` function.")
+        return
+
+    try:
+        mod.render()
+    except Exception as exc:
+        log.exception("Page render failed: %s — %s", selected, exc)
+        st.error(f"**{selected}** encountered an error: {exc}")
 
 
 if __name__ == "__main__":

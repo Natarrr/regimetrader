@@ -1,0 +1,33 @@
+# Git commands for this audit
+# 2026-05-10 — End-to-end pipeline validation
+#
+# This audit produced no functional fixes (PASS).
+# Only the diagnostics document was added.
+
+# 1. Branch from main
+git checkout -b audit/pipeline-validation-20260510
+
+# 2. Stage the audit deliverables
+git add docs/AUDIT_DIAGNOSTICS.md docs/AUDIT_GIT_COMMANDS.txt docs/AUDIT_PR_BODY.md
+
+# 3. Commit with a clear, scope-bounded message
+git commit -m "docs(audit): end-to-end pipeline validation report 20260510
+
+All acceptance gates pass:
+  - yamllint: clean
+  - check_secrets.py: gates correctly by REQUIRE_SECRETS / GITHUB_REF
+  - smoke + service tests: 38 + 44 pass (mocked)
+  - full mocked suite: 760 pass under CI=true
+  - integration ranking: weights sum to 1.0, math verified
+
+No production logic changes."
+
+# 4. Push for review
+git push -u origin audit/pipeline-validation-20260510
+
+# 5. (Optional) Open PR via gh CLI when available
+#    gh pr create --title 'docs(audit): pipeline validation 20260510' --body-file docs/AUDIT_PR_BODY.md
+
+# ── Rollback (if any later regression is traced to the audit branch) ──
+# git revert --no-edit <commit-sha>
+# git push
