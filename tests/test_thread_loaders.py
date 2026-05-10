@@ -54,8 +54,8 @@ class TestLoadCommodityPrices:
         fake_prices = {"price": 1900.0, "ret_1d": 0.01, "ret_5d": 0.02}
 
         with (
-            patch("regime_trader.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
-            patch("regime_trader.market_intel_macro.fetch_commodity_prices",
+            patch("regime_trader.scanners.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
+            patch("regime_trader.scanners.market_intel_macro.fetch_commodity_prices",
                   return_value=fake_prices),
         ):
             result = app._load_commodity_prices()
@@ -73,8 +73,8 @@ class TestLoadCommodityPrices:
             raise RuntimeError("feed down")
 
         with (
-            patch("regime_trader.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
-            patch("regime_trader.market_intel_macro.fetch_commodity_prices", side_effect=boom),
+            patch("regime_trader.scanners.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
+            patch("regime_trader.scanners.market_intel_macro.fetch_commodity_prices", side_effect=boom),
         ):
             result = app._load_commodity_prices()
 
@@ -98,8 +98,8 @@ class TestLoadCommodityPrices:
             return fake_prices
 
         with (
-            patch("regime_trader.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
-            patch("regime_trader.market_intel_macro.fetch_commodity_prices",
+            patch("regime_trader.scanners.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
+            patch("regime_trader.scanners.market_intel_macro.fetch_commodity_prices",
                   side_effect=maybe_fail),
         ):
             result = app._load_commodity_prices()
@@ -111,8 +111,8 @@ class TestLoadCommodityPrices:
         app = _get_app()
 
         with (
-            patch("regime_trader.market_intel_macro.COMMODITY_UNIVERSE", []),
-            patch("regime_trader.market_intel_macro.fetch_commodity_prices",
+            patch("regime_trader.scanners.market_intel_macro.COMMODITY_UNIVERSE", []),
+            patch("regime_trader.scanners.market_intel_macro.fetch_commodity_prices",
                   return_value={}),
         ):
             result = app._load_commodity_prices()
@@ -133,8 +133,8 @@ class TestLoadMacroIndicators:
         fake_data = {"price": 18.5, "ret_1d": -0.02, "ret_5d": 0.01}
 
         with (
-            patch("regime_trader.market_intel_macro.MACRO_INDICATORS", fake_indicators),
-            patch("regime_trader.market_intel_macro.fetch_macro_indicator",
+            patch("regime_trader.scanners.market_intel_macro.MACRO_INDICATORS", fake_indicators),
+            patch("regime_trader.scanners.market_intel_macro.fetch_macro_indicator",
                   return_value=fake_data),
         ):
             result = app._load_macro_indicators()
@@ -148,8 +148,8 @@ class TestLoadMacroIndicators:
         fake_indicators = [{"ticker": "^VIX", "name": "VIX"}]
 
         with (
-            patch("regime_trader.market_intel_macro.MACRO_INDICATORS", fake_indicators),
-            patch("regime_trader.market_intel_macro.fetch_macro_indicator",
+            patch("regime_trader.scanners.market_intel_macro.MACRO_INDICATORS", fake_indicators),
+            patch("regime_trader.scanners.market_intel_macro.fetch_macro_indicator",
                   side_effect=ConnectionError("timeout")),
         ):
             result = app._load_macro_indicators()
@@ -171,8 +171,8 @@ class TestLoadMacroIndicators:
             return fake_data
 
         with (
-            patch("regime_trader.market_intel_macro.MACRO_INDICATORS", fake_indicators),
-            patch("regime_trader.market_intel_macro.fetch_macro_indicator",
+            patch("regime_trader.scanners.market_intel_macro.MACRO_INDICATORS", fake_indicators),
+            patch("regime_trader.scanners.market_intel_macro.fetch_macro_indicator",
                   side_effect=maybe_fail),
         ):
             result = app._load_macro_indicators()
@@ -222,8 +222,8 @@ class TestLoaderTimeoutHandling:
             return fast_data
 
         with (
-            patch("regime_trader.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
-            patch("regime_trader.market_intel_macro.fetch_commodity_prices",
+            patch("regime_trader.scanners.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
+            patch("regime_trader.scanners.market_intel_macro.fetch_commodity_prices",
                   side_effect=fetch),
             patch("regime_trader.ui.streamlit_app.as_completed", patched_as_completed),
         ):

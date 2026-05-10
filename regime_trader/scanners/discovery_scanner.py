@@ -19,8 +19,8 @@ Design:
   • FMP free-tier aware: institutional calls batched to ≤ 50 symbols.
 
 CLI:
-  python -m regime_trader.discovery_scanner --limit 5
-  python -m regime_trader.discovery_scanner --force-refresh --limit 5
+  python -m regime_trader.scanners.discovery_scanner --limit 5
+  python -m regime_trader.scanners.discovery_scanner --force-refresh --limit 5
 """
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """tests/test_discovery_scanner.py
-Unit tests for regime_trader.discovery_scanner.
+Unit tests for regime_trader.scanners.discovery_scanner.
 
 Coverage:
   - disc_get_json()          : 200 OK, 4xx, network error, unexpected shape
@@ -27,7 +27,7 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from regime_trader.discovery_scanner import (
+from regime_trader.scanners.discovery_scanner import (
     _smart_money_prescore,
     disc_get_json,
     enrich_with_momentum,
@@ -44,7 +44,7 @@ from regime_trader.discovery_scanner import (
 @pytest.fixture()
 def tmp_cache(tmp_path, monkeypatch):
     """Redirect _DISC_CACHE_FILE to a temp directory for isolation."""
-    import regime_trader.discovery_scanner as ds
+    import regime_trader.scanners.discovery_scanner as ds
     cache_path = tmp_path / "discovery_cache.json"
     monkeypatch.setattr(ds, "_DISC_CACHE_FILE", cache_path)
     return cache_path
@@ -79,7 +79,7 @@ class TestDiscGetJson:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = [{"symbol": "AAPL"}]
-        with patch("regime_trader.discovery_scanner._get_session") as mock_sess:
+        with patch("regime_trader.scanners.discovery_scanner._get_session") as mock_sess:
             mock_sess.return_value.get.return_value = mock_resp
             result = disc_get_json("https://example.com/api", {"apikey": "test"})
         assert result == [{"symbol": "AAPL"}]
@@ -87,13 +87,13 @@ class TestDiscGetJson:
     def test_404_returns_none(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        with patch("regime_trader.discovery_scanner._get_session") as mock_sess:
+        with patch("regime_trader.scanners.discovery_scanner._get_session") as mock_sess:
             mock_sess.return_value.get.return_value = mock_resp
             result = disc_get_json("https://example.com/api")
         assert result is None
 
     def test_network_error_returns_none(self):
-        with patch("regime_trader.discovery_scanner._get_session") as mock_sess:
+        with patch("regime_trader.scanners.discovery_scanner._get_session") as mock_sess:
             mock_sess.return_value.get.side_effect = ConnectionError("timeout")
             result = disc_get_json("https://example.com/api")
         assert result is None
@@ -103,7 +103,7 @@ class TestDiscGetJson:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = "unexpected string"
-        with patch("regime_trader.discovery_scanner._get_session") as mock_sess:
+        with patch("regime_trader.scanners.discovery_scanner._get_session") as mock_sess:
             mock_sess.return_value.get.return_value = mock_resp
             result = disc_get_json("https://example.com/api")
         assert result == "unexpected string"
@@ -136,7 +136,7 @@ class TestFmpScreener:
         df = _make_yf_df("AAPL", prices, volumes)
 
         with patch("yfinance.download", return_value=df):
-            with patch("regime_trader.discovery_scanner._YF_WATCHLIST", ["AAPL"]):
+            with patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["AAPL"]):
                 results = fmp_screener()
 
         assert len(results) == 1
@@ -154,7 +154,7 @@ class TestFmpScreener:
         df = _make_yf_df("PENNYSTOCK", prices, volumes)
 
         with patch("yfinance.download", return_value=df):
-            with patch("regime_trader.discovery_scanner._YF_WATCHLIST", ["PENNYSTOCK"]):
+            with patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["PENNYSTOCK"]):
                 results = fmp_screener()
 
         assert results == []
@@ -339,14 +339,14 @@ class TestGetTopAlphaPicks:
              "volume_spike": 1.0, "price_change_pct": 0.0,
              "market_cap": 3e12, "source_flags": ["insider"]},
         ]
-        with patch("regime_trader.discovery_scanner.run_scan", return_value=fake_result):
+        with patch("regime_trader.scanners.discovery_scanner.run_scan", return_value=fake_result):
             payload = get_top_alpha_picks_sync(limit=1)
         assert "results" in payload
         assert payload["results"][0]["symbol"] == "AAPL"
 
     def test_cache_hit_skips_scan(self, tmp_cache):
         """Pre-populate a fresh cache; run_scan must not be called."""
-        import regime_trader.discovery_scanner as ds
+        import regime_trader.scanners.discovery_scanner as ds
         payload = {
             "results": [{"symbol": "CACHED"}],
             "cached": False,
@@ -354,7 +354,7 @@ class TestGetTopAlphaPicks:
             "_expires_at": time.time() + 3600,
         }
         save_disc_cache(payload)
-        with patch("regime_trader.discovery_scanner.run_scan") as mock_scan:
+        with patch("regime_trader.scanners.discovery_scanner.run_scan") as mock_scan:
             result = get_top_alpha_picks_sync(limit=5)
         mock_scan.assert_not_called()
         assert result["cached"] is True

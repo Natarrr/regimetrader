@@ -1,21 +1,21 @@
 """discovery_scanner.py — backwards-compat shim.
 
-The implementation now lives in :mod:`regime_trader.discovery_scanner`.
+The implementation now lives in :mod:`regime_trader.scanners.discovery_scanner`.
 
 Existing callers using ``from discovery_scanner import X`` (e.g. local notebooks
 or ad-hoc CLI invocations) keep working through these re-exports. New code
 should import directly from the package:
 
-    from regime_trader.discovery_scanner import get_top_alpha_picks_sync
+    from regime_trader.scanners.discovery_scanner import get_top_alpha_picks_sync
 
 CLI:
     python -m discovery_scanner
     # or:
-    python -m regime_trader.discovery_scanner
+    python -m regime_trader.scanners.discovery_scanner
 """
 from __future__ import annotations
 
-from regime_trader.discovery_scanner import (  # noqa: F401
+from regime_trader.scanners.discovery_scanner import (  # noqa: F401
     ScanResult,
     disc_get_json,
     enrich_with_momentum,

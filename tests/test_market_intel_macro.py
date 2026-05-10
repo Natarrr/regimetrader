@@ -1,5 +1,5 @@
 """tests/test_market_intel_macro.py
-Unit tests for regime_trader.market_intel_macro.
+Unit tests for regime_trader.scanners.market_intel_macro.
 
 Coverage:
   - calc_term_structure_score : backwardation, contango, neutral, all-zero
@@ -24,7 +24,7 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from regime_trader.market_intel_macro import (
+from regime_trader.scanners.market_intel_macro import (
     calc_cot_proxy_score,
     calc_macro_conviction,
     calc_sentiment_score,

@@ -225,13 +225,13 @@ class TestRenderMacroIntel:
         monkeypatch.setattr(_app, "_load_macro_indicators", _loader(indicators))
 
         return (
-            patch("regime_trader.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
-            patch("regime_trader.market_intel_macro.MACRO_INDICATORS",   fake_indics),
-            patch("regime_trader.market_intel_macro.calc_macro_conviction",
+            patch("regime_trader.scanners.market_intel_macro.COMMODITY_UNIVERSE", fake_universe),
+            patch("regime_trader.scanners.market_intel_macro.MACRO_INDICATORS",   fake_indics),
+            patch("regime_trader.scanners.market_intel_macro.calc_macro_conviction",
                   MagicMock(return_value=conviction_ret)),
-            patch("regime_trader.market_intel_macro.check_macro_shocks",
+            patch("regime_trader.scanners.market_intel_macro.check_macro_shocks",
                   MagicMock(return_value=[])),
-            patch("regime_trader.market_intel_macro.generate_macro_synthesis",
+            patch("regime_trader.scanners.market_intel_macro.generate_macro_synthesis",
                   MagicMock(return_value=["ok"])),
         )
 

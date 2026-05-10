@@ -40,7 +40,7 @@ def test_streamlit_app_imports():
 
 
 def test_discovery_scanner_imports():
-    import regime_trader.discovery_scanner as ds
+    import regime_trader.scanners.discovery_scanner as ds
 
     for fn_name in (
         "get_top_alpha_picks_sync",
@@ -56,7 +56,7 @@ def test_discovery_scanner_imports():
 
 
 def test_market_intel_macro_imports():
-    import regime_trader.market_intel_macro as mim
+    import regime_trader.scanners.market_intel_macro as mim
 
     assert mim is not None
 
@@ -78,7 +78,7 @@ _STUB_RESULTS: List[Dict[str, Any]] = [
 
 def test_get_top_alpha_picks_returns_expected_shape(tmp_path, monkeypatch):
     """The Market Intel tab calls get_top_alpha_picks_sync(); shape must be stable."""
-    import regime_trader.discovery_scanner as ds
+    import regime_trader.scanners.discovery_scanner as ds
 
     # Force cache miss by pointing to a temp directory that doesn't have a cache file.
     monkeypatch.setattr(ds, "_DISC_CACHE_FILE", tmp_path / "disc_cache.json", raising=False)
@@ -187,7 +187,7 @@ def test_save_load_disc_cache_round_trip(tmp_path, monkeypatch):
     when the payload is well-formed (TTL not expired)."""
     import time
 
-    import regime_trader.discovery_scanner as ds
+    import regime_trader.scanners.discovery_scanner as ds
 
     cache_file = tmp_path / "cache.json"
     monkeypatch.setattr(ds, "_DISC_CACHE_FILE", cache_file, raising=False)
@@ -213,7 +213,7 @@ def test_save_disc_cache_is_atomic(tmp_path, monkeypatch):
     """Atomic write: no partial / temp files left behind on success."""
     import time
 
-    import regime_trader.discovery_scanner as ds
+    import regime_trader.scanners.discovery_scanner as ds
 
     cache_file = tmp_path / "cache.json"
     monkeypatch.setattr(ds, "_DISC_CACHE_FILE", cache_file, raising=False)

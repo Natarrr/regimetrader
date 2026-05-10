@@ -64,7 +64,7 @@ _EDGAR_USER_AGENT = os.getenv("EDGAR_USER_AGENT", "regime-trader n.tardy@hotmail
 
 # ── Optional import: generate_macro_synthesis (graceful fallback) ─────────────
 try:
-    from regime_trader.market_intel_macro import generate_macro_synthesis as _generate_macro_synthesis
+    from regime_trader.scanners.market_intel_macro import generate_macro_synthesis as _generate_macro_synthesis
 except ImportError:
     def _generate_macro_synthesis(  # type: ignore[misc]
         prices: Dict, convictions: Dict, indicators: Dict
@@ -147,7 +147,7 @@ def _load_discovery(limit: int = 5) -> Dict[str, Any]:
         Discovery payload dict with at minimum a 'results' list.
     """
     try:
-        from regime_trader.discovery_scanner import get_top_alpha_picks_sync
+        from regime_trader.scanners.discovery_scanner import get_top_alpha_picks_sync
         return get_top_alpha_picks_sync(limit=limit)
     except Exception as exc:
         log.warning("discovery load failed: %s", exc)
@@ -161,7 +161,7 @@ def _load_commodity_prices() -> Dict[str, Optional[Dict]]:
     Returns:
         {ticker: price_dict | None} for each commodity in COMMODITY_UNIVERSE.
     """
-    from regime_trader.market_intel_macro import COMMODITY_UNIVERSE, fetch_commodity_prices
+    from regime_trader.scanners.market_intel_macro import COMMODITY_UNIVERSE, fetch_commodity_prices
 
     prices: Dict[str, Optional[Dict]] = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -192,7 +192,7 @@ def _load_macro_indicators() -> Dict[str, Optional[Dict]]:
     Returns:
         {ticker: indicator_dict | None} for each indicator in MACRO_INDICATORS.
     """
-    from regime_trader.market_intel_macro import MACRO_INDICATORS, fetch_macro_indicator
+    from regime_trader.scanners.market_intel_macro import MACRO_INDICATORS, fetch_macro_indicator
 
     indicators: Dict[str, Optional[Dict]] = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -470,7 +470,7 @@ def _render_market_intel() -> None:
     if force:
         _load_discovery.clear()
         try:
-            from regime_trader.discovery_scanner import force_refresh_sync
+            from regime_trader.scanners.discovery_scanner import force_refresh_sync
             with st.spinner("Running fresh scan…"):
                 payload = force_refresh_sync(limit=limit)
             st.success("Scan complete.")
@@ -582,7 +582,7 @@ def _render_explainability(results: List[Dict]) -> None:
 
 def _render_macro_intel() -> None:
     """Render the Macro Intel tab — commodity conviction + macro shocks."""
-    from regime_trader.market_intel_macro import (
+    from regime_trader.scanners.market_intel_macro import (
         COMMODITY_UNIVERSE,
         MACRO_INDICATORS,
         calc_macro_conviction,
