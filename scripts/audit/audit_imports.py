@@ -19,8 +19,9 @@ def collect_entry_points(root: Path) -> Set[str]:
     for pat in ENTRY_PATTERNS:
         for p in root.glob(pat):
             entries.add(str(p.relative_to(root)))
-    for p in root.rglob("conftest.py"):
-        entries.add(str(p.relative_to(root)))
+    for p in _iter_py_files(root):
+        if p.name == "conftest.py":
+            entries.add(str(p.relative_to(root)))
     return entries
 
 
@@ -47,17 +48,18 @@ def _get_exported_names(file_path: Path) -> Set[str]:
     """Extract names that are defined/exported in a Python file."""
     try:
         tree = ast.parse(file_path.read_text(encoding="utf-8", errors="replace"))
-    except SyntaxError:
+    except (SyntaxError, OSError):
         return set()
 
-    names = set()
-    for node in ast.walk(tree):
+    names: set[str] = set()
+    for node in ast.iter_child_nodes(tree):  # top-level only
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    names.add(target.id)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
     return names
 
 
@@ -146,12 +148,13 @@ def find_broken_imports(root: Path, local_packages: Set[str]) -> Dict[str, List[
                                     if not _module_to_rel(import_path, root):
                                         bad.append(import_path)
                         else:
-                            # For ImportFrom from non-__init__, check if what we're importing exists
+                            # Module resolves to a plain .py file
+                            exported = _get_exported_names(root / module_rel.replace("\\", "/"))
                             for alias in node.names:
                                 if alias.name == "*":
                                     continue
                                 import_path = f"{node.module}.{alias.name}"
-                                if not _module_to_rel(import_path, root):
+                                if _module_to_rel(import_path, root) is None and alias.name not in exported:
                                     bad.append(import_path)
         if bad:
             broken[rel] = bad
