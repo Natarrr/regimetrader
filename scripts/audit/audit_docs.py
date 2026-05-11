@@ -43,10 +43,14 @@ def collect_symbols(root: Path) -> Set[str]:
 
 def extract_doc_symbols(text: str) -> List[str]:
     """Extract backtick-wrapped identifiers from markdown text."""
-    return [
-        (m.group(1) or m.group(2)).rstrip("(.")
-        for m in _SYMBOL_RE.finditer(text)
-    ]
+    results = []
+    for m in _SYMBOL_RE.finditer(text):
+        raw = (m.group(1) or m.group(2)).rstrip("(.")
+        # Take only the final component of dotted paths (e.g. "regime_trader.Foo" -> "Foo")
+        name = raw.rsplit(".", 1)[-1]
+        if name:
+            results.append(name)
+    return results
 
 
 def find_dead_docs(root: Path, threshold: float = 0.5) -> List[str]:
@@ -68,11 +72,14 @@ def find_dead_docs(root: Path, threshold: float = 0.5) -> List[str]:
 
 
 def _heading_set(text: str) -> Set[str]:
-    return {
-        line.lstrip("#").strip().lower()
-        for line in text.splitlines()
-        if line.startswith("#") and line.strip() != "#"
-    }
+    result = set()
+    for line in text.splitlines():
+        if not line.startswith("#"):
+            continue
+        heading = line.lstrip("#").strip()
+        if heading:  # skip empty headings like "## "
+            result.add(heading.lower())
+    return result
 
 
 def _code_fingerprints(text: str) -> Set[str]:
@@ -100,6 +107,8 @@ def find_duplicate_docs(root: Path, threshold: float = 0.7) -> List[Tuple[str, s
     dups: List[Tuple[str, str, float]] = []
     for i in range(len(profiles)):
         for j in range(i + 1, len(profiles)):
+            if not profiles[i][1] and not profiles[j][1]:
+                continue  # both empty — no meaningful content to compare
             score = jaccard(profiles[i][1], profiles[j][1])
             if score > threshold:
                 dups.append((profiles[i][0], profiles[j][0], score))
