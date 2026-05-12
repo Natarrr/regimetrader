@@ -57,7 +57,7 @@ _FACTOR_EMOJI = {
     "insider":  "🏦",
     "congress": "🏛️",
     "news":     "📰",
-    "momentum": "📈",   # was "macro": "🌍"
+    "momentum": "📈",
 }
 
 _BADGE_EMOJI = {
@@ -89,7 +89,7 @@ def _format_ticker_block(entry: Dict[str, Any], rank: Optional[int] = None) -> s
 
     Output (fits within ~200 chars):
         **1. AAPL** 🟡  `0.7341`  TACTICAL BUY
-        📋`0.40` 🏦`0.50` 🏛️`0.50` 📰`0.60` 🌍`0.65`  ████░░░░
+        📋`0.40` 🏦`0.50` 🏛️`0.50` 📰`0.60` 📈`0.65`  ████░░░░
     """
     ticker   = entry.get("ticker", "?")
     score    = float(entry.get("final_score", 0))
