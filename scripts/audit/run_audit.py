@@ -53,7 +53,7 @@ def main(root_str: str = ".", out_str: str = "docs/superpowers/specs") -> None:
         _render_decisions(decisions), encoding="utf-8"
     )
 
-    print(f"\nReport → {out}/audit-report.md")
+    print(f"\nReport -> {out}/audit-report.md")
     print(f"  Orphaned .py files : {len(orphans)}")
     print(f"  Broken imports     : {len(broken)}")
     print(f"  Dead docs          : {len(dead_docs)}")
