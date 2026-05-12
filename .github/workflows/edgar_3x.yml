@@ -2,7 +2,7 @@ name: edgar_3x
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EDGAR data pipeline — 3× daily at 00:00, 08:00, 16:00 UTC.
-# Each run fetches full 50-ticker universe, generates top_lists.json,
+# Each run fetches full 160-ticker universe, generates top_lists.json,
 # and uploads it as artifact "top-lists" for the daily Discord workflow.
 #
 # SEC rate-limit note: concurrency group "edgar_data_fetch" prevents two runs
@@ -36,8 +36,8 @@ on:
 jobs:
   fetch-and-rank:
     runs-on: ubuntu-latest
-    # 50 tickers at 7 req/s ≈ 6 min nominal + retries + scoring ≈ 20 min max
-    timeout-minutes: 30
+    # 160 tickers via ThreadPoolExecutor — EDGAR + FMP + yfinance ≈ 40 min max
+    timeout-minutes: 60
 
     concurrency:
       group: edgar_data_fetch
@@ -117,9 +117,9 @@ jobs:
 
       # ── 6. Generate top_lists.json ───────────────────────────────────────────
       #
-      # Five-factor scoring: edgar(0.30) insider(0.25) congress(0.20) news(0.15) macro(0.10)
-      # Congress/institutional fetched from FMP if FMP_API_KEY is set.
-      # Market cap tiers assigned relative to the 50-ticker universe.
+      # Five-factor scoring: edgar(0.30) insider(0.25) congress(0.20) news(0.15) momentum(0.10)
+      # Congress data from House/Senate Stock Watcher S3 (no API key needed).
+      # Market cap tiers assigned relative to the 160-ticker universe.
       - name: Generate top lists
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
