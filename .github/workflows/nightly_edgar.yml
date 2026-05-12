@@ -10,18 +10,14 @@ name: nightly_edgar
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  schedule:
-    - cron: "0 0 * * *"   # 00:00 UTC every night
+  # Schedule disabled — edgar_3x.yml runs at 00:00 UTC and covers this.
+  # Kept as workflow_dispatch for manual full-universe backfills.
   workflow_dispatch:
     inputs:
       tickers_file:
         description: "Tickers CSV (path relative to repo root)"
         required: false
-        default: "backend/market_intel/top50.csv"
-      limit_forms:
-        description: "Max filings fetched per form type per ticker"
-        required: false
-        default: "20"
+        default: "config/top50.csv"
       min_coverage:
         description: "Min EDGAR coverage ratio that passes threshold gate (0–1)"
         required: false
@@ -79,8 +75,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |
-          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}"
-          LIMIT_FORMS="${{ github.event.inputs.limit_forms || '20' }}"
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/top50.csv' }}"
           LOG_DIR="logs"
           mkdir -p "$LOG_DIR" .monitoring
 
@@ -89,9 +84,8 @@ jobs:
             echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
             START=$(date +%s)
 
-            if python -m backend.market_intel.run_pipeline \
+            if python scripts/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
-              --limit-forms  "$LIMIT_FORMS" \
               --max-workers  4 \
               --log-dir      "$LOG_DIR" \
               --verbose; then
@@ -181,8 +175,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Tickers file | \`${{ github.event.inputs.tickers_file || 'backend/market_intel/top50.csv' }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Limit forms  | \`${{ github.event.inputs.limit_forms || '20' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tickers file | \`${{ github.event.inputs.tickers_file || 'config/top50.csv' }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Min coverage | \`${{ github.event.inputs.min_coverage || '0.80' }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f logs/metrics.json ]; then

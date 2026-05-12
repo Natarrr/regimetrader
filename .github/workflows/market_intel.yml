@@ -3,40 +3,21 @@ name: market_intel
 on:
   push:
     paths:
-      - "backend/market_intel/**"
-      - "backend/tests/market_intel/**"
-      - "backend/quant_models/**"
-      - "backend/tests/quant_models/**"
+      - "scripts/**"
+      - "config/**"
+      - "regime_trader/**"
       - "monitoring/**"
-      - "utils/atomic_write.py"
       - "tests/**"
       - ".github/workflows/market_intel.yml"
   pull_request:
     paths:
-      - "backend/market_intel/**"
-      - "backend/tests/market_intel/**"
-      - "backend/quant_models/**"
-      - "backend/tests/quant_models/**"
+      - "scripts/**"
+      - "config/**"
+      - "regime_trader/**"
       - "monitoring/**"
-      - "utils/atomic_write.py"
       - "tests/**"
-  schedule:
-    # 06:30 ET (10:30 UTC) — pre-open
-    - cron: "30 10 * * 1-5"
-    # 14:00 ET (18:00 UTC) — mid-day
-    - cron: "0 18 * * 1-5"
-    # 22:00 ET (02:00 UTC next day) — post-close
-    - cron: "0 2 * * 2-6"
-    # 02:00 ET (06:00 UTC) — nightly full backfill
-    - cron: "0 6 * * *"
+  # Scheduled fetch removed — edgar_3x.yml runs 3×/day and covers data production.
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Run mode"
-        required: true
-        default: "test"
-        type: choice
-        options: [test, fetch_top50, fetch_full_universe]
 
 jobs:
   test:
@@ -52,60 +33,5 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
-      - name: Run market_intel test suite
-        run: pytest backend/tests/market_intel/ -v
-      - name: Run canary hardening test suite (atomic / CB / alert_state / evaluate)
+      - name: Run full test suite
         run: pytest tests/ -v
-
-  test-quant:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install CI dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-ci.txt
-      - name: Run quant model test suite
-        run: pytest backend/tests/quant_models/ -v
-
-  fetch:
-    needs: test
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'test')
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    concurrency:
-      group: market_intel_fetch
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Run market_intel fetch
-        env:
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
-          MARKET_INTEL_DATA_DIR: ${{ github.workspace }}/data/raw/edgar
-        run: |
-          python -m backend.market_intel.run_pipeline --tickers-file=backend/market_intel/top50.csv --limit-forms=5
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: market-intel-${{ github.run_id }}
-          path: |
-            logs/form4_summary.csv
-            logs/edgar_debug_summary.json
-            logs/marketintel_events.json
-          retention-days: 30

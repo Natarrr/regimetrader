@@ -135,6 +135,18 @@ def _section_value(entries: List[Dict], max_chars: int = 1020) -> str:
     return _truncate("\n".join(blocks), max_chars)
 
 
+_STALE_HOURS = 25   # warn in Discord if top_lists.json is older than this
+
+
+def _data_age_hours(generated_at: str) -> Optional[float]:
+    """Return age of top_lists.json in hours, or None if unparseable."""
+    try:
+        ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+    except Exception:
+        return None
+
+
 def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
     """Build the Discord webhook JSON payload with embeds."""
     generated_at = top_lists.get("generated_at", "")
@@ -142,6 +154,7 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
     ticker_count = top_lists.get("ticker_count", 0)
     weights      = top_lists.get("weights", {})
 
+    age_h = _data_age_hours(generated_at)
     try:
         ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
         date_str = ts.strftime("%Y-%m-%d %H:%M UTC")
@@ -154,11 +167,20 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
         f"{k}={v:.0%}" for k, v in weights.items()
     ) if weights else "default"
 
+    stale_warning = ""
+    if age_h is not None and age_h > _STALE_HOURS:
+        stale_warning = (
+            f"\n⚠️ **DATA IS {age_h:.0f}h OLD** — pipeline may have failed. "
+            "Check the `edgar_3x` workflow on GitHub Actions."
+        )
+        color = _COLOR_RED
+
     description = (
         f"**Universe:** {ticker_count} tickers  |  "
         f"**Run:** `{run_id}`\n"
         f"**Weights:** {weight_str}\n"
         f"*⚠️ Mid/Small tiers are relative within this large-cap universe.*"
+        f"{stale_warning}"
     )
 
     # Build embed fields

@@ -56,11 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/canary_top10.csv' }}"
-          LIMIT="${{ github.event.inputs.limit_forms || '5' }}"
           START=$(date +%s)
-          python -m backend.market_intel.run_pipeline \
+          python scripts/run_pipeline.py \
             --tickers-file "$TICKERS_FILE" \
-            --limit-forms "$LIMIT" \
             --verbose
           END=$(date +%s)
           echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"

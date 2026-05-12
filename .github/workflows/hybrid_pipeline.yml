@@ -132,7 +132,7 @@ jobs:
           import yfinance as yf
           import numpy as np
           import pandas as pd
-          from regime.regime_detector import vix_rule
+          from regime_trader.models.regime_detector import vix_rule
 
           # Quick VIX rule for regime tagging (HMM/ML require fit — use rule in CI)
           vix_df = yf.download("^VIX", period="5d", interval="1d",
