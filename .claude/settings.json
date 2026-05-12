@@ -15,5 +15,12 @@
     "additionalDirectories": [
       "C:\\Users\\ntard\\.claude\\projects\\c--Users-ntard-OneDrive-Documents-Bureau-Github-test-regime-trader"
     ]
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": true,
+    "context7@claude-plugins-official": false
   }
 }

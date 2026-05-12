@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/audit/run_audit.py --root . --out docs/superpowers/specs)",
+      "Bash(dir hmm_engine /s /b)",
+      "Bash(dir backend\\\\quant_models /s /b)",
+      "Bash(Get-ChildItem hmm_engine -Recurse -Filter \"*.py\")",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(Get-ChildItem backend\\\\quant_models -Recurse -Filter \"*.py\")",
+      "PowerShell($output = & python \"C:\\\\Users\\\\ntard\\\\Projects\\\\Trading dashboard\\\\regime_trader\\\\scripts\\\\audit\\\\apply_structural.py\" 2>&1; $output | ForEach-Object { $_.ToString\\(\\) })",
+      "Bash(python -c \"import sys; sys.exit\\(0 if open\\('C:/Users/ntard/AppData/Local/Temp/claude/c--Users-ntard-Projects-Trading-dashboard-regime-trader/0c6cd592-5d5d-4a57-801d-a4e5a0331e04/tasks/b2xcb21a7.output'\\).read\\(\\).strip\\(\\) else 1\\)\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\ntard\\\\Projects\\\\Trading dashboard\\\\regime_trader\"; $proc = Start-Process python -ArgumentList \"scripts\\\\audit\\\\apply_structural.py\" -NoNewWindow -PassThru -RedirectStandardOutput \"$env:TEMP\\\\apply_out.txt\" -RedirectStandardError \"$env:TEMP\\\\apply_err.txt\"; $proc.WaitForExit\\(90000\\); Get-Content \"$env:TEMP\\\\apply_out.txt\"; Get-Content \"$env:TEMP\\\\apply_err.txt\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\ntard\\\\Projects\\\\Trading dashboard\\\\regime_trader\"; $proc = Start-Process python -ArgumentList \"-m\", \"pytest\", \"tests/\", \"backend/tests/\", \"-q\", \"--tb=short\" -NoNewWindow -PassThru -RedirectStandardOutput \"$env:TEMP\\\\pytest_out.txt\" -RedirectStandardError \"$env:TEMP\\\\pytest_err.txt\"; $proc.WaitForExit\\(180000\\); Write-Host \"Exit code: $\\($proc.ExitCode\\)\"; Get-Content \"$env:TEMP\\\\pytest_out.txt\"; Get-Content \"$env:TEMP\\\\pytest_err.txt\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\ntard\\\\Projects\\\\Trading dashboard\\\\regime_trader\"; $proc = Start-Process python -ArgumentList \"-m\", \"pytest\", \"tests/\", \"backend/tests/\", \"-q\", \"--tb=short\" -NoNewWindow -PassThru -RedirectStandardOutput \"$env:TEMP\\\\pytest_out2.txt\" -RedirectStandardError \"$env:TEMP\\\\pytest_err2.txt\"; $proc.WaitForExit\\(300000\\); Write-Host \"Exit code: $\\($proc.ExitCode\\)\"; Get-Content \"$env:TEMP\\\\pytest_out2.txt\"; Get-Content \"$env:TEMP\\\\pytest_err2.txt\")",
+      "Bash(ls docs/)",
+      "Bash(ls backend/)",
+      "Bash(ls feature_engineering/)",
+      "Bash(ls monitoring/)",
+      "Bash(ls discovery_scanner.py)",
+      "Bash(python scripts/audit/apply_cleanup.py --dry-run)",
+      "Bash(python scripts/audit/apply_cleanup.py)",
+      "Bash(python -c \"from feature_engineering.feature_engineering import FeatureEngineer; print\\('OK', FeatureEngineer\\)\")",
+      "Bash(python -c \"from feature_engineering import FeatureEngineer; print\\('OK', FeatureEngineer\\)\")",
+      "Bash(python -m pytest tests/ backend/tests/ -q --tb=no)",
+      "Bash(python -c ' *)",
+      "Bash(python scripts/audit/check_naming.py)",
+      "Bash(python -m pytest tests/test_ci_environment.py -v --tb=short)",
+      "Bash(python -c \"import regime_trader; import hmm_engine; import monitoring; print\\('OK'\\)\")",
+      "Bash(rm \"backend/data/market_service.py\")",
+      "Bash(python -m pytest tests/audit/ -q --tb=short)",
+      "Bash(python -c \"import json; r=json.load\\(open\\('docs/superpowers/specs/audit-report.json'\\)\\); print\\('orphans:', r['orphans']\\)\")"
+    ]
+  }
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Set
 
 ENTRY_PATTERNS = [
+    "*.py",             # root-level entry-point shims (e.g. streamlit_app.py)
     "pages/*.py",
     "scripts/**/*.py",
     "cloud/**/*.py",
@@ -60,6 +61,11 @@ def _get_exported_names(file_path: Path) -> Set[str]:
             for t in targets:
                 if isinstance(t, ast.Name):
                     names.add(t.id)
+        elif isinstance(node, ast.ImportFrom):
+            # Include re-exported names (e.g. `from .mod import Foo` in __init__.py)
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name)
     return names
 
 
