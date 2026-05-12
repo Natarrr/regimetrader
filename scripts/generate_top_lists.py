@@ -43,7 +43,7 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from regime_trader.scoring.normalize import normalize_score, fallback_reweight
+from regime_trader.scoring.normalize import normalize_score
 from regime_trader.utils.io import save_json_atomic
 
 log = logging.getLogger("generate_top_lists")
@@ -186,6 +186,9 @@ def generate(
         log.warning("No results found in intel_source_status.json — producing empty top_lists")
 
     norm_factor_list = _cross_sectional_normalize(results)
+    assert len(norm_factor_list) == len(results), (
+        f"_cross_sectional_normalize returned {len(norm_factor_list)} rows for {len(results)} results"
+    )
     entries = [_to_entry(row, nf) for row, nf in zip(results, norm_factor_list)]
     _assign_cap_tiers(entries)
 
