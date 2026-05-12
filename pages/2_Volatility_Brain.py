@@ -16,7 +16,8 @@ import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 
-from backend.data.market_service import MarketData
+# TODO: MarketData import removed — backend.data.market_service does not exist; wire up correct service
+MarketData = None  # placeholder until re-wired
 from backend.quant_models.volatility_brain import (
     fit_gjr_garch,
     volatility_regime,

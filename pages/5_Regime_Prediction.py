@@ -29,15 +29,18 @@ from backend.quant_models.volatility_brain import fit_gjr_garch, volatility_regi
 from backend.quant_models.monetary_pulse import (
     yield_spread, is_inverted, monetary_regime, m2_velocity_trend,
 )
-from backend.data.market_service import MarketData
+# TODO: MarketData import removed — backend.data.market_service does not exist; wire up correct service
+MarketData = None  # placeholder until re-wired
 from backend.data.fred_service import fetch_10y_yield, fetch_2y_yield, fetch_m2_velocity
 
+_HMM_ERR: str = ""
 try:
     from feature_engineering.feature_engineering import FeatureEngineer
     from hmm_engine.classifier import RegimeClassifier
     _HMM_OK = True
-except ImportError:
+except Exception as _e:
     _HMM_OK = False
+    _HMM_ERR = f"{type(_e).__name__}: {_e}"
 
 _CHART_BG = "#050505"
 _CARD_BG  = "#121212"
@@ -188,8 +191,8 @@ def render() -> None:
         )
 
     if not _HMM_OK:
-        st.warning("⚠️ HMM engine not importable — regime will show 'Unknown'. "
-                   "Minsky alert still runs on macro + valuation data.")
+        st.warning(f"⚠️ HMM engine not importable — regime will show 'Unknown'. "
+                   f"Minsky alert still runs on macro + valuation data.  [{_HMM_ERR}]")
 
     if run or "_rp_regime_result" in st.session_state:
         if run:
