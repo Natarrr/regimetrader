@@ -25,7 +25,7 @@ on:
       tickers_file:
         description: "Tickers CSV (relative to repo root)"
         required: false
-        default: "config/top50.csv"
+        default: "config/universe.csv"
       force_regen:
         description: "Force top_lists regeneration even if fresh"
         required: false
@@ -75,7 +75,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |
-          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/top50.csv' }}"
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
           LOG_DIR="logs"
           mkdir -p "$LOG_DIR" .monitoring
 

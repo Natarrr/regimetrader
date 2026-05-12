@@ -1,0 +1,161 @@
+ticker,sector,cap_tier
+META,Communication Services,large
+GOOGL,Communication Services,large
+NFLX,Communication Services,large
+DIS,Communication Services,large
+CHTR,Communication Services,large
+CMCSA,Communication Services,large
+T,Communication Services,large
+VZ,Communication Services,large
+TMUS,Communication Services,large
+EA,Communication Services,large
+WBD,Communication Services,large
+FOXA,Communication Services,large
+IPG,Communication Services,large
+OMC,Communication Services,large
+TTD,Communication Services,large
+AMZN,Consumer Discretionary,large
+TSLA,Consumer Discretionary,large
+HD,Consumer Discretionary,large
+NKE,Consumer Discretionary,large
+MCD,Consumer Discretionary,large
+TGT,Consumer Discretionary,large
+LOW,Consumer Discretionary,large
+SBUX,Consumer Discretionary,large
+GM,Consumer Discretionary,large
+BKNG,Consumer Discretionary,large
+ORLY,Consumer Discretionary,large
+MAR,Consumer Discretionary,large
+RCL,Consumer Discretionary,large
+ULTA,Consumer Discretionary,large
+ROST,Consumer Discretionary,large
+WMT,Consumer Staples,large
+PG,Consumer Staples,large
+KO,Consumer Staples,large
+PEP,Consumer Staples,large
+COST,Consumer Staples,large
+PM,Consumer Staples,large
+MO,Consumer Staples,large
+CL,Consumer Staples,large
+GIS,Consumer Staples,large
+ADM,Consumer Staples,large
+HSY,Consumer Staples,large
+STZ,Consumer Staples,large
+CHD,Consumer Staples,large
+HRL,Consumer Staples,large
+SYY,Consumer Staples,large
+XOM,Energy,large
+CVX,Energy,large
+COP,Energy,large
+SLB,Energy,large
+EOG,Energy,large
+MPC,Energy,large
+PSX,Energy,large
+VLO,Energy,large
+OXY,Energy,large
+HAL,Energy,large
+DVN,Energy,large
+BKR,Energy,large
+FANG,Energy,large
+HES,Energy,large
+MRO,Energy,large
+JPM,Financials,large
+BAC,Financials,large
+WFC,Financials,large
+GS,Financials,large
+MS,Financials,large
+BLK,Financials,large
+SPGI,Financials,large
+CB,Financials,large
+AXP,Financials,large
+PNC,Financials,large
+USB,Financials,large
+TRV,Financials,large
+MET,Financials,large
+AFL,Financials,large
+PRU,Financials,large
+JNJ,Healthcare,large
+LLY,Healthcare,large
+ABBV,Healthcare,large
+UNH,Healthcare,large
+MRK,Healthcare,large
+PFE,Healthcare,large
+ABT,Healthcare,large
+DHR,Healthcare,large
+AMGN,Healthcare,large
+TMO,Healthcare,large
+ISRG,Healthcare,large
+CVS,Healthcare,large
+MDT,Healthcare,large
+SYK,Healthcare,large
+BMY,Healthcare,large
+CAT,Industrials,large
+HON,Industrials,large
+GE,Industrials,large
+BA,Industrials,large
+UPS,Industrials,large
+RTX,Industrials,large
+LMT,Industrials,large
+DE,Industrials,large
+MMM,Industrials,large
+EMR,Industrials,large
+ETN,Industrials,large
+FDX,Industrials,large
+WM,Industrials,large
+CARR,Industrials,large
+PCAR,Industrials,large
+AAPL,Information Technology,large
+MSFT,Information Technology,large
+NVDA,Information Technology,large
+ORCL,Information Technology,large
+CRM,Information Technology,large
+NOW,Information Technology,large
+ADBE,Information Technology,large
+AMD,Information Technology,large
+QCOM,Information Technology,large
+IBM,Information Technology,large
+INTC,Information Technology,large
+TXN,Information Technology,large
+AMAT,Information Technology,large
+MU,Information Technology,large
+ACN,Information Technology,large
+LIN,Materials,large
+APD,Materials,large
+ECL,Materials,large
+NEM,Materials,large
+FCX,Materials,large
+NUE,Materials,large
+ALB,Materials,large
+CF,Materials,large
+MOS,Materials,large
+PPG,Materials,large
+RPM,Materials,large
+IP,Materials,large
+PKG,Materials,large
+DOW,Materials,large
+IFF,Materials,large
+AMT,Real Estate,large
+PLD,Real Estate,large
+CCI,Real Estate,large
+EQIX,Real Estate,large
+PSA,Real Estate,large
+O,Real Estate,large
+DLR,Real Estate,large
+SPG,Real Estate,large
+VICI,Real Estate,large
+AVB,Real Estate,large
+EQR,Real Estate,large
+WY,Real Estate,large
+NEE,Utilities,large
+DUK,Utilities,large
+SO,Utilities,large
+D,Utilities,large
+AEP,Utilities,large
+EXC,Utilities,large
+XEL,Utilities,large
+PCG,Utilities,large
+WEC,Utilities,large
+ETR,Utilities,large
+PPL,Utilities,large
+CMS,Utilities,large
+ES,Utilities,large
