@@ -46,7 +46,7 @@ def _py_files(root: Path, pkg: str) -> List[Path]:
 
 
 def _count_inbound(pkg: str, graph: Dict[str, Set[str]]) -> int:
-    prefix = pkg.replace("\\", "/")
+    prefix = pkg.replace("\\", "/").rstrip("/") + "/"
     count = 0
     for importer, deps in graph.items():
         if not importer.replace("\\", "/").startswith(prefix):
@@ -146,7 +146,7 @@ def score_pairs(
 ) -> List[PairDecision]:
     pairs = pairs or MODULE_PAIRS
     all_mtimes = [_latest_mtime(root, p) for pair in pairs for p in pair]
-    max_mtime = max(all_mtimes, default=1.0)
+    max_mtime = max(all_mtimes) if any(t > 0 for t in all_mtimes) else 1.0
 
     decisions: List[PairDecision] = []
     for left, right in pairs:
