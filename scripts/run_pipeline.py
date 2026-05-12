@@ -46,6 +46,14 @@ WEIGHTS = {
     "macro":    0.10,
 }
 
+# ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
+CONGRESS_CACHE_PATH = ROOT / ".cache" / "congress_cache.json"
+
+_CONGRESS_TTL_HOURS = 24
+_HOUSE_URL   = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+_SENATE_URL  = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+_INVALID_TICKERS = frozenset({"N/A", "--", "", "NONE"})
+
 # ── VIX → macro score ──────────────────────────────────────────────────────────
 _VIX_MACRO = [
     (45.0, 0.20),   # Crash
@@ -160,6 +168,88 @@ def fetch_fmp_insider_buys(lookback_days: int = 60) -> Dict[str, Dict]:
         if is_key:
             by_ticker[ticker]["key_exec_usd"] += val
     return by_ticker
+
+
+def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
+    """Stiglitz (2001 Nobel) — fetch congressional trading from House/Senate Stock Watcher.
+
+    Downloads both chamber feeds from public S3 (no API key required), filters
+    to the lookback window, and counts purchase vs sale transactions per ticker.
+    Results are cached for 24 h to avoid redundant downloads within a trading day.
+
+    $\\text{net\\_score} = \\frac{(purchases - sales)}{total + 1}$
+
+    Returns:
+        Dict keyed by ticker → {"purchases": int, "sales": int, "total": int}
+    """
+    import requests as _req
+
+    # ── Check 24-hour cache ───────────────────────────────────────────────────
+    if CONGRESS_CACHE_PATH.exists():
+        try:
+            cached = json.loads(CONGRESS_CACHE_PATH.read_text(encoding="utf-8"))
+            age_h = (time.time() - float(cached.get("_ts", 0))) / 3600
+            if age_h < _CONGRESS_TTL_HOURS:
+                return cached.get("by_ticker", {})
+        except Exception:
+            pass
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+    by_ticker: Dict[str, Dict] = {}
+
+    for url, label in [(_HOUSE_URL, "house"), (_SENATE_URL, "senate")]:
+        try:
+            resp = _req.get(url, timeout=30)
+            resp.raise_for_status()
+            transactions = resp.json()
+            for tx in transactions:
+                date_str = str(tx.get("transaction_date") or tx.get("date") or "")
+                if date_str[:10] < cutoff:
+                    continue
+                ticker = str(tx.get("ticker") or "").upper().strip()
+                if not ticker or ticker in _INVALID_TICKERS:
+                    continue
+                tx_type = str(tx.get("type") or "").lower()
+                is_purchase = "purchase" in tx_type
+                is_sale = "sale" in tx_type
+                if not (is_purchase or is_sale):
+                    continue
+                if ticker not in by_ticker:
+                    by_ticker[ticker] = {"purchases": 0, "sales": 0, "total": 0}
+                if is_purchase:
+                    by_ticker[ticker]["purchases"] += 1
+                else:
+                    by_ticker[ticker]["sales"] += 1
+                by_ticker[ticker]["total"] += 1
+        except Exception as exc:
+            log.warning("Congress feed %s failed: %s", label, exc)
+
+    # ── Persist cache ─────────────────────────────────────────────────────────
+    try:
+        save_json_atomic(CONGRESS_CACHE_PATH, {"_ts": time.time(), "by_ticker": by_ticker})
+    except Exception as exc:
+        log.debug("Congress cache write failed: %s", exc)
+
+    return by_ticker
+
+
+def score_congress(data: Optional[Dict]) -> float:
+    """Stiglitz (2001 Nobel) — congressional net buy signal $\\in [0, 1]$.
+
+    $score = \\frac{(purchases - sales) / (total + 1) + 1}{2}$
+
+    A ticker with only purchases scores >0.5; only sales scores <0.5;
+    no congressional activity or equal purchases/sales scores 0.5.
+    """
+    if not data:
+        return 0.50
+    total = int(data.get("total", 0))
+    if total == 0:
+        return 0.50
+    purchases = int(data.get("purchases", 0))
+    sales     = int(data.get("sales", 0))
+    raw = (purchases - sales) / (total + 1)   # $\in (-1, 1)$
+    return round((raw + 1) / 2, 4)             # $\to (0, 1)$
 
 
 # ── EDGAR Form 4 counter ───────────────────────────────────────────────────────
