@@ -57,22 +57,31 @@ def test_regime_package():
     assert (ROOT / "regime").is_dir(), "regime/ directory not found"
 
 
+def _ci_provides(pkg: str) -> bool:
+    """Return True if pkg is provided directly or via -r requirements.txt."""
+    ci = (ROOT / "requirements-ci.txt").read_text()
+    if pkg in ci:
+        return True
+    # Transitive include: -r requirements.txt pulls in everything from prod deps.
+    if "-r requirements.txt" in ci:
+        prod = (ROOT / "requirements.txt").read_text()
+        return pkg in prod
+    return False
+
+
 def test_requirements_ci_has_pydantic():
-    """requirements-ci.txt must declare pydantic (guards against regression)."""
-    content = (ROOT / "requirements-ci.txt").read_text()
-    assert "pydantic" in content, "pydantic missing from requirements-ci.txt"
+    """pydantic must be reachable from CI deps (directly or via -r requirements.txt)."""
+    assert _ci_provides("pydantic"), "pydantic missing from CI deps"
 
 
 def test_requirements_ci_has_anthropic():
-    """requirements-ci.txt must declare anthropic for claude_client tests."""
-    content = (ROOT / "requirements-ci.txt").read_text()
-    assert "anthropic" in content, "anthropic missing from requirements-ci.txt"
+    """anthropic must be reachable from CI deps for claude_client tests."""
+    assert _ci_provides("anthropic"), "anthropic missing from CI deps"
 
 
 def test_requirements_ci_has_hmmlearn():
-    """requirements-ci.txt must declare hmmlearn for regime detector tests."""
-    content = (ROOT / "requirements-ci.txt").read_text()
-    assert "hmmlearn" in content, "hmmlearn missing from requirements-ci.txt"
+    """hmmlearn must be reachable from CI deps for regime detector tests."""
+    assert _ci_provides("hmmlearn"), "hmmlearn missing from CI deps"
 
 
 def test_ci_workflow_exists():
