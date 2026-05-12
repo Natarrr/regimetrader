@@ -6,7 +6,7 @@ credible, costly-to-fake signal. This pipeline sources it from two layers:
   1. SEC EDGAR daily index  — Form 4 filings (free, cached 24 h)
   2. FMP insider-trading    — structured buy/sell with role classification
      (1 API call/day; TTL 12 h)
-  3. yfinance               — news sentiment + VIX macro (free)
+  3. yfinance               — news sentiment + 20-day price momentum (free)
 
 FMP budget: ≤ 2 calls per run (profile batch + insider list).
 With caching, repeated intraday runs spend 0 additional FMP calls.
@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -43,7 +44,7 @@ WEIGHTS = {
     "insider":  0.25,
     "congress": 0.20,
     "news":     0.15,
-    "macro":    0.10,
+    "momentum": 0.10,
 }
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
@@ -53,16 +54,6 @@ _CONGRESS_TTL_HOURS = 24
 _HOUSE_URL   = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 _SENATE_URL  = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 _INVALID_TICKERS = frozenset({"N/A", "--", "", "NONE", "NO TICKER"})
-
-# ── VIX → macro score ──────────────────────────────────────────────────────────
-_VIX_MACRO = [
-    (45.0, 0.20),   # Crash
-    (35.0, 0.35),   # Panic
-    (25.0, 0.50),   # Bear
-    (15.0, 0.65),   # Neutral
-    (12.0, 0.80),   # Bull
-    (0.0,  0.90),   # Euphoria
-]
 
 # ── Bull/bear word lists for news scoring ──────────────────────────────────────
 _BULL = frozenset([
@@ -130,15 +121,21 @@ def _fmp_get(path: str, params: Dict, timeout: int = 20) -> Any:
 
 
 def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
-    """Fama (2013): batch profile fetch — 1 FMP call for all tickers."""
-    data = _fmp_get("profile", {"symbol": ",".join(tickers)})
-    if not data or not isinstance(data, list):
-        return {}
-    return {
-        row.get("symbol", ""): float(row.get("mktCap") or 0)
-        for row in data
-        if row.get("symbol")
-    }
+    """Fama (2013 Nobel): batch profile fetch — ≤2 FMP calls for 160 tickers (chunks of 100).
+
+    FMP /stable/profile accepts comma-separated symbols. Chunking at 100 keeps
+    each request well within URL length limits and allows partial success.
+    """
+    result: Dict[str, float] = {}
+    for i in range(0, len(tickers), 100):
+        chunk = tickers[i : i + 100]
+        data  = _fmp_get("profile", {"symbol": ",".join(chunk)})
+        if data and isinstance(data, list):
+            for row in data:
+                sym = row.get("symbol", "")
+                if sym:
+                    result[sym] = float(row.get("mktCap") or 0)
+    return result
 
 
 def fetch_fmp_insider_buys(lookback_days: int = 60) -> Dict[str, Dict]:
@@ -252,9 +249,46 @@ def score_congress(data: Optional[Dict]) -> float:
     return round((raw + 1) / 2, 4)             # $\to (0, 1)$
 
 
+def fetch_price_data(ticker: str) -> Dict[str, float]:
+    """Thaler (2017 Nobel) — 20-day price return for behavioral momentum.
+
+    $r_{20d} = (P_t - P_{t-20}) / P_{t-20}$
+
+    Returns {"return_20d": float} where float ∈ ℝ (unbounded before normalization).
+    Returns {"return_20d": 0.0} on any error — treated as neutral after
+    cross-sectional normalization.
+    """
+    try:
+        import yfinance as yf
+        df = yf.download(ticker, period="1mo", interval="1d",
+                         progress=False, auto_adjust=True)
+        if df is None or df.empty or len(df) < 5:
+            return {"return_20d": 0.0}
+        close = df["Close"].squeeze().dropna()
+        if len(close) < 2:
+            return {"return_20d": 0.0}
+        ret = float((close.iloc[-1] - close.iloc[0]) / close.iloc[0])
+        return {"return_20d": ret}
+    except Exception:
+        return {"return_20d": 0.0}
+
+
+def score_momentum(return_20d: float) -> float:
+    """Thaler (2017 Nobel) — map 20-day return to pre-normalization score ∈ [0.10, 0.90].
+
+    Clips return at ±30% before mapping:
+    $score = 0.10 + \\frac{clip(r, -0.30, 0.30) + 0.30}{0.60} \\times 0.80$
+
+    This bounded value is subsequently normalized cross-sectionally across the
+    universe in generate_top_lists.py; absolute value matters less than ordering.
+    """
+    r = max(-0.30, min(0.30, return_20d))
+    return round(0.10 + (r + 0.30) / 0.60 * 0.80, 4)
+
+
 # ── EDGAR Form 4 counter ───────────────────────────────────────────────────────
 
-def count_edgar_form4(ticker: str, lookback_days: int = 90) -> int:
+def count_edgar_form4(ticker: str, lookback_days: int = 180) -> int:
     """Stiglitz (2001 Nobel) — count Form 4 insider filings from EDGAR daily index."""
     try:
         from regime_trader.services.edgar_index import EdgarDailyIndex
@@ -304,27 +338,6 @@ def score_news(ticker: str, max_items: int = 8) -> float:
         return 0.50
 
 
-def fetch_vix() -> float:
-    """Engle (2003 Nobel) — fetch latest VIX close via yfinance."""
-    try:
-        import yfinance as yf
-        df = yf.download("^VIX", period="3d", interval="1d",
-                         progress=False, auto_adjust=True)
-        if df.empty:
-            return 20.0
-        return float(df["Close"].squeeze().dropna().iloc[-1])
-    except Exception:
-        return 20.0
-
-
-def vix_to_macro(vix: float) -> float:
-    """Engle (2003 Nobel) — map VIX level to macro score ∈ [0.20, 0.90]."""
-    for threshold, score in _VIX_MACRO:
-        if vix >= threshold:
-            return score
-    return 0.90
-
-
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
@@ -364,17 +377,17 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     t0 = time.time()
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
 
-    # ── FMP: 2 calls ──────────────────────────────────────────────────────────
-    log.info("Fetching FMP profiles (1 call)…")
+    # ── FMP: profile (chunked) + insider ─────────────────────────────────────
+    log.info("Fetching FMP profiles (chunked at 100)…")
     mktcaps = fetch_fmp_profiles(tickers)
     log.info("Fetching FMP insider buys (1 call)…")
     fmp_insider = fetch_fmp_insider_buys()
-    fmp_count = (1 if mktcaps else 0) + (1 if fmp_insider else 0)
+    n_profile_chunks = math.ceil(len(tickers) / 100) if tickers else 0
+    fmp_count = (n_profile_chunks if mktcaps else 0) + (1 if fmp_insider else 0)
 
-    # ── Macro: yfinance VIX ───────────────────────────────────────────────────
-    vix = fetch_vix()
-    macro_score = vix_to_macro(vix)
-    log.info("VIX=%.1f  macro_score=%.2f", vix, macro_score)
+    # ── Congress feed ─────────────────────────────────────────────────────────
+    log.info("Fetching congress trading data…")
+    congress_data = fetch_congress_buys()
 
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
@@ -386,20 +399,22 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             form4_count = count_edgar_form4(ticker)
             e_score     = score_edgar(form4_count)
             i_score, ceo_buy = score_insider(fmp_insider.get(ticker))
+            c_score     = score_congress(congress_data.get(ticker))
             n_score     = score_news(ticker)
+            price_data  = fetch_price_data(ticker)
+            m_score     = score_momentum(price_data["return_20d"])
             return {
-                "ticker":         ticker,
-                "sector":         sector.get(ticker, "Unknown"),
-                "cap_tier":       cap_tier.get(ticker, "large"),
-                "market_cap":     mktcaps.get(ticker, 0.0),
-                "edgar_score":    e_score,
-                "insider_score":  i_score,
-                "congress_score": 0.50,   # not fetched — FMP budget preserved
-                "news_score":     n_score,
-                "macro_score":    macro_score,
-                "ceo_buy":        ceo_buy,
-                "form4_count":    form4_count,
-                "vix":            vix,
+                "ticker":           ticker,
+                "sector":           sector.get(ticker, "Unknown"),
+                "cap_tier":         cap_tier.get(ticker, "large"),
+                "market_cap":       mktcaps.get(ticker, 0.0),
+                "edgar_score":      e_score,
+                "insider_score":    i_score,
+                "congress_score":   c_score,
+                "news_score":       n_score,
+                "momentum_score":   m_score,
+                "ceo_buy":          ceo_buy,
+                "form4_count":      form4_count,
             }
         except Exception as exc:
             log.warning("Scoring failed for %s: %s", ticker, exc)
@@ -409,8 +424,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "market_cap": 0.0,
                 "edgar_score": 0.30, "insider_score": 0.50,
                 "congress_score": 0.50, "news_score": 0.50,
-                "macro_score": macro_score, "ceo_buy": False,
-                "form4_count": 0, "vix": vix,
+                "momentum_score": 0.50, "ceo_buy": False,
+                "form4_count": 0,
             }
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -421,8 +436,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 errors += 1
             results.append(r)
 
-    edgar_count = sum(1 for r in results if r.get("form4_count", 0) > 0)
-    duration    = round(time.time() - t0, 2)
+    edgar_count   = sum(1 for r in results if r.get("form4_count", 0) > 0)
+    congress_count = len(congress_data)
+    duration      = round(time.time() - t0, 2)
 
     status = {
         "_edgar_meta": {
@@ -431,6 +447,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             "ticker_count":         len(tickers),
             "edgar_count":          edgar_count,
             "fmp_count":            fmp_count,
+            "congress_count":       congress_count,
             "error_count":          errors,
         },
         "weights": WEIGHTS,
@@ -440,8 +457,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     out = log_dir / "intel_source_status.json"
     save_json_atomic(out, status)
     log.info(
-        "Done in %.1fs — tickers=%d edgar=%d fmp_calls=%d errors=%d → %s",
-        duration, len(tickers), edgar_count, fmp_count, errors, out,
+        "Done in %.1fs — tickers=%d edgar=%d fmp_calls=%d congress=%d errors=%d → %s",
+        duration, len(tickers), edgar_count, fmp_count, congress_count, errors, out,
     )
     return status
 
