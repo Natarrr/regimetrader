@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, NamedTuple
 
-from utils.atomic_write import atomic_write_json
+from regime_trader.utils.io import atomic_write_json
 
 _STATE_PATH = Path(".monitoring/alert_state.json")
 

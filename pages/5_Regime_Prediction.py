@@ -35,7 +35,7 @@ from backend.data.fred_service import fetch_10y_yield, fetch_2y_yield, fetch_m2_
 
 _HMM_ERR: str = ""
 try:
-    from feature_engineering.feature_engineering import FeatureEngineer
+    from analysis.feature_engineer import FeatureEngineer
     from hmm_engine.classifier import RegimeClassifier
     _HMM_OK = True
 except Exception as _e:

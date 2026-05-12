@@ -23,7 +23,7 @@ from backend.quant_models.volatility_brain import (
     volatility_regime,
     merton_distance_to_default,
 )
-from utils.volatility import annualise_vol_from_condvar
+from regime_trader.utils.volatility import annualise_vol_from_condvar
 
 _CHART_BG = "#050505"
 _CARD_BG  = "#121212"

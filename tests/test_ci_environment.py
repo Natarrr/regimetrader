@@ -53,8 +53,8 @@ def test_analysis_package():
 
 
 def test_regime_package():
-    """regime/ module directory must exist."""
-    assert (ROOT / "regime").is_dir(), "regime/ directory not found"
+    """regime_trader/models/ must exist (regime/ was migrated here)."""
+    assert (ROOT / "regime_trader" / "models").is_dir(), "regime_trader/models/ directory not found"
 
 
 def _ci_provides(pkg: str) -> bool:

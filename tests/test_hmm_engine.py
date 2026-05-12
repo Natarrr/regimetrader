@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from hmm_engine.classifier import RegimeClassifier, RegimeState
-from feature_engineering.feature_engineering import FeatureEngineer
+from analysis.feature_engineer import FeatureEngineer
 
 
 # ── Synthetic data helpers ─────────────────────────────────────────────────────

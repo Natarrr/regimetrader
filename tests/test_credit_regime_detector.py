@@ -33,7 +33,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from regime.credit_regime_detector import (
+from regime_trader.models.credit_regime_detector import (
     CreditFeatures,
     CreditRegime,
     CreditRegimeDetector,
@@ -664,7 +664,7 @@ class TestRegimeDetectorCreditIntegration:
 
     @pytest.fixture(scope="class")
     def ensemble(self):
-        from regime.regime_detector import RegimeDetector
+        from regime_trader.models.regime_detector import RegimeDetector
         import numpy as np
         import pandas as pd
         rng = np.random.default_rng(42)
@@ -687,7 +687,7 @@ class TestRegimeDetectorCreditIntegration:
 
     def test_w_credit_zero_ignores_credit_scores(self, ensemble):
         """When w_credit=0, passing credit_scores has no effect."""
-        from regime.regime_detector import RegimeDetector
+        from regime_trader.models.regime_detector import RegimeDetector
         det_no_credit, vix, ret, idx = ensemble
         credit_scores = pd.Series(np.ones(len(vix)) * 0.99, index=idx)
 
@@ -697,7 +697,7 @@ class TestRegimeDetectorCreditIntegration:
 
     def test_credit_enabled_bull_normal_stays_calm(self, ensemble):
         """All-bull VIX + CREDIT=NORMAL → regime stays in calm range."""
-        from regime.regime_detector import RegimeDetector
+        from regime_trader.models.regime_detector import RegimeDetector
         _, _, _, idx = ensemble
         n = 50
         short_idx = idx[:n]
@@ -714,7 +714,7 @@ class TestRegimeDetectorCreditIntegration:
 
     def test_credit_crisis_prevents_bull_output(self, ensemble):
         """CRISIS credit + neutral-VIX → override forces at least Bear."""
-        from regime.regime_detector import RegimeDetector
+        from regime_trader.models.regime_detector import RegimeDetector
         _, _, _, idx = ensemble
         n = 50
         short_idx = idx[:n]
@@ -738,7 +738,7 @@ class TestRegimeDetectorCreditIntegration:
 
     def test_credit_stress_low_vix_early_warning(self, ensemble):
         """STRESS credit + VIX < 20 → at least Bear (early warning rule)."""
-        from regime.regime_detector import RegimeDetector
+        from regime_trader.models.regime_detector import RegimeDetector
         _, _, _, idx = ensemble
         n = 50
         short_idx = idx[:n]

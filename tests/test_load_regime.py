@@ -57,7 +57,7 @@ class TestLoadRegimeSuccess:
         vix_df = _make_vix_df(18.0)
         with (
             patch("yfinance.download", return_value=vix_df),
-            patch("regime.regime_detector.vix_rule", return_value="Neutral"),
+            patch("regime_trader.models.regime_detector.vix_rule", return_value="Neutral"),
         ):
             result = fn()
         assert "regime" in result
@@ -68,7 +68,7 @@ class TestLoadRegimeSuccess:
         vix_df = _make_vix_df(22.5)
         with (
             patch("yfinance.download", return_value=vix_df),
-            patch("regime.regime_detector.vix_rule", return_value="Bear"),
+            patch("regime_trader.models.regime_detector.vix_rule", return_value="Bear"),
         ):
             result = fn()
         assert abs(result["vix"] - 22.5) < 1e-6
@@ -78,7 +78,7 @@ class TestLoadRegimeSuccess:
         vix_df = _make_vix_df(35.0)
         with (
             patch("yfinance.download", return_value=vix_df),
-            patch("regime.regime_detector.vix_rule", return_value="Panic"),
+            patch("regime_trader.models.regime_detector.vix_rule", return_value="Panic"),
         ):
             result = fn()
         assert result["regime"] == "Panic"
@@ -95,7 +95,7 @@ class TestLoadRegimeSuccess:
         vix_df = _make_vix_df(vix)
         with (
             patch("yfinance.download", return_value=vix_df),
-            patch("regime.regime_detector.vix_rule", return_value=expected_regime) as mock_rule,
+            patch("regime_trader.models.regime_detector.vix_rule", return_value=expected_regime) as mock_rule,
         ):
             result = fn()
         mock_rule.assert_called_once()
@@ -124,7 +124,7 @@ class TestLoadRegimeFallback:
         vix_df = _make_vix_df(20.0)
         with (
             patch("yfinance.download", return_value=vix_df),
-            patch("regime.regime_detector.vix_rule", side_effect=ValueError("bad")),
+            patch("regime_trader.models.regime_detector.vix_rule", side_effect=ValueError("bad")),
         ):
             result = fn()
         assert result["regime"] == "Unknown"

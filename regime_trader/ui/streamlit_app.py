@@ -265,7 +265,7 @@ def _load_regime() -> Dict[str, Any]:
     """Fetch latest VIX and derive market regime label. TTL 5 min."""
     try:
         import yfinance as yf
-        from regime.regime_detector import vix_rule
+        from regime_trader.models.regime_detector import vix_rule
         df = yf.download("^VIX", period="2d", interval="1d",
                          progress=False, auto_adjust=True)
         if df.empty:

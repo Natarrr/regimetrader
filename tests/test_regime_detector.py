@@ -35,7 +35,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from regime.regime_detector import (
+from regime_trader.models.regime_detector import (
     HMMRegimeDetector,
     MLRegimeDetector,
     RegimeDetector,

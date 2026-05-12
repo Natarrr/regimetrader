@@ -43,6 +43,20 @@ def save_json_atomic(path: Path | str, payload: Any, *, indent: int = 2) -> None
         raise
 
 
+def atomic_write_json(path: Path | str, obj: Any, mode: int = 0o644) -> None:
+    """Knuth (Turing 1974) — write JSON to *path* atomically (UTF-8, indent=2).
+
+    Alias for save_json_atomic kept for back-compat with monitoring modules.
+    The *mode* argument is accepted but is a best-effort chmod on Windows.
+    """
+    save_json_atomic(path, obj)
+    try:
+        import os as _os
+        _os.chmod(str(path), mode)
+    except (OSError, NotImplementedError):
+        pass
+
+
 def load_json_safe(path: Path | str, default: Any = None) -> Any:
     """Read and parse a JSON file; return *default* on any error.
 

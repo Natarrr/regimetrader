@@ -16,7 +16,7 @@ import pandas as pd
 from arch import arch_model
 from scipy import optimize, stats
 
-from utils.volatility import annualise_vol_from_condvar
+from regime_trader.utils.volatility import annualise_vol_from_condvar
 
 
 # ── GJR-GARCH ─────────────────────────────────────────────────────────────────
