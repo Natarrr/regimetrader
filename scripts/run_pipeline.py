@@ -135,6 +135,8 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
                 sym = row.get("symbol", "")
                 if sym:
                     result[sym] = float(row.get("mktCap") or 0)
+        else:
+            log.warning("FMP profile chunk %d–%d returned no data", i, i + len(chunk) - 1)
     return result
 
 
@@ -269,7 +271,8 @@ def fetch_price_data(ticker: str) -> Dict[str, float]:
             return {"return_20d": 0.0}
         ret = float((close.iloc[-1] - close.iloc[0]) / close.iloc[0])
         return {"return_20d": ret}
-    except Exception:
+    except Exception as exc:
+        log.debug("fetch_price_data %s failed: %s", ticker, exc)
         return {"return_20d": 0.0}
 
 
