@@ -52,7 +52,7 @@ CONGRESS_CACHE_PATH = ROOT / ".cache" / "congress_cache.json"
 _CONGRESS_TTL_HOURS = 24
 _HOUSE_URL   = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 _SENATE_URL  = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
-_INVALID_TICKERS = frozenset({"N/A", "--", "", "NONE"})
+_INVALID_TICKERS = frozenset({"N/A", "--", "", "NONE", "NO TICKER"})
 
 # ── VIX → macro score ──────────────────────────────────────────────────────────
 _VIX_MACRO = [
@@ -243,11 +243,11 @@ def score_congress(data: Optional[Dict]) -> float:
     """
     if not data:
         return 0.50
-    total = int(data.get("total", 0))
-    if total == 0:
-        return 0.50
     purchases = int(data.get("purchases", 0))
     sales     = int(data.get("sales", 0))
+    total     = purchases + sales   # compute from actual values, not stored field
+    if total == 0:
+        return 0.50
     raw = (purchases - sales) / (total + 1)   # $\in (-1, 1)$
     return round((raw + 1) / 2, 4)             # $\to (0, 1)$
 
