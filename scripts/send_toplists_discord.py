@@ -57,7 +57,7 @@ _FACTOR_EMOJI = {
     "insider":  "🏦",
     "congress": "🏛️",
     "news":     "📰",
-    "macro":    "🌍",
+    "momentum": "📈",   # was "macro": "🌍"
 }
 
 _BADGE_EMOJI = {
@@ -76,9 +76,9 @@ def _score_bar(score: float, width: int = 8) -> str:
 
 
 def _format_factor_line(factors: Dict[str, float]) -> str:
-    """One compact line: 📋0.72 🏦0.90 🏛️0.50 📰0.65 🌍0.58"""
+    """One compact line: 📋0.72 🏦0.90 🏛️0.50 📰0.65 📈0.58"""
     parts = []
-    for key in ("edgar", "insider", "congress", "news", "macro"):
+    for key in ("edgar", "insider", "congress", "news", "momentum"):
         v = factors.get(key, 0.50)
         parts.append(f"{_FACTOR_EMOJI[key]}`{v:.2f}`")
     return "  ".join(parts)
@@ -203,7 +203,7 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
         {
             "name":   "📊 Factor Legend",
             "value":  (
-                "📋 EDGAR  🏦 Insider  🏛️ Congress/Inst  📰 News  🌍 Macro\n"
+                "📋 EDGAR  🏦 Insider  🏛️ Congress/Inst  📰 News  📈 Momentum\n"
                 "Scores ∈ [0,1] · 0.50 = neutral · >0.65 = strong buy signal"
             ),
             "inline": False,
