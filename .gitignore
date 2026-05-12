@@ -96,6 +96,11 @@ data_cache/
 *.h5
 *.hdf5
 
+# ── Generated audit reports ───────────────────────────────────────────────────
+docs/superpowers/specs/audit-report.json
+docs/superpowers/specs/audit-report.md
+docs/superpowers/specs/*-consistency-audit-decisions.md
+
 # ── API response cache (may contain partial key material in URL fragments) ────
 .cache/
 
