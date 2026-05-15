@@ -107,7 +107,7 @@ jobs:
           logging.basicConfig(level=logging.INFO)
           sys.path.insert(0, ".")
 
-          from regime_trader.discovery_scanner import get_top_alpha_picks_sync
+          from regime_trader.scanners.discovery_scanner import get_top_alpha_picks_sync
           from analysis.earnings_analyzer import build_shortlist
 
           payload = get_top_alpha_picks_sync(limit=20)
