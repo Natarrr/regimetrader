@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from scripts.generate_top_lists import _cross_sectional_normalize, FACTOR_FIELDS
+from backend.market_intel.generate_top_lists import _cross_sectional_normalize, FACTOR_FIELDS
 
 
 def _make_results(n: int, overrides: dict | None = None) -> list:
@@ -57,7 +57,7 @@ class TestCrossSectionalNormalize:
         results = _make_results(3)
         normed  = _cross_sectional_normalize(results)
         for row in normed:
-            assert set(row.keys()) == {"edgar", "insider", "congress", "news", "momentum"}
+            assert set(row.keys()) == {"edgar", "insider", "congress", "news", "macro"}
 
     def test_output_length_matches_input(self):
         results = _make_results(7)
@@ -70,13 +70,14 @@ class TestCrossSectionalNormalize:
         normed  = _cross_sectional_normalize(results)
         assert normed[0]["edgar"] == pytest.approx(0.5, abs=1e-4)
 
-    def test_congress_factor_key_renamed(self):
-        """FACTOR_FIELDS maps congress_score → 'congress' (not 'macro')."""
+    def test_congress_factor_key_present(self):
+        """FACTOR_FIELDS maps 'congress' → congress_score."""
         assert FACTOR_FIELDS.get("congress") == "congress_score"
-        assert "macro" not in FACTOR_FIELDS
+        assert "momentum" not in FACTOR_FIELDS
 
-    def test_momentum_factor_present(self):
-        assert FACTOR_FIELDS.get("momentum") == "momentum_score"
+    def test_macro_factor_present(self):
+        """FACTOR_FIELDS maps 'macro' → momentum_score (pipeline field name)."""
+        assert FACTOR_FIELDS.get("macro") == "momentum_score"
 
     def test_2008_crash_outlier_does_not_collapse_scores(self):
         """2020 COVID analog: one ticker with extreme momentum → others not collapsed to 0."""
@@ -84,5 +85,5 @@ class TestCrossSectionalNormalize:
         results = _make_results(50, {"momentum_score": scores})
         normed  = _cross_sectional_normalize(results)
         # The 49 normal tickers should not all map to near-zero
-        normal_scores = [normed[i]["momentum"] for i in range(49)]
+        normal_scores = [normed[i]["macro"] for i in range(49)]
         assert max(normal_scores) > 0.30   # not all collapsed

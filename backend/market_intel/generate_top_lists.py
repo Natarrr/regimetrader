@@ -1,10 +1,10 @@
-"""scripts/generate_top_lists.py
+"""backend/market_intel/generate_top_lists.py
 Five-factor weighted scoring → top_lists.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
 and applies Markowitz (1990 Nobel) portfolio ranking:
 
-  final_score = 0.30×edgar + 0.25×insider + 0.20×congress + 0.15×news + 0.10×momentum
+  final_score = 0.30×edgar + 0.25×insider + 0.20×congress + 0.15×news + 0.10×macro
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -23,8 +23,8 @@ Output:
   logs/top5.csv       — flat reference file for downstream analysis
 
 Usage:
-  python scripts/generate_top_lists.py --log-dir logs --run-id $GITHUB_RUN_ID
-  python scripts/generate_top_lists.py --force --verbose
+  python -m backend.market_intel.generate_top_lists --log-dir logs --run-id $GITHUB_RUN_ID
+  python -m backend.market_intel.generate_top_lists --force --verbose
 """
 from __future__ import annotations
 
@@ -36,10 +36,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import numpy as np
 
@@ -53,7 +49,7 @@ WEIGHTS: Dict[str, float] = {
     "insider":  0.25,
     "congress": 0.20,
     "news":     0.15,
-    "momentum": 0.10,   # renamed from macro
+    "macro":    0.10,
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -62,7 +58,7 @@ FACTOR_FIELDS: Dict[str, str] = {
     "insider":  "insider_score",
     "congress": "congress_score",
     "news":     "news_score",
-    "momentum": "momentum_score",
+    "macro":    "momentum_score",  # pipeline writes momentum_score; exposed as macro
 }
 
 _BADGES = [
@@ -77,7 +73,6 @@ _MID_CUTOFF   = 35   # ranks 21–35; 36+ → small
 
 
 def _badge(score: float) -> str:
-    """Sharpe-inspired — map final_score to buy/watchlist tier."""
     for threshold, label in _BADGES:
         if score >= threshold:
             return label
@@ -92,13 +87,6 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     all identical scores receives 0.5 (neutral) for that factor.
 
     $x_{norm,i} = \\frac{winsorize(x_i) - \\min}{\\max - \\min}$
-
-    Args:
-        results: List of raw result dicts from intel_source_status.json.
-
-    Returns:
-        One dict per result with keys matching FACTOR_FIELDS (edgar, insider,
-        congress, news, momentum), values normalized to [0, 1].
     """
     n = len(results)
     if n == 0:
@@ -108,13 +96,10 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     for factor, field in FACTOR_FIELDS.items():
         raw = np.array([float(r.get(field, 0.0)) for r in results])
         if n == 1 or float(np.nanmax(raw)) == float(np.nanmin(raw)):
-            # No variance — return neutral 0.5 for all entries
             normed_factors[factor] = np.full(n, 0.5)
         else:
             scaled = normalize_score(raw, lo_pct=5, hi_pct=95) / 100.0
             if float(np.nanmax(scaled)) == float(np.nanmin(scaled)):
-                # Winsorizing collapsed all variance (e.g. extreme outlier absorbed
-                # by percentile clipping) — return neutral 0.5 for all entries
                 normed_factors[factor] = np.full(n, 0.5)
             else:
                 normed_factors[factor] = scaled
@@ -126,13 +111,12 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
 
 
 def _to_entry(row: Dict[str, Any], norm_factors: Dict[str, float]) -> Dict[str, Any]:
-    """Markowitz (1990 Nobel) — build a ranked-list entry from a normalized factor dict."""
     score = round(
         WEIGHTS["edgar"]    * norm_factors["edgar"] +
         WEIGHTS["insider"]  * norm_factors["insider"] +
         WEIGHTS["congress"] * norm_factors["congress"] +
         WEIGHTS["news"]     * norm_factors["news"] +
-        WEIGHTS["momentum"] * norm_factors["momentum"],
+        WEIGHTS["macro"]    * norm_factors["macro"],
         4,
     )
     return {
@@ -149,13 +133,6 @@ def _to_entry(row: Dict[str, Any], norm_factors: Dict[str, float]) -> Dict[str, 
 
 
 def _assign_cap_tiers(entries: List[Dict[str, Any]]) -> None:
-    """Markowitz (1990 Nobel) — assign relative cap tiers within universe.
-
-    Sorts entries by market_cap descending and overwrites cap_tier in-place:
-      ranks 1–20  → large
-      ranks 21–35 → mid
-      ranks 36+   → small
-    """
     by_mktcap = sorted(entries, key=lambda e: e["market_cap"], reverse=True)
     for rank, entry in enumerate(by_mktcap, 1):
         if rank <= _LARGE_CUTOFF:
@@ -171,16 +148,7 @@ def generate(
     run_id: str,
     log_dir: Path,
 ) -> Dict[str, Any]:
-    """Markowitz (1990 Nobel) — score, rank, and tier the full ticker universe.
-
-    Args:
-        status:  Parsed intel_source_status.json from run_pipeline.py.
-        run_id:  Identifier stamped into generated_at metadata (e.g. GitHub run ID).
-        log_dir: Output directory for top_lists.json and top5.csv.
-
-    Returns:
-        The top_lists dict written to disk.
-    """
+    """Score, rank, and tier the full ticker universe."""
     results = status.get("results", [])
     if not results:
         log.warning("No results found in intel_source_status.json — producing empty top_lists")
@@ -230,7 +198,7 @@ def generate(
         writer.writerow([
             "rank", "ticker", "sector", "cap_tier", "market_cap",
             "final_score", "badge", "ceo_buy", "form4_count",
-            "edgar", "insider", "congress", "news", "momentum",
+            "edgar", "insider", "congress", "news", "macro",
         ])
         for rank, entry in enumerate(top_buys, 1):
             f = entry["factors"]
@@ -244,7 +212,7 @@ def generate(
                 entry["badge"],
                 entry["ceo_buy"],
                 entry["form4_count"],
-                f["edgar"], f["insider"], f["congress"], f["news"], f["momentum"],
+                f["edgar"], f["insider"], f["congress"], f["news"], f["macro"],
             ])
     log.info("Wrote %s", out_csv)
 
@@ -272,7 +240,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     status_path = args.log_dir / "intel_source_status.json"
     if not status_path.exists():
-        log.error("intel_source_status.json not found at %s — run scripts/run_pipeline.py first", status_path)
+        log.error(
+            "intel_source_status.json not found at %s — run scripts/run_pipeline.py first",
+            status_path,
+        )
         return 1
 
     try:
