@@ -71,7 +71,7 @@ jobs:
       - name: EDGAR full-universe fetch
         id: edgar_fetch
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || '' }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |

@@ -50,7 +50,7 @@ jobs:
       # ── 4. EDGAR-first pipeline ─────────────────────────────────────────────
       - name: Run EDGAR pipeline
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || '' }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |

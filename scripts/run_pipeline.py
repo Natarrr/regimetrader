@@ -282,23 +282,28 @@ def score_momentum(return_20d: float) -> float:
 def _sec_get(url: str, timeout: int = 20):
     """Rate-limited GET to any SEC endpoint (data.sec.gov or www.sec.gov/Archives).
 
-    Uses a module-level shared lock so all worker threads together stay under
-    the SEC's 10 req/sec guidance.  Raises requests.HTTPError on non-200.
+    Uses a module-level shared lock so all worker threads together respect the
+    SEC's 10 req/sec guidance.  Lock is released BEFORE the HTTP call so
+    threads can execute requests in parallel within the rate budget.
+
+    Raises requests.HTTPError on non-200.
     """
     global _SEC_RATE_LAST
     import requests as _req
-    headers = {
-        "User-Agent": os.getenv(
-            "EDGAR_USER_AGENT", "regime-trader-research infra-team@example.com"
-        ),
-        "Accept-Encoding": "gzip, deflate",
-    }
+    # `or` handles both absent key AND empty-string (e.g. when secret is unset
+    # and workflow sets EDGAR_USER_AGENT='').  An empty User-Agent causes 403.
+    ua = os.getenv("EDGAR_USER_AGENT") or "regime-trader-research n.tardy@hotmail.fr"
+    headers = {"User-Agent": ua, "Accept-Encoding": "gzip, deflate"}
+
+    # Hold lock only for the rate-limit sleep + timestamp update, NOT for the
+    # HTTP call — allows genuine parallelism across worker threads.
     with _SEC_RATE_LOCK:
         elapsed = time.time() - _SEC_RATE_LAST
         if elapsed < _SEC_MIN_DELAY:
             time.sleep(_SEC_MIN_DELAY - elapsed)
-        resp = _req.get(url, headers=headers, timeout=timeout)
         _SEC_RATE_LAST = time.time()
+
+    resp = _req.get(url, headers=headers, timeout=timeout)
     resp.raise_for_status()
     return resp
 
@@ -533,6 +538,19 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
     t0 = time.time()
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
+
+    # ── EDGAR connectivity preflight ──────────────────────────────────────────
+    # Log the effective User-Agent and test data.sec.gov with AAPL (CIK 320193).
+    # This diagnostic appears in verbose CI output and helps trace 403/timeout.
+    _ua = os.getenv("EDGAR_USER_AGENT") or "regime-trader-research n.tardy@hotmail.fr"
+    log.info("EDGAR User-Agent: %.40s%s", _ua, "…" if len(_ua) > 40 else "")
+    try:
+        _test = _sec_get("https://data.sec.gov/submissions/CIK0000320193.json", timeout=15)
+        _d = _test.json().get("filings", {}).get("recent", {})
+        _f4 = sum(1 for f in _d.get("form", []) if f == "4")
+        log.info("EDGAR preflight OK — AAPL submissions: %d form4 filings", _f4)
+    except Exception as _exc:
+        log.warning("EDGAR preflight FAILED — data.sec.gov unreachable: %s", _exc)
 
     # ── FMP: profile (chunked) — insider now uses yfinance per-ticker ────────
     log.info("Fetching FMP profiles (chunked at 100)…")
