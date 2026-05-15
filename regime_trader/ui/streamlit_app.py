@@ -23,10 +23,12 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -75,28 +77,42 @@ except ImportError:
 
 # ── Page module loader ────────────────────────────────────────────────────────
 
+_PAGE_MODULE_MTIMES: dict[str, float] = {}
+
+
 def _load_page_module(name: str, filename: str):
-    """Load a page module once; cache it in sys.modules so @st.cache_data persists.
+    """Load a page module; re-execute if the source file has changed since last load.
+
+    Caches the module in sys.modules so @st.cache_data survives across Streamlit
+    re-runs, but invalidates the cache automatically on file modification so that
+    code changes take effect without a full process restart.
 
     Returns the module or None if the file is missing / imports fail.
     """
-    key = f"_rt_page_{name}"
-    if key in sys.modules:
-        return sys.modules[key]
+    key  = f"_rt_page_{name}"
     path = _PAGES_DIR / filename
     if not path.exists():
         log.warning("Page file not found: %s", path)
         return None
+
+    current_mtime = path.stat().st_mtime
+    if key in sys.modules and _PAGE_MODULE_MTIMES.get(key) == current_mtime:
+        return sys.modules[key]
+
+    if key in sys.modules:
+        log.info("Page %s modified — reloading", filename)
+
     try:
         spec = importlib.util.spec_from_file_location(key, path)
         mod  = importlib.util.module_from_spec(spec)
         sys.modules[key] = mod
         spec.loader.exec_module(mod)
+        _PAGE_MODULE_MTIMES[key] = current_mtime
         return mod
     except Exception as exc:
         log.warning("Failed to load page %s: %s", filename, exc)
-        # Remove partial entry so next run retries
         sys.modules.pop(key, None)
+        _PAGE_MODULE_MTIMES.pop(key, None)
         return None
 
 
@@ -132,6 +148,25 @@ def _safe_payload() -> Dict[str, Any]:
 
 
 # ── Cached data loaders ───────────────────────────────────────────────────────
+
+_STATE_FILE = _ROOT / "data" / "market_state.json"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_market_state() -> Optional[Dict[str, Any]]:
+    """Read engine-produced market_state.json with a 60 s TTL.
+
+    Returns the parsed dict (keys: last_updated, macro_status, alpha_picks)
+    or None when the file is absent or corrupted — caller shows Engine Offline.
+    """
+    try:
+        return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        log.warning("market_state.json read failed: %s", exc)
+        return None
+
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def _load_discovery(limit: int = 5) -> Dict[str, Any]:
@@ -231,14 +266,17 @@ def _load_alpaca_account() -> Dict[str, Any]:
         daily_pnl_pct = (daily_pnl / last_equity * 100) if last_equity else 0.0
 
         pos_rows = []
+        amount_invested = 0.0
         for p in sorted(positions, key=lambda x: float(x.market_value or 0), reverse=True):
+            mkt_val = float(p.market_value or 0)
+            amount_invested += mkt_val
             pos_rows.append({
                 "Symbol":    p.symbol,
                 "Side":      p.side.value.capitalize(),
                 "Qty":       float(p.qty),
                 "Entry":     float(p.avg_entry_price),
                 "Price":     float(p.current_price),
-                "Mkt Value": float(p.market_value),
+                "Mkt Value": mkt_val,
                 "Unreal. P&L": float(p.unrealized_pl),
                 "Unreal. %": float(p.unrealized_plpc) * 100,
                 "Day P&L":   float(p.unrealized_intraday_pl),
@@ -246,14 +284,16 @@ def _load_alpaca_account() -> Dict[str, Any]:
             })
 
         return {
-            "equity":          equity,
-            "buying_power":    float(acct.buying_power),
-            "portfolio_value": float(acct.portfolio_value),
-            "daily_pnl":       daily_pnl,
-            "daily_pnl_pct":   daily_pnl_pct,
-            "positions":       pos_rows,
-            "status":          acct.status.value,
-            "paper":           _ALPACA_PAPER,
+            "equity":           equity,
+            "buying_power":     float(acct.buying_power),
+            "cash":             float(acct.cash),
+            "amount_invested":  amount_invested,
+            "portfolio_value":  float(acct.portfolio_value),
+            "daily_pnl":        daily_pnl,
+            "daily_pnl_pct":    daily_pnl_pct,
+            "positions":        pos_rows,
+            "status":           acct.status.value,
+            "paper":            _ALPACA_PAPER,
         }
     except Exception as exc:
         log.warning("Alpaca account load failed: %s", exc)
@@ -293,6 +333,124 @@ def _load_vix_history() -> Optional[List[float]]:
         return None
 
 
+_PERIOD_MAP = {"1W": ("1W", "1H"), "1M": ("1M", "1D"), "3M": ("3M", "1D"), "1Y": ("1A", "1D")}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_portfolio_history(period: str = "1M") -> Optional[Dict[str, Any]]:
+    """Fetch Alpaca portfolio equity history for the given period.
+
+    Args:
+        period: One of '1W', '1M', '3M', '1Y'.
+
+    Returns:
+        Dict with keys timestamps, equity, profit_loss_pct, base_value — or None.
+    """
+    if not _HAS_ALPACA:
+        return None
+    try:
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+        alpaca_period, timeframe = _PERIOD_MAP.get(period, ("1M", "1D"))
+        client = TradingClient(_ALPACA_KEY, _ALPACA_SECRET, paper=_ALPACA_PAPER)
+        req = GetPortfolioHistoryRequest(period=alpaca_period, timeframe=timeframe)
+        h = client.get_portfolio_history(filter=req)
+
+        # Filter out None equity entries (market closures)
+        pairs = [
+            (datetime.fromtimestamp(t, tz=timezone.utc), e)
+            for t, e in zip(h.timestamp, h.equity)
+            if e is not None
+        ]
+        if not pairs:
+            return None
+
+        timestamps, equity = zip(*pairs)
+        return {
+            "timestamps":      list(timestamps),
+            "equity":          list(equity),
+            "profit_loss_pct": [p for p, e in zip(h.profit_loss_pct or [], h.equity or []) if e is not None],
+            "base_value":      h.base_value,
+        }
+    except Exception as exc:
+        log.warning("Portfolio history load failed: %s", exc)
+        return None
+
+
+def _render_portfolio_chart(history: Dict[str, Any]) -> None:
+    """Render a Revolut-style portfolio performance line chart using Plotly.
+
+    Design principles (Revolut aesthetic):
+      - Gradient area fill below the equity curve (green/red based on P&L direction)
+      - Smooth spline line with no markers
+      - Transparent plot background blending into Streamlit dark theme
+      - Minimal axes: no x-gridlines, subtle y-gridlines on the right
+      - Clean hover tooltip showing dollar value and date
+    """
+    import plotly.graph_objects as go
+
+    timestamps = history["timestamps"]
+    equity     = history["equity"]
+
+    if len(equity) < 2:
+        st.caption("Not enough data to render chart.")
+        return
+
+    base     = equity[0]
+    current  = equity[-1]
+    positive = current >= base
+
+    line_color = "#00d26a" if positive else "#ff4d6d"
+    fill_rgba  = "rgba(0,210,106,0.12)" if positive else "rgba(255,77,109,0.12)"
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=timestamps,
+        y=equity,
+        fill="tozeroy",
+        fillcolor=fill_rgba,
+        line=dict(color=line_color, width=2.5, shape="spline", smoothing=0.7),
+        mode="lines",
+        hovertemplate="<b>$%{y:,.2f}</b><br>%{x|%b %d, %Y}<extra></extra>",
+    ))
+
+    # Baseline reference — subtle dashed line at opening value
+    fig.add_hline(
+        y=base,
+        line=dict(color="rgba(255,255,255,0.15)", width=1, dash="dot"),
+    )
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=8, b=0),
+        xaxis=dict(
+            showgrid=False,
+            showline=False,
+            zeroline=False,
+            tickfont=dict(color="#8b8b9e", size=11),
+            tickformat="%b %d",
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.05)",
+            gridwidth=1,
+            showline=False,
+            zeroline=False,
+            tickfont=dict(color="#8b8b9e", size=11),
+            tickformat="$,.0f",
+            side="right",
+        ),
+        hovermode="x unified",
+        showlegend=False,
+        height=240,
+    )
+
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
 # ── Sidebar: navigation + settings ───────────────────────────────────────────
 
 _NAV_PAGES = [
@@ -321,9 +479,10 @@ def _render_sidebar() -> str:
         st.markdown("## ⚙️ Settings")
 
         with st.expander("Cache controls", expanded=False):
-            if st.button("Clear discovery cache", key="clear_disc"):
+            if st.button("Clear engine state cache", key="clear_disc"):
+                _load_market_state.clear()
                 _load_discovery.clear()
-                st.success("Discovery cache cleared.")
+                st.success("Engine state + discovery cache cleared.")
             if st.button("Clear commodity cache", key="clear_comm"):
                 _load_commodity_prices.clear()
                 _load_macro_indicators.clear()
@@ -332,6 +491,7 @@ def _render_sidebar() -> str:
                 _load_alpaca_account.clear()
                 _load_regime.clear()
                 _load_vix_history.clear()
+                _load_portfolio_history.clear()
                 st.success("Account / regime cache cleared.")
 
         with st.expander("Environment", expanded=False):
@@ -363,14 +523,61 @@ def _require_fmp() -> bool:
 
 # ── Dashboard tab renderers ───────────────────────────────────────────────────
 
+_CSS = """
+<style>
+/* ── Metric cards — Revolut-style glass cards ── */
+div[data-testid="metric-container"] {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 18px 22px 14px;
+}
+/* Metric value */
+div[data-testid="metric-container"] > label + div {
+    font-size: 1.55rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.02em;
+}
+/* Metric label */
+div[data-testid="metric-container"] > label {
+    font-size: 0.72rem !important;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.55;
+}
+/* Dataframe rounded corners */
+div[data-testid="stDataFrame"] > div {
+    border-radius: 12px;
+    overflow: hidden;
+}
+/* Period selector pills — compact */
+div[data-testid="stHorizontalBlock"] .stRadio > div {
+    flex-direction: row;
+    gap: 6px;
+}
+</style>
+"""
+
+
 def _render_live_monitor() -> None:
-    """Render the Live Monitor tab — live regime + Alpaca account + VIX sparkline."""
+    """Render the Live Monitor tab — Revolut-style layout.
+
+    Layout:
+      Row 1  : Regime  |  Portfolio Value  |  Daily P&L   (primary KPIs)
+      Section: Portfolio performance chart  (Revolut-style, period selectable)
+      Row 2  : Invested  |  Cash  |  Open Positions        (balance breakdown)
+      Section: VIX 10-day sparkline
+      Section: Positions table
+    """
+    st.markdown(_CSS, unsafe_allow_html=True)
+
     hdr, btn = st.columns([8, 1])
     hdr.header("Live Monitor")
     if btn.button("↻", key="live_refresh", help="Refresh account data"):
         _load_alpaca_account.clear()
         _load_regime.clear()
         _load_vix_history.clear()
+        _load_portfolio_history.clear()
 
     regime_data = _load_regime()
     regime      = regime_data.get("regime", "Unknown")
@@ -382,18 +589,18 @@ def _render_live_monitor() -> None:
     }
     regime_icon = _REGIME_COLOR.get(regime, "❓")
 
+    # ── No Alpaca credentials — show regime only ──────────────────────────────
     if not _HAS_ALPACA:
         st.warning(
             "**ALPACA_API_KEY / ALPACA_SECRET_KEY not set.** "
             "Add them to `.env` and restart the app.",
             icon="⚠️",
         )
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Regime", f"{regime_icon} {regime}",
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Regime",          f"{regime_icon} {regime}",
                     f"VIX {vix:.1f}" if vix else None)
-        col2.metric("Portfolio Value", "—")
-        col3.metric("Open Positions", "—")
-        col4.metric("Daily P&L", "—")
+        col2.metric("Portfolio Value",  "—")
+        col3.metric("Daily P&L",        "—")
         _render_vix_sparkline()
         return
 
@@ -404,24 +611,59 @@ def _render_live_monitor() -> None:
         st.error(f"Alpaca connection failed: {acct['error']}")
         return
 
-    paper_tag = " · Paper trading" if acct["paper"] else ""
+    paper_tag = " · Paper" if acct["paper"] else ""
     pnl       = acct["daily_pnl"]
     pnl_pct   = acct["daily_pnl_pct"]
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Regime", f"{regime_icon} {regime}",
-                f"VIX {vix:.1f}" if vix else None)
-    col2.metric("Portfolio Value", f"${acct['portfolio_value']:,.2f}")
-    col3.metric("Open Positions",  len(acct["positions"]))
-    col4.metric("Daily P&L",       f"${pnl:+,.2f}", f"{pnl_pct:+.2f}%")
-
-    st.caption(
-        f"Alpaca · Status: **{acct['status']}**{paper_tag} · "
-        f"Buying power: **${acct['buying_power']:,.2f}**"
+    # ── Row 1: Primary KPIs ───────────────────────────────────────────────────
+    col1, col2, col3 = st.columns(3)
+    col1.metric(
+        "Regime",
+        f"{regime_icon} {regime}",
+        f"VIX {vix:.1f}" if vix else None,
+    )
+    col2.metric(
+        "Portfolio Value",
+        f"${acct['portfolio_value']:,.2f}",
+        f"{pnl_pct:+.2f}% today",
+    )
+    col3.metric(
+        "Daily P&L",
+        f"${pnl:+,.2f}",
+        f"{pnl_pct:+.2f}%",
     )
 
+    st.caption(f"Alpaca · Status: **{acct['status']}**{paper_tag}")
+
+    # ── Portfolio performance chart ───────────────────────────────────────────
+    period_col, spacer = st.columns([3, 7])
+    period = period_col.radio(
+        "period",
+        ["1W", "1M", "3M", "1Y"],
+        index=1,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="portfolio_period",
+    )
+
+    with st.spinner("Loading chart…"):
+        port_history = _load_portfolio_history(period)
+
+    if port_history:
+        _render_portfolio_chart(port_history)
+    else:
+        _render_vix_sparkline()
+
+    # ── Row 2: Balance breakdown ──────────────────────────────────────────────
+    col4, col5, col6 = st.columns(3)
+    col4.metric("Invested",       f"${acct['amount_invested']:,.2f}")
+    col5.metric("Cash",           f"${acct['cash']:,.2f}")
+    col6.metric("Open Positions", len(acct["positions"]))
+
+    # ── VIX sparkline (always shown below the portfolio chart) ────────────────
     _render_vix_sparkline()
 
+    # ── Positions table ───────────────────────────────────────────────────────
     st.subheader(f"Positions ({len(acct['positions'])})")
     positions = acct["positions"]
     if not positions:
@@ -443,94 +685,196 @@ def _render_live_monitor() -> None:
 
 
 def _render_vix_sparkline() -> None:
-    """Render a 10-day VIX sparkline below the regime metrics. No-op on failure."""
+    """Render a 10-day VIX sparkline using a Revolut-style Plotly chart. No-op on failure."""
     try:
+        import plotly.graph_objects as go
+
         history = _load_vix_history()
         if not history or len(history) < 2:
             return
-        import pandas as pd
-        df = pd.DataFrame({"VIX": history})
-        st.caption("VIX — 10-day history")
-        st.line_chart(df, height=100, use_container_width=True)
+
+        # VIX above 20 = elevated risk; colour shifts amber → red
+        latest_vix = history[-1]
+        line_color = "#ff4d6d" if latest_vix >= 25 else "#f5a623" if latest_vix >= 18 else "#00d26a"
+        fill_rgba  = f"rgba(245,166,35,0.10)" if latest_vix >= 18 else "rgba(0,210,106,0.10)"
+
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            y=history,
+            fill="tozeroy",
+            fillcolor=fill_rgba,
+            line=dict(color=line_color, width=2, shape="spline", smoothing=0.6),
+            mode="lines",
+            hovertemplate="VIX <b>%{y:.1f}</b><extra></extra>",
+        ))
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=4, b=0),
+            xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(255,255,255,0.04)",
+                showticklabels=True,
+                tickfont=dict(color="#8b8b9e", size=10),
+                zeroline=False,
+                side="right",
+            ),
+            showlegend=False,
+            height=90,
+        )
+        st.caption(f"VIX — 10-day history  ·  latest **{latest_vix:.1f}**")
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     except Exception as exc:
         log.debug("VIX sparkline render failed: %s", exc)
 
 
+def _render_system_health() -> None:
+    """Render the System Health expander with the last 10 lines of main.log."""
+    log_file = _ROOT / "logs" / "main.log"
+    with st.expander("🩺 System Health", expanded=False):
+        st.caption(f"Log: `{log_file}`")
+        try:
+            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            tail = "\n".join(lines[-10:]) if lines else "(empty)"
+            st.code(tail, language="text")
+        except FileNotFoundError:
+            st.info("Log file not found — engine has not run yet.")
+        except Exception as exc:
+            st.warning(f"Could not read log: {exc}")
+
+
 def _render_market_intel() -> None:
-    """Render the Market Intel tab — Smart Money discovery picks + explainability."""
-    st.header("Market Intel — Smart Money Discovery")
-    _require_fmp()
+    """Render the Market Intel tab — dumb UI reading from engine-produced JSON.
 
-    limit = st.slider("Top picks", min_value=3, max_value=20, value=5, step=1)
-
-    col_refresh, col_status = st.columns([1, 4])
-    force = col_refresh.button("Force refresh", key="disc_refresh")
-
-    payload: Dict[str, Any]
-    if force:
-        _load_discovery.clear()
-        try:
-            from regime_trader.scanners.discovery_scanner import force_refresh_sync
-            with st.spinner("Running fresh scan…"):
-                payload = force_refresh_sync(limit=limit)
-            st.success("Scan complete.")
-        except Exception as exc:
-            log.warning("force refresh failed: %s", exc)
-            payload = _safe_payload()
-            st.warning("Scan failed — check application logs.")
-    else:
-        try:
-            with st.spinner("Loading discovery data…"):
-                payload = _load_discovery(limit=limit)
-        except Exception as exc:
-            log.warning("discovery load failed: %s", exc)
-            payload = _safe_payload()
-
-    cached_flag = payload.get("cached", False)
-    computed_at = payload.get("computed_at", "—")
-    col_status.caption(
-        f"{'Cached' if cached_flag else 'Fresh'} · computed {computed_at}"
-    )
-
-    results: List[Dict] = payload.get("results", [])
-
-    if not results:
-        st.info("No discovery results. Check FMP_API_KEY and try Force refresh.")
-        return
-
+    This function makes zero API calls. All computation lives in
+    backend/engine_worker.py which writes data/market_state.json.
+    TTL is 60 s so new engine runs appear within one minute.
+    """
     import pandas as pd
 
-    _INSIDER_PCT_HELP = (
-        "Insider % of Market Cap — values ≤ 1.0 from the scanner are raw fractions "
-        "and are multiplied by 100 for display; values > 1.0 are already percentages."
-    )
+    st.header("Market Intel — Smart Money Discovery")
+
+    # ── Refresh control ───────────────────────────────────────────────────────
+    col_ref, col_ts = st.columns([1, 5])
+    if col_ref.button("🔄 Refresh cache", key="mi_refresh"):
+        _load_market_state.clear()
+        st.rerun()
+
+    # ── Load state ────────────────────────────────────────────────────────────
+    state = _load_market_state()
+
+    if state is None:
+        st.error(
+            "**⚠️ Engine Offline** — `data/market_state.json` not found.\n\n"
+            "Run the engine worker to generate fresh data:\n"
+            "```\npython -m backend.engine_worker\n```"
+        )
+        _render_system_health()
+        return
+
+    last_updated = state.get("last_updated", "—")
+    col_ts.caption(f"Engine snapshot · {last_updated}")
+
+    # ── Macro status banner ───────────────────────────────────────────────────
+    macro = state.get("macro_status", {})
+    regime          = macro.get("regime", "Unknown")
+    conviction      = macro.get("conviction", 0.0)
+    kill_switch     = macro.get("kill_switch_active", False)
+    vix_latest      = macro.get("vix_latest", 0.0)
+
+    _REGIME_COLOR = {
+        "Bull":    "#00FFA3",
+        "Neutral": "#60A5FA",
+        "Bear":    "#FFB347",
+        "Panic":   "#FF6B6B",
+        "Crash":   "#FF2222",
+    }
+    rc = _REGIME_COLOR.get(regime, "#9E9E9E")
+
+    if kill_switch:
+        st.markdown(
+            f"""<div style="background:#3A0000;border:2px solid #FF2222;
+            border-radius:8px;padding:14px 20px;margin:8px 0;">
+            <span style="font-size:1.4em;color:#FF2222;">⛔ MACRO KILL SWITCH ACTIVE</span>
+            <span style="color:#FF8080;margin-left:16px;">
+            Regime: <strong>{regime}</strong> · VIX {vix_latest:.1f} ·
+            All picks are <strong>RISK BLOCKED</strong></span></div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"""<div style="background:{rc}18;border:1px solid {rc};
+            border-radius:8px;padding:10px 20px;margin:8px 0;">
+            <span style="font-size:1.1em;color:{rc};">✅ Regime: <strong>{regime}</strong></span>
+            <span style="color:#B0B0B0;margin-left:16px;">
+            Conviction {conviction:.0%} · VIX {vix_latest:.1f}</span></div>""",
+            unsafe_allow_html=True,
+        )
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Regime", regime)
+    m2.metric("Conviction", f"{conviction:.0%}")
+    m3.metric("VIX", f"{vix_latest:.1f}")
+
+    st.divider()
+
+    # ── Alpha picks table ─────────────────────────────────────────────────────
+    alpha_picks: List[Dict] = state.get("alpha_picks", [])
+
+    if not alpha_picks:
+        st.info("No alpha picks in current state. Run `python -m backend.engine_worker` to populate.")
+        _render_system_health()
+        return
 
     rows = []
-    for r in results:
+    for r in alpha_picks:
         rows.append({
-            "Symbol": r.get("symbol", ""),
-            "Smart Money Score": f"{r.get('smart_money_score', 0):.3f}",
-            "Insider Score": f"{r.get('insider_score', 0):.3f}",
-            "Inst. Score": f"{r.get('institutional_score', 0):.3f}",
-            "Momentum Score": f"{r.get('momentum_score', 0):.3f}",
-            "Insider $": f"${r.get('insider_value_usd', 0):,.0f}",
-            "Insider % MktCap": _fmt_insider_pct(r.get("insider_value_pct_mcap")),
-            "Vol Spike": f"{r.get('volume_spike', 0):.2f}x",
-            "Price Chg": f"{r.get('price_change_pct', 0):+.2f}%",
-            "Sources": ", ".join(r.get("source_flags", [])),
+            "Symbol":        r.get("symbol", ""),
+            "Smart Money":   float(r.get("smart_money_score", 0.0)),
+            "Insider (45%)": float(r.get("insider_score", 0.0)),
+            "Inst. (35%)":   float(r.get("institutional_score", 0.0)),
+            "Momentum (20%)":float(r.get("momentum_score", 0.0)),
+            "Insider $":     float(r.get("insider_value_usd", 0.0)),
+            "Insider % Cap": _fmt_insider_pct(r.get("insider_value_pct_mcap")),
+            "Vol Spike":     f"{r.get('volume_spike', 0.0):.2f}x",
+            "Price Δ":       f"{r.get('price_change_pct', 0.0):+.2f}%",
+            "Risk Block":    "⛔" if r.get("risk_block") else "✅",
+            "Sources":       ", ".join(r.get("source_flags", [])),
         })
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.caption(f"ℹ️ Insider % MktCap: {_INSIDER_PCT_HELP}")
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Smart Money":    st.column_config.ProgressColumn(
+                "Smart Money", help="0.45·Insider + 0.35·Inst + 0.20·Momentum",
+                min_value=0.0, max_value=1.0, format="%.3f",
+            ),
+            "Insider (45%)":  st.column_config.ProgressColumn(
+                "Insider (45%)", min_value=0.0, max_value=1.0, format="%.3f",
+            ),
+            "Inst. (35%)":    st.column_config.ProgressColumn(
+                "Inst. (35%)", min_value=0.0, max_value=1.0, format="%.3f",
+            ),
+            "Momentum (20%)": st.column_config.ProgressColumn(
+                "Momentum (20%)", min_value=0.0, max_value=1.0, format="%.3f",
+            ),
+            "Insider $": st.column_config.NumberColumn(
+                "Insider $", format="$%,.0f",
+            ),
+        },
+    )
 
-    _render_explainability(results)
+    _render_explainability(alpha_picks)
 
-    with st.expander("Raw payload"):
-        import json
-        st.code(json.dumps(
-            {k: v for k, v in payload.items() if not k.startswith("_")},
-            indent=2, default=str,
-        ), language="json")
+    with st.expander("Raw JSON state"):
+        st.code(json.dumps(state, indent=2, default=str), language="json")
+
+    _render_system_health()
 
 
 def _render_explainability(results: List[Dict]) -> None:

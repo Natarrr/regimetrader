@@ -16,8 +16,10 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import yfinance as yf
 
 from backend.quant_models.prediction_controller import (
     classify_regime,
@@ -29,8 +31,6 @@ from backend.quant_models.volatility_brain import fit_gjr_garch, volatility_regi
 from backend.quant_models.monetary_pulse import (
     yield_spread, is_inverted, monetary_regime, m2_velocity_trend,
 )
-# TODO: MarketData import removed — backend.data.market_service does not exist; wire up correct service
-MarketData = None  # placeholder until re-wired
 from backend.data.fred_service import fetch_10y_yield, fetch_2y_yield, fetch_m2_velocity
 
 _HMM_ERR: str = ""
@@ -107,14 +107,28 @@ def _load_cape() -> dict:
     return dict(cape=current_cape, pct=pct)
 
 
+def _fetch_bars(sym: str, years_back: int) -> pd.DataFrame:
+    """Fama (2013 Nobel) — fetch OHLCV price history via yfinance.
+
+    Returns a DataFrame with columns Close, High, Low, Volume indexed by Date.
+    Period: $T = \\text{years\\_back} \\times 252$ trading days approximated as calendar years.
+    """
+    bars = yf.download(sym, period=f"{years_back}y", interval="1d",
+                       progress=False, auto_adjust=True)
+    if isinstance(bars.columns, pd.MultiIndex):
+        bars.columns = bars.columns.get_level_values(0)
+    if bars.empty:
+        raise ValueError(f"No price data returned for {sym!r}")
+    return bars
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _load_garch(sym: str) -> dict:
     """Engle (2003 Nobel) — GJR-GARCH persistence for Minsky precondition 1.
 
     Persistence: $P = \\alpha + \\beta + \\gamma/2 > 0.98$ triggers CLUSTERING.
     """
-    md      = MarketData()
-    bars    = md.get_historical_bars(symbol=sym, years_back=5)
+    bars    = _fetch_bars(sym, years_back=5)
     log_ret = np.log(bars["Close"] / bars["Close"].shift(1)).dropna().values
     result  = fit_gjr_garch(log_ret)
     result["vol_regime"] = volatility_regime(result["persistence"])
@@ -131,7 +145,7 @@ def _run_hmm(sym: str) -> dict:
         return {"hmm_label": "Unknown", "position_scale": 1.0, "is_uncertain": False,
                 "regime_probs": [], "label_sequence": [], "color_map": {}}
 
-    bars             = MarketData().get_historical_bars(symbol=sym, years_back=3)
+    bars             = _fetch_bars(sym, years_back=3)
     features, returns, _ = FeatureEngineer().build(bars)
     clf              = RegimeClassifier()
     clf.fit(features, returns)

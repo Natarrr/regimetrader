@@ -154,13 +154,13 @@ jobs:
             python -c "
           import json, sys
           d = json.load(open('logs/top_lists.json'))
-          print('| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Macro |')
+          print('| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Momentum |')
           print('|---|---|---|---|---|---|---|---|---|')
           for i, t in enumerate(d.get('top_buys', [])[:5], 1):
               f = t.get('factors', {})
               print(f'| {i} | **{t[\"ticker\"]}** | {t[\"final_score\"]:.4f} | {t[\"badge\"]} |'
                     f' {f.get(\"edgar\",0):.2f} | {f.get(\"insider\",0):.2f} |'
-                    f' {f.get(\"congress\",0):.2f} | {f.get(\"news\",0):.2f} | {f.get(\"macro\",0):.2f} |')
+                    f' {f.get(\"congress\",0):.2f} | {f.get(\"news\",0):.2f} | {f.get(\"momentum\",0):.2f} |')
           " >> "$GITHUB_STEP_SUMMARY"
           else
             echo "_top_lists.json not produced — check generate step._" >> "$GITHUB_STEP_SUMMARY"

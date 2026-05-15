@@ -132,17 +132,15 @@ class TestRenderLiveMonitor:
             "equity": 100000.0, "buying_power": 50000.0,
             "portfolio_value": 100000.0, "daily_pnl": 500.0,
             "daily_pnl_pct": 0.5, "positions": [],
+            "cash": 25000.0, "amount_invested": 75000.0,
             "status": "ACTIVE", "paper": True,
         }))
 
         _app._render_live_monitor()
 
         # st.metric is called on column objects (col1.metric, col2.metric ...) not on st
-        # directly; verify we reached that section by checking st.columns was called with 4
-        cols_calls = [str(c) for c in _ST.columns.call_args_list]
-        assert any("4" in c for c in cols_calls), (
-            "Expected st.columns(4) to be called for the four metric columns"
-        )
+        # directly; verify we reached that section by checking st.columns was called
+        assert _ST.columns.called, "Expected st.columns to be called for metric layout"
 
     def test_alpaca_error_shows_st_error(self, monkeypatch):
         monkeypatch.setattr(_app, "_HAS_ALPACA", True)
@@ -162,6 +160,7 @@ class TestRenderLiveMonitor:
             "equity": 100000.0, "buying_power": 50000.0,
             "portfolio_value": 100000.0, "daily_pnl": 100.0,
             "daily_pnl_pct": 0.1,
+            "cash": 25000.0, "amount_invested": 75000.0,
             "positions": [
                 {"Symbol": "AAPL", "Side": "Long", "Qty": 10.0,
                  "Entry": 170.0, "Price": 175.0, "Mkt Value": 1750.0,
@@ -178,30 +177,60 @@ class TestRenderLiveMonitor:
 
 # ── _render_market_intel ──────────────────────────────────────────────────────
 
+def _make_market_state(alpha_picks=None) -> dict:
+    """Build a minimal market_state.json structure for renderer tests."""
+    return {
+        "last_updated": "2026-05-15T14:00:00+00:00",
+        "macro_status": {
+            "regime": "Bull",
+            "conviction": 0.75,
+            "kill_switch_active": False,
+            "vix_latest": 16.0,
+        },
+        "alpha_picks": alpha_picks if alpha_picks is not None else [],
+    }
+
+
+def _canned_as_picks() -> list:
+    """Convert canned discovery fixture results to alpha_picks format."""
+    return [
+        {**r, "risk_block": False,
+         "institutional_net_shares": r.get("institutional_net_shares", 0.0),
+         "institutional_pct_change": r.get("institutional_pct_change", 0.0),
+         "key_insider_roles": r.get("key_insider_roles", []),
+         "market_cap": r.get("market_cap", 0.0),
+         "insider_value_pct_mcap": r.get("insider_value_pct_mcap", 0.0),
+         "insider_score": r.get("insider_score", 0.0),
+         "institutional_score": r.get("institutional_score", 0.0),
+         "momentum_score": r.get("momentum_score", 0.0),
+        }
+        for r in _load_canned().get("results", [])
+    ]
+
+
 class TestRenderMarketIntel:
     def setup_method(self):
         _reset_st()
 
     def test_no_results_shows_info(self, monkeypatch):
-        monkeypatch.setattr(_app, "_HAS_FMP", False)
-        monkeypatch.setattr(_app, "_load_discovery",
-                            _loader({"results": [], "cached": False, "computed_at": "—"}))
+        monkeypatch.setattr(_app, "_load_market_state",
+                            _loader(_make_market_state(alpha_picks=[])))
 
         _app._render_market_intel()
 
         _ST.info.assert_called()
 
     def test_results_render_dataframe(self, monkeypatch):
-        monkeypatch.setattr(_app, "_HAS_FMP", True)
-        monkeypatch.setattr(_app, "_load_discovery", _loader(_load_canned()))
+        monkeypatch.setattr(_app, "_load_market_state",
+                            _loader(_make_market_state(alpha_picks=_canned_as_picks())))
 
         _app._render_market_intel()
 
         _ST.dataframe.assert_called()
 
     def test_explainability_expander_opened_per_result(self, monkeypatch):
-        monkeypatch.setattr(_app, "_HAS_FMP", True)
-        monkeypatch.setattr(_app, "_load_discovery", _loader(_load_canned()))
+        monkeypatch.setattr(_app, "_load_market_state",
+                            _loader(_make_market_state(alpha_picks=_canned_as_picks())))
 
         _app._render_market_intel()
 

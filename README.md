@@ -71,7 +71,7 @@ Every day at **14:00 London time (BST)**, the `daily_toplists_discord` workflow:
 
 ```text
 final_score = 0.30 × edgar  +  0.25 × insider  +  0.20 × congress
-            + 0.15 × news   +  0.10 × macro
+            + 0.15 × news   +  0.10 × momentum
 ```
 
 | Factor | Source | Signal |
@@ -80,7 +80,7 @@ final_score = 0.30 × edgar  +  0.25 × insider  +  0.20 × congress
 | **Insider** | Derived from EDGAR score_breakdown | CEO buy presence (+0.30), buy/sell ratio, amendment penalty |
 | **Congress/Inst** | FMP `/v4/senate-disclosure` + `/v3/institutional-holder` | Senate trade recency + institutional net-change direction |
 | **News** | yfinance headline sentiment | Bull/bear word-list score over last 10 articles |
-| **Macro** | EDGAR pipeline health (`metrics.json`) | Coverage ratio + error rate proxy for data environment |
+| **Momentum** | Price & volume trend (cross-sectional normalization) | Relative strength vs universe over rolling window |
 
 Weights can be overridden: `--weights '{"edgar":0.40,"insider":0.20,...}'`
 

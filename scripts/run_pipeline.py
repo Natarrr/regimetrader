@@ -292,23 +292,21 @@ def score_momentum(return_20d: float) -> float:
 # ── EDGAR Form 4 counter ───────────────────────────────────────────────────────
 
 def count_edgar_form4(ticker: str, lookback_days: int = 180) -> int:
-    """Stiglitz (2001 Nobel) — count Form 4 insider filings from EDGAR daily index."""
-    try:
-        from regime_trader.services.edgar_index import EdgarDailyIndex
-        idx = EdgarDailyIndex()
-        end  = datetime.now(timezone.utc).date()
-        start = end - timedelta(days=lookback_days)
-        filings = idx.list_filings_range(start, end)
-        target  = ticker.upper().replace("-", " ")
-        count   = sum(
-            1 for f in filings
-            if f.get("form") in ("4", "4/A")
-            and target in f.get("company", "").upper()
-        )
-        return count
-    except Exception as exc:
-        log.debug("EDGAR count for %s failed: %s", ticker, exc)
-        return 0
+    """Stiglitz (2001 Nobel) — count Form 4 insider filings from EDGAR daily index.
+
+    Raises on any failure so callers can distinguish "0 filings" from "EDGAR unreachable".
+    """
+    from regime_trader.services.edgar_index import EdgarDailyIndex
+    idx = EdgarDailyIndex()
+    end  = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=lookback_days)
+    filings = idx.list_filings_range(start, end)
+    target  = ticker.upper().replace("-", " ")
+    return sum(
+        1 for f in filings
+        if f.get("form") in ("4", "4/A")
+        and target in f.get("company", "").upper()
+    )
 
 
 # ── yfinance scorers ───────────────────────────────────────────────────────────
@@ -398,8 +396,18 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
     def _score_ticker(row: Dict[str, str]) -> Dict[str, Any]:
         ticker = row["ticker"]
+        # EDGAR reachability tracked separately from overall scoring success.
+        # count_edgar_form4 now raises on failure, so _edgar_ok=False means the
+        # service was unreachable; form4_count=0 with _edgar_ok=True is valid data.
+        edgar_ok = False
+        form4_count = 0
         try:
             form4_count = count_edgar_form4(ticker)
+            edgar_ok = True
+        except Exception as exc:
+            log.warning("EDGAR unreachable for %s: %s", ticker, exc)
+
+        try:
             e_score     = score_edgar(form4_count)
             i_score, ceo_buy = score_insider(fmp_insider.get(ticker))
             c_score     = score_congress(congress_data.get(ticker))
@@ -418,6 +426,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "momentum_score":   m_score,
                 "ceo_buy":          ceo_buy,
                 "form4_count":      form4_count,
+                "_edgar_ok":        edgar_ok,
+                "_scoring_error":   False,
             }
         except Exception as exc:
             log.warning("Scoring failed for %s: %s", ticker, exc)
@@ -428,18 +438,21 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "edgar_score": 0.30, "insider_score": 0.50,
                 "congress_score": 0.50, "news_score": 0.50,
                 "momentum_score": 0.50, "ceo_buy": False,
-                "form4_count": 0,
+                "form4_count": form4_count,
+                "_edgar_ok":      edgar_ok,
+                "_scoring_error": True,
             }
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_score_ticker, row): row for row in ticker_rows}
         for fut in as_completed(futures):
             r = fut.result()
-            if r.get("edgar_score", 0) == 0.30 and r.get("form4_count", 0) == 0:
+            if r.get("_scoring_error", False):
                 errors += 1
             results.append(r)
 
-    edgar_count   = sum(1 for r in results if r.get("form4_count", 0) > 0)
+    # edgar_count = tickers where EDGAR was reachable (even if 0 filings returned).
+    edgar_count   = sum(1 for r in results if r.get("_edgar_ok", False))
     congress_count = len(congress_data)
     duration      = round(time.time() - t0, 2)
 

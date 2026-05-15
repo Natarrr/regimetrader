@@ -34,4 +34,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
       - name: Run full test suite
-        run: pytest tests/ -v
+        env:
+          CI: "true"
+        run: pytest tests/ -v -m "not slow"

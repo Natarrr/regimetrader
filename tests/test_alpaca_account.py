@@ -36,12 +36,13 @@ if str(ROOT) not in sys.path:
 
 def _fake_account(equity="100000.00", last_equity="99000.00",
                    buying_power="50000.00", portfolio_value="100000.00",
-                   status="ACTIVE"):
+                   cash="25000.00", status="ACTIVE"):
     ns = SimpleNamespace(
         equity=equity,
         last_equity=last_equity,
         buying_power=buying_power,
         portfolio_value=portfolio_value,
+        cash=cash,
         status=SimpleNamespace(value=status),
     )
     return ns
