@@ -78,7 +78,7 @@ trading_halted.lock
 # (session recovery snapshot — machine-generated)
 state_snapshot.json
 # (serialised HMM model files — regenerated on retrain)
-models/
+/models/
 
 # ── Canary runtime state (CB + alert streak) ──────────────────────────────────
 # (edgar_cb.json, alert_state.json — regenerated each run)
