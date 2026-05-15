@@ -24,6 +24,7 @@ import logging
 import math
 import os
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -57,8 +58,12 @@ _SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 _cik_map: Dict[str, str] = {}   # TICKER → zero-padded 10-digit CIK
 _cik_map_loaded  = False
 
-# Shared EdgarService instance — one rate-limiter bucket across all threads
-_edgar_svc = None
+# ── SEC rate-limited HTTP ─────────────────────────────────────────────────────
+# data.sec.gov allows up to 10 req/sec; we stay at ~8 with a shared lock so
+# all worker threads collectively respect the limit (not per-thread).
+_SEC_RATE_LOCK: threading.Lock = threading.Lock()
+_SEC_RATE_LAST: float = 0.0
+_SEC_MIN_DELAY: float = 0.12   # 1/8 s ≈ 8 req/s globally
 
 _CONGRESS_TTL_HOURS = 24
 _HOUSE_URL   = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
@@ -272,6 +277,32 @@ def score_momentum(return_20d: float) -> float:
     return round(0.10 + (r + 0.30) / 0.60 * 0.80, 4)
 
 
+# ── SEC helpers ────────────────────────────────────────────────────────────────
+
+def _sec_get(url: str, timeout: int = 20):
+    """Rate-limited GET to any SEC endpoint (data.sec.gov or www.sec.gov/Archives).
+
+    Uses a module-level shared lock so all worker threads together stay under
+    the SEC's 10 req/sec guidance.  Raises requests.HTTPError on non-200.
+    """
+    global _SEC_RATE_LAST
+    import requests as _req
+    headers = {
+        "User-Agent": os.getenv(
+            "EDGAR_USER_AGENT", "regime-trader-research infra-team@example.com"
+        ),
+        "Accept-Encoding": "gzip, deflate",
+    }
+    with _SEC_RATE_LOCK:
+        elapsed = time.time() - _SEC_RATE_LAST
+        if elapsed < _SEC_MIN_DELAY:
+            time.sleep(_SEC_MIN_DELAY - elapsed)
+        resp = _req.get(url, headers=headers, timeout=timeout)
+        _SEC_RATE_LAST = time.time()
+    resp.raise_for_status()
+    return resp
+
+
 # ── EDGAR Form 4 counter ───────────────────────────────────────────────────────
 
 def _load_cik_map() -> Dict[str, str]:
@@ -291,12 +322,7 @@ def _load_cik_map() -> Dict[str, str]:
         except Exception:
             pass
 
-    import requests as _req
-    headers = {"User-Agent": os.getenv(
-        "EDGAR_USER_AGENT", "regime-trader-research infra-team@example.com"
-    )}
-    resp = _req.get(_SEC_TICKERS_URL, headers=headers, timeout=30)
-    resp.raise_for_status()
+    resp = _sec_get(_SEC_TICKERS_URL, timeout=30)
     data = resp.json()
     ticker_map: Dict[str, str] = {
         str(e["ticker"]).upper(): str(e["cik_str"]).zfill(10)
@@ -310,35 +336,6 @@ def _load_cik_map() -> Dict[str, str]:
     log.info("CIK map fetched from SEC: %d tickers", len(_cik_map))
     return _cik_map
 
-
-def _get_edgar_svc():
-    """Return the shared EdgarService singleton (one rate-limiter across all threads)."""
-    global _edgar_svc
-    if _edgar_svc is None:
-        from regime_trader.services.edgar_service import EdgarService
-        _edgar_svc = EdgarService()
-    return _edgar_svc
-
-
-def count_edgar_form4(ticker: str, lookback_days: int = 180) -> int:
-    """Stiglitz (2001 Nobel) — count Form 4 insider filings from EDGAR.
-
-    Looks up the ticker's SEC CIK from company_tickers.json, then queries
-    EdgarService.list_filings(cik, form_type="4") — exact CIK match, not the
-    broken company-name substring search that returned 0 for every ticker.
-    Raises on CIK-map network failure so callers can track edgar_ok=False.
-    Returns 0 (not raises) when ticker has no SEC CIK or genuinely no filings.
-    """
-    cik_map = _load_cik_map()   # raises on HTTP/network failure
-    cik = cik_map.get(ticker.upper())
-    if not cik:
-        log.debug("No SEC CIK for %s — 0 Form 4 filings", ticker)
-        return 0
-
-    svc = _get_edgar_svc()
-    filings = svc.list_filings(cik, form_type="4", max_results=100)
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
-    return sum(1 for f in filings if f.get("date_filed", "") >= cutoff)
 
 
 # ── yfinance scorers ───────────────────────────────────────────────────────────
@@ -380,53 +377,148 @@ def score_edgar(form4_count: int) -> float:
     return round(min(0.90, 0.30 + form4_count * 0.12), 4)
 
 
-def score_insider_yf(ticker: str) -> Tuple[float, bool]:
-    """Akerlof (2001): insider open-market purchase score from yfinance Form 4 data.
 
-    FMP v4/insider-trading retired Aug 2025. Uses yfinance insider_transactions
-    (sourced from SEC Form 4 filings via yfinance) instead. No API key required.
-    Returns (score ∈ [0,1], ceo_buy_flag).
+# ── EDGAR submissions API (replaces CGI browse + yfinance insider) ─────────────
+
+def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
+    """Fetch and parse a Form 4 XML filing from EDGAR Archives.
+
+    Returns list of dicts: {code, value, title}.
+      code:  P=open-market purchase, S=sale, A=award, F=tax withholding, etc.
+      value: shares × price (USD, approximate)
+      title: officer/director title of the reporting owner
+
+    Returns [] on any failure (network, non-XML .htm filing, parse error).
+    HTTP call goes through the shared _sec_get() rate limiter.
     """
+    from xml.etree import ElementTree as ET
+    acc_nodash = accession.replace("-", "")
+    cik_int = str(int(cik))   # strip leading zeros for the Archives path segment
+    url = (
+        f"https://www.sec.gov/Archives/edgar/data/{cik_int}"
+        f"/{acc_nodash}/{primary_doc}"
+    )
     try:
-        import yfinance as yf
-        df = yf.Ticker(ticker).insider_transactions
-        if df is None or df.empty:
-            return 0.50, False
+        resp = _sec_get(url)
+    except Exception as exc:
+        log.debug("Form 4 fetch failed %s: %s", url, exc)
+        return []
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError:
+        return []   # .htm or plain-text filing — not XML-parseable
 
-        text_col = next((c for c in df.columns if c.lower() == "text"), None)
-        pos_col  = next((c for c in df.columns if c.lower() == "position"), None)
-        val_col  = next((c for c in df.columns if c.lower() == "value"), None)
-        if text_col is None or pos_col is None:
-            return 0.50, False
+    # Strip namespace prefixes so findall() works regardless of xmlns= declaration
+    for el in root.iter():
+        if "}" in el.tag:
+            el.tag = el.tag.split("}", 1)[1]
 
-        buys = df[
-            df[text_col].str.contains("Purchase", case=False, na=False)
-            & ~df[text_col].str.contains(
-                "Award|Grant|Option|Derivative|Restricted", case=False, na=False
-            )
-        ]
-        if buys.empty:
-            return 0.50, False
+    # Reporting owner's title (first occurrence)
+    officer_title = ""
+    title_el = root.find(".//officerTitle")
+    if title_el is not None and title_el.text:
+        officer_title = title_el.text.strip()
+    if not officer_title:
+        is_dir_el = root.find(".//isDirector")
+        if is_dir_el is not None and is_dir_el.text == "1":
+            officer_title = "Director"
 
-        key_buys = buys[
-            buys[pos_col].str.contains(
-                "CEO|CFO|COO|CTO|President|Chairman|"
-                "Chief Executive|Chief Financial|Chief Operating|Director|Founder",
-                case=False, na=False,
-            )
-        ]
-        count = len(key_buys)
-        if count == 0:
-            return 0.50, False
+    transactions: List[Dict] = []
+    for tx in root.findall(".//nonDerivativeTransaction"):
+        code_el = tx.find(".//transactionCode")
+        if code_el is None or not code_el.text:
+            continue
+        code = code_el.text.strip()
 
-        total_value = float(key_buys[val_col].fillna(0).sum()) if val_col else 0.0
-        score = min(0.90, 0.50 + count * 0.08)
+        shares_el = tx.find(".//transactionShares/value")
+        price_el  = tx.find(".//transactionPricePerShare/value")
+        try:
+            shares = float(shares_el.text) if shares_el is not None else 0.0
+        except (TypeError, ValueError):
+            shares = 0.0
+        try:
+            price = float(price_el.text) if price_el is not None else 0.0
+        except (TypeError, ValueError):
+            price = 0.0
+
+        transactions.append({"code": code, "value": shares * price, "title": officer_title})
+
+    return transactions
+
+
+def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float, bool]:
+    """Fetch Form 4 count and insider score from the SEC submissions API.
+
+    Stiglitz (2001 Nobel) / Akerlof (2001 Nobel) — replaces both the legacy
+    CGI browse endpoint (EdgarService.list_filings) and the yfinance insider
+    path, both of which fail silently in GitHub Actions CI environments.
+
+    Uses data.sec.gov/submissions/CIK{cik}.json (official programmatic API)
+    for EDGAR count, then optionally fetches up to 3 Form 4 XML documents for
+    insider buy/sell classification.
+
+    Returns:
+        (form4_count, insider_score ∈ [0,1], ceo_buy_flag)
+
+    Raises on network failure so the caller can set _edgar_ok=False.
+    """
+    cik_map = _load_cik_map()
+    cik = cik_map.get(ticker.upper())
+    if not cik:
+        log.debug("No SEC CIK for %s", ticker)
+        return 0, 0.50, False
+
+    url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    resp = _sec_get(url)   # raises on failure → caller sets _edgar_ok=False
+    data = resp.json()
+
+    recent     = data.get("filings", {}).get("recent", {})
+    forms      = recent.get("form", [])
+    dates      = recent.get("filingDate", [])
+    accessions = recent.get("accessionNumber", [])
+    prim_docs  = recent.get("primaryDocument", [])
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+
+    form4_filings = [
+        {
+            "date":      dates[i],
+            "accession": accessions[i] if i < len(accessions) else "",
+            "doc":       prim_docs[i]  if i < len(prim_docs)  else "",
+        }
+        for i in range(len(forms))
+        if forms[i] == "4" and i < len(dates) and dates[i] >= cutoff
+    ]
+    form4_count = len(form4_filings)
+    log.debug("EDGAR %s: CIK=%s form4=%d (last %dd)", ticker, cik, form4_count, lookback_days)
+
+    # Parse up to 3 most-recent Form 4 XMLs to determine open-market purchases
+    key_purchases: List[float] = []   # USD values of purchases by key officers
+    for filing in form4_filings[:3]:
+        if not filing["accession"] or not filing["doc"]:
+            continue
+        txs = _parse_form4_xml(cik, filing["accession"], filing["doc"])
+        for tx in txs:
+            if tx["code"] != "P":
+                continue
+            if any(role in tx["title"].upper() for role in _KEY_ROLES):
+                key_purchases.append(tx["value"])
+
+    insider_score = 0.50
+    ceo_buy = False
+    if key_purchases:
+        count = len(key_purchases)
+        total_value = sum(key_purchases)
+        insider_score = min(0.90, 0.50 + count * 0.08)
         if total_value > 100_000:
-            score = max(score, 0.82)
+            insider_score = max(insider_score, 0.82)
         ceo_buy = total_value > 25_000
-        return round(score, 4), ceo_buy
-    except Exception:
-        return 0.50, False
+        log.debug(
+            "INSIDER %s: %d key purchases $%.0f score=%.2f ceo_buy=%s",
+            ticker, count, total_value, insider_score, ceo_buy,
+        )
+
+    return form4_count, insider_score, ceo_buy
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -458,24 +550,25 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
     def _score_ticker(row: Dict[str, str]) -> Dict[str, Any]:
         ticker = row["ticker"]
-        # EDGAR reachability tracked separately from overall scoring success.
-        # count_edgar_form4 now raises on failure, so _edgar_ok=False means the
-        # service was unreachable; form4_count=0 with _edgar_ok=True is valid data.
-        edgar_ok = False
+        # fetch_edgar_data() raises on network failure → _edgar_ok=False.
+        # It returns (0, 0.50, False) when ticker genuinely has no CIK or no filings
+        # — that is valid data, not a failure, so _edgar_ok stays True.
+        edgar_ok    = False
         form4_count = 0
+        i_score     = 0.50
+        ceo_buy     = False
         try:
-            form4_count = count_edgar_form4(ticker)
+            form4_count, i_score, ceo_buy = fetch_edgar_data(ticker)
             edgar_ok = True
         except Exception as exc:
             log.warning("EDGAR unreachable for %s: %s", ticker, exc)
 
         try:
-            e_score     = score_edgar(form4_count)
-            i_score, ceo_buy = score_insider_yf(ticker)
-            c_score     = score_congress(congress_data.get(ticker))
-            n_score     = score_news(ticker)
-            price_data  = fetch_price_data(ticker)
-            m_score     = score_momentum(price_data["return_20d"])
+            e_score    = score_edgar(form4_count)
+            c_score    = score_congress(congress_data.get(ticker))
+            n_score    = score_news(ticker)
+            price_data = fetch_price_data(ticker)
+            m_score    = score_momentum(price_data["return_20d"])
             return {
                 "ticker":           ticker,
                 "sector":           sector.get(ticker, "Unknown"),
@@ -497,9 +590,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "ticker": ticker, "sector": sector.get(ticker, "Unknown"),
                 "cap_tier": cap_tier.get(ticker, "large"),
                 "market_cap": 0.0,
-                "edgar_score": 0.30, "insider_score": 0.50,
+                "edgar_score": 0.30, "insider_score": i_score,
                 "congress_score": 0.50, "news_score": 0.50,
-                "momentum_score": 0.50, "ceo_buy": False,
+                "momentum_score": 0.50, "ceo_buy": ceo_buy,
                 "form4_count": form4_count,
                 "_edgar_ok":      edgar_ok,
                 "_scoring_error": True,
