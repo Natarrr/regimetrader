@@ -27,6 +27,17 @@ _st_mock.set_page_config = MagicMock()
 
 sys.modules.setdefault("streamlit", _st_mock)
 
+# ── Stub alpaca SDK ────────────────────────────────────────────────────────────
+# alpaca-py is not installed in CI (requirements-ci.txt comment: "faked with
+# SimpleNamespace/MagicMock"). patch("alpaca.trading.client.TradingClient", ...)
+# needs the module tree in sys.modules to resolve the target before replacing it.
+_alpaca_stub = MagicMock()
+sys.modules.setdefault("alpaca", _alpaca_stub)
+sys.modules.setdefault("alpaca.trading", _alpaca_stub.trading)
+sys.modules.setdefault("alpaca.trading.client", _alpaca_stub.trading.client)
+sys.modules.setdefault("alpaca.trading.requests", _alpaca_stub.trading.requests)
+sys.modules.setdefault("alpaca.trading.enums", _alpaca_stub.trading.enums)
+
 ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
