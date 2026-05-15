@@ -150,33 +150,6 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
     return result
 
 
-def fetch_fmp_insider_buys(lookback_days: int = 60) -> Dict[str, Dict]:
-    """Akerlof (2001 Nobel) — fetch recent executive purchases, 1 FMP call."""
-    data = _fmp_get("insider-trading", {"transactionType": "P", "limit": 200})
-    if not data or not isinstance(data, list):
-        return {}
-
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()[:10]
-    by_ticker: Dict[str, Dict] = {}
-    for tx in data:
-        tx_date = str(tx.get("transactionDate") or "")
-        if tx_date < cutoff:
-            continue
-        if tx.get("acquistionOrDisposition") != "A":
-            continue
-        role = str(tx.get("reportingTitle") or "").upper()
-        is_key = any(k in role for k in _KEY_ROLES)
-        ticker = (tx.get("symbol") or "").upper()
-        if not ticker:
-            continue
-        val = float(tx.get("securitiesTransacted") or 0) * float(tx.get("price") or 0)
-        if ticker not in by_ticker:
-            by_ticker[ticker] = {"count": 0, "total_usd": 0.0, "key_exec_usd": 0.0}
-        by_ticker[ticker]["count"]    += 1
-        by_ticker[ticker]["total_usd"] += val
-        if is_key:
-            by_ticker[ticker]["key_exec_usd"] += val
-    return by_ticker
 
 
 def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
@@ -407,21 +380,53 @@ def score_edgar(form4_count: int) -> float:
     return round(min(0.90, 0.30 + form4_count * 0.12), 4)
 
 
-def score_insider(fmp_data: Optional[Dict]) -> Tuple[float, bool]:
-    """Akerlof (2001): insider score + CEO buy flag from FMP data."""
-    if not fmp_data:
+def score_insider_yf(ticker: str) -> Tuple[float, bool]:
+    """Akerlof (2001): insider open-market purchase score from yfinance Form 4 data.
+
+    FMP v4/insider-trading retired Aug 2025. Uses yfinance insider_transactions
+    (sourced from SEC Form 4 filings via yfinance) instead. No API key required.
+    Returns (score ∈ [0,1], ceo_buy_flag).
+    """
+    try:
+        import yfinance as yf
+        df = yf.Ticker(ticker).insider_transactions
+        if df is None or df.empty:
+            return 0.50, False
+
+        text_col = next((c for c in df.columns if c.lower() == "text"), None)
+        pos_col  = next((c for c in df.columns if c.lower() == "position"), None)
+        val_col  = next((c for c in df.columns if c.lower() == "value"), None)
+        if text_col is None or pos_col is None:
+            return 0.50, False
+
+        buys = df[
+            df[text_col].str.contains("Purchase", case=False, na=False)
+            & ~df[text_col].str.contains(
+                "Award|Grant|Option|Derivative|Restricted", case=False, na=False
+            )
+        ]
+        if buys.empty:
+            return 0.50, False
+
+        key_buys = buys[
+            buys[pos_col].str.contains(
+                "CEO|CFO|COO|CTO|President|Chairman|"
+                "Chief Executive|Chief Financial|Chief Operating|Director|Founder",
+                case=False, na=False,
+            )
+        ]
+        count = len(key_buys)
+        if count == 0:
+            return 0.50, False
+
+        total_value = float(key_buys[val_col].fillna(0).sum()) if val_col else 0.0
+        score = min(0.90, 0.50 + count * 0.08)
+        if total_value > 100_000:
+            score = max(score, 0.82)
+        ceo_buy = total_value > 25_000
+        return round(score, 4), ceo_buy
+    except Exception:
         return 0.50, False
-    count   = fmp_data.get("count", 0)
-    total   = fmp_data.get("total_usd", 0.0)
-    key_usd = fmp_data.get("key_exec_usd", 0.0)
-    if count == 0:
-        return 0.50, False
-    # Base score from count (0.60) + bonus for large-value key exec buys
-    score = min(0.90, 0.50 + count * 0.08)
-    if key_usd > 100_000:
-        score = max(score, 0.82)
-    ceo_buy = key_usd > 25_000
-    return round(score, 4), ceo_buy
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -437,13 +442,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     t0 = time.time()
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
 
-    # ── FMP: profile (chunked) + insider ─────────────────────────────────────
+    # ── FMP: profile (chunked) — insider now uses yfinance per-ticker ────────
     log.info("Fetching FMP profiles (chunked at 100)…")
     mktcaps = fetch_fmp_profiles(tickers)
-    log.info("Fetching FMP insider buys (1 call)…")
-    fmp_insider = fetch_fmp_insider_buys()
     n_profile_chunks = math.ceil(len(tickers) / 100) if tickers else 0
-    fmp_count = (n_profile_chunks if mktcaps else 0) + (1 if fmp_insider else 0)
+    fmp_count = n_profile_chunks if mktcaps else 0
 
     # ── Congress feed ─────────────────────────────────────────────────────────
     log.info("Fetching congress trading data…")
@@ -468,7 +471,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
         try:
             e_score     = score_edgar(form4_count)
-            i_score, ceo_buy = score_insider(fmp_insider.get(ticker))
+            i_score, ceo_buy = score_insider_yf(ticker)
             c_score     = score_congress(congress_data.get(ticker))
             n_score     = score_news(ticker)
             price_data  = fetch_price_data(ticker)
