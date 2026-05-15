@@ -50,6 +50,16 @@ WEIGHTS = {
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
 CONGRESS_CACHE_PATH = ROOT / ".cache" / "congress_cache.json"
 
+# ── SEC ticker→CIK map (fetched once, disk-cached 24 h) ───────────────────────
+_CIK_CACHE_PATH  = ROOT / ".cache" / "sec_cik_map.json"
+_CIK_TTL_SECONDS = 24 * 3600
+_SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+_cik_map: Dict[str, str] = {}   # TICKER → zero-padded 10-digit CIK
+_cik_map_loaded  = False
+
+# Shared EdgarService instance — one rate-limiter bucket across all threads
+_edgar_svc = None
+
 _CONGRESS_TTL_HOURS = 24
 _HOUSE_URL   = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 _SENATE_URL  = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
@@ -291,22 +301,71 @@ def score_momentum(return_20d: float) -> float:
 
 # ── EDGAR Form 4 counter ───────────────────────────────────────────────────────
 
-def count_edgar_form4(ticker: str, lookback_days: int = 180) -> int:
-    """Stiglitz (2001 Nobel) — count Form 4 insider filings from EDGAR daily index.
+def _load_cik_map() -> Dict[str, str]:
+    """Fetch SEC ticker→CIK map (disk-cached 24 h). Raises on network failure."""
+    global _cik_map, _cik_map_loaded
+    if _cik_map_loaded:
+        return _cik_map
 
-    Raises on any failure so callers can distinguish "0 filings" from "EDGAR unreachable".
+    if _CIK_CACHE_PATH.exists():
+        try:
+            cached = json.loads(_CIK_CACHE_PATH.read_text(encoding="utf-8"))
+            if time.time() - float(cached.get("_ts", 0)) < _CIK_TTL_SECONDS:
+                _cik_map = cached["tickers"]
+                _cik_map_loaded = True
+                log.info("CIK map loaded from cache: %d tickers", len(_cik_map))
+                return _cik_map
+        except Exception:
+            pass
+
+    import requests as _req
+    headers = {"User-Agent": os.getenv(
+        "EDGAR_USER_AGENT", "regime-trader-research infra-team@example.com"
+    )}
+    resp = _req.get(_SEC_TICKERS_URL, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    ticker_map: Dict[str, str] = {
+        str(e["ticker"]).upper(): str(e["cik_str"]).zfill(10)
+        for e in data.values()
+        if e.get("ticker") and e.get("cik_str")
+    }
+    _CIK_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    save_json_atomic(_CIK_CACHE_PATH, {"_ts": time.time(), "tickers": ticker_map})
+    _cik_map = ticker_map
+    _cik_map_loaded = True
+    log.info("CIK map fetched from SEC: %d tickers", len(_cik_map))
+    return _cik_map
+
+
+def _get_edgar_svc():
+    """Return the shared EdgarService singleton (one rate-limiter across all threads)."""
+    global _edgar_svc
+    if _edgar_svc is None:
+        from regime_trader.services.edgar_service import EdgarService
+        _edgar_svc = EdgarService()
+    return _edgar_svc
+
+
+def count_edgar_form4(ticker: str, lookback_days: int = 180) -> int:
+    """Stiglitz (2001 Nobel) — count Form 4 insider filings from EDGAR.
+
+    Looks up the ticker's SEC CIK from company_tickers.json, then queries
+    EdgarService.list_filings(cik, form_type="4") — exact CIK match, not the
+    broken company-name substring search that returned 0 for every ticker.
+    Raises on CIK-map network failure so callers can track edgar_ok=False.
+    Returns 0 (not raises) when ticker has no SEC CIK or genuinely no filings.
     """
-    from regime_trader.services.edgar_index import EdgarDailyIndex
-    idx = EdgarDailyIndex()
-    end  = datetime.now(timezone.utc).date()
-    start = end - timedelta(days=lookback_days)
-    filings = idx.list_filings_range(start, end)
-    target  = ticker.upper().replace("-", " ")
-    return sum(
-        1 for f in filings
-        if f.get("form") in ("4", "4/A")
-        and target in f.get("company", "").upper()
-    )
+    cik_map = _load_cik_map()   # raises on HTTP/network failure
+    cik = cik_map.get(ticker.upper())
+    if not cik:
+        log.debug("No SEC CIK for %s — 0 Form 4 filings", ticker)
+        return 0
+
+    svc = _get_edgar_svc()
+    filings = svc.list_filings(cik, form_type="4", max_results=100)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+    return sum(1 for f in filings if f.get("date_filed", "") >= cutoff)
 
 
 # ── yfinance scorers ───────────────────────────────────────────────────────────
