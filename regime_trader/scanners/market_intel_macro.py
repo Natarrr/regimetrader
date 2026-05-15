@@ -764,12 +764,12 @@ def fetch_stock_pick_data(
 
             momentum_c = 0.85 if above_sma200 else 0.25
             de_c = (
-                0.50 if de_ratio is None else
+                0.25 if de_ratio is None else   # missing data → penalized, not rewarded
                 0.50 if de_ratio < 0.50 else
                 0.35 if de_ratio < 1.00 else 0.10
             )
             mg_c = (
-                0.50 if net_margin is None else
+                0.20 if net_margin is None else  # missing data → penalized, not rewarded
                 0.50 if net_margin > 15 else
                 0.38 if net_margin > 5 else
                 0.20 if net_margin > 0 else 0.05
