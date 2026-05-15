@@ -1,7 +1,7 @@
 name: nightly_edgar
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Nightly full-universe EDGAR backfill (50 tickers, 00:00 UTC).
+# Nightly full-universe EDGAR backfill (160 tickers, 00:00 UTC).
 # Distinct from canary (10 tickers, 3×/day health check) and market_intel
 # (push/PR unit tests + scheduled partial fetch).
 #
@@ -17,7 +17,7 @@ on:
       tickers_file:
         description: "Tickers CSV (path relative to repo root)"
         required: false
-        default: "config/top50.csv"
+        default: "config/universe.csv"
       min_coverage:
         description: "Min EDGAR coverage ratio that passes threshold gate (0–1)"
         required: false
@@ -26,7 +26,7 @@ on:
 jobs:
   nightly-edgar:
     runs-on: ubuntu-latest
-    # 50 tickers × ~5s each at 7 req/s SEC rate limit ≈ 6 min nominal.
+    # 160 tickers × ~5s each at 7 req/s SEC rate limit ≈ 15 min nominal.
     # 45-min ceiling absorbs SEC throttling, slow nights, and up to 2 retries.
     timeout-minutes: 45
 
@@ -75,7 +75,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |
-          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/top50.csv' }}"
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
           LOG_DIR="logs"
           mkdir -p "$LOG_DIR" .monitoring
 
@@ -175,7 +175,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Tickers file | \`${{ github.event.inputs.tickers_file || 'config/top50.csv' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tickers file | \`${{ github.event.inputs.tickers_file || 'config/universe.csv' }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Min coverage | \`${{ github.event.inputs.min_coverage || '0.80' }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f logs/metrics.json ]; then

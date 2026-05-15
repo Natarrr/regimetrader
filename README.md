@@ -15,7 +15,7 @@ EDGAR-first market intelligence and regime detection pipeline.
 | --- | --- | --- |
 | `market_intel` | push, PR, schedule (3×/day weekdays) | Unit tests + EDGAR data fetch |
 | `canary` | schedule (06:00, 12:00, 18:00 UTC) | End-to-end pipeline health check (10 tickers) |
-| `nightly_edgar` | schedule (00:00 UTC daily) | Full 50-ticker EDGAR backfill with retry |
+| `nightly_edgar` | manual dispatch only | Full 160-ticker EDGAR backfill with retry |
 | `edgar_3x` | schedule (00:00, 08:00, 16:00 UTC) | 3× daily data fetch + top_lists artifact |
 | `daily_toplists_discord` | schedule (13:00 UTC daily) | Daily 14:00 London market checkup → Discord |
 

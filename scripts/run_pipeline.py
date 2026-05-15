@@ -12,8 +12,8 @@ FMP budget: ≤ 2 calls per run (profile batch + insider list).
 With caching, repeated intraday runs spend 0 additional FMP calls.
 
 Usage:
-  python scripts/run_pipeline.py --tickers-file config/top50.csv --log-dir logs
-  python -m scripts.run_pipeline --tickers-file config/top50.csv --verbose
+  python scripts/run_pipeline.py --tickers-file config/universe.csv --log-dir logs
+  python -m scripts.run_pipeline --tickers-file config/universe.csv --verbose
 """
 from __future__ import annotations
 
@@ -481,7 +481,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="EDGAR+FMP+yfinance daily pipeline")
-    parser.add_argument("--tickers-file", type=Path, default=Path("config/top50.csv"))
+    parser.add_argument("--tickers-file", type=Path, default=Path("config/universe.csv"))
     parser.add_argument("--log-dir",      type=Path, default=Path("logs"))
     parser.add_argument("--max-workers",  type=int,  default=8)
     parser.add_argument("--verbose",      action="store_true")
