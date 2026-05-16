@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 import streamlit as st
 
 log = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def _load_top_lists() -> Optional[Dict[str, Any]]:
 
 
 def _score_bar(score: float, width: int = 10) -> str:
-    filled = round(score * width)
+    filled = round(max(0.0, min(1.0, score)) * width)
     return "█" * filled + "░" * (width - filled)
 
 
@@ -54,8 +54,6 @@ def _render_ticker_table(entries: List[Dict[str, Any]], show_watchlist: bool = F
     if not entries:
         st.caption("No tickers in this category.")
         return
-
-    import pandas as pd
 
     rows = []
     for i, e in enumerate(entries, 1):
