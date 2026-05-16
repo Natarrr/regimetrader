@@ -1,7 +1,6 @@
 """tests/test_revolut_parser.py — unit tests for Revolut XLSX parser"""
 from __future__ import annotations
 
-import io
 import json
 import tempfile
 from pathlib import Path
@@ -119,3 +118,23 @@ class TestParseXlsx:
         result = parse_xlsx(xlsx_path, ticker_map={})
         assert len(result) == 1
         assert result[0]["ticker"] == "OXY"
+
+    def test_raises_on_missing_header_row(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(("Not", "A", "Valid", "Header"))
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+        with pytest.raises(ValueError, match="Could not find header row"):
+            parse_xlsx(Path(tmp.name), ticker_map={})
+
+    def test_raises_on_missing_required_column(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(("Date", "Ticker", "Type"))  # Missing Quantity and Price per share
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+        with pytest.raises(ValueError, match="missing required columns"):
+            parse_xlsx(Path(tmp.name), ticker_map={})

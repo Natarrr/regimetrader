@@ -35,7 +35,7 @@ def _parse_price(raw: Any) -> float:
         return 0.0
     parts = str(raw).strip().split()
     try:
-        return float(parts[-1])
+        return float(parts[-1].replace(",", ""))
     except (ValueError, IndexError):
         return 0.0
 
@@ -54,7 +54,8 @@ def net_positions_from_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         tx_type = str(row.get("type", "")).strip()
         ticker  = row.get("ticker")
         qty     = row.get("qty")
-        price   = row.get("price") or 0.0
+        price_raw = row.get("price")
+        price = float(price_raw) if price_raw is not None else 0.0
         currency = str(row.get("currency", "USD")).strip()
 
         if not ticker or qty is None:
@@ -123,6 +124,11 @@ def parse_xlsx(
 
     col = {h: i for i, h in enumerate(headers)}
 
+    _REQUIRED_COLS = {"Ticker", "Type", "Quantity", "Price per share"}
+    missing = _REQUIRED_COLS - col.keys()
+    if missing:
+        raise ValueError(f"XLSX missing required columns: {missing}")
+
     rows = []
     for raw in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
         rows.append({
@@ -130,7 +136,7 @@ def parse_xlsx(
             "type":     str(raw[col["Type"]]).strip()   if raw[col["Type"]]   else "",
             "qty":      raw[col["Quantity"]],
             "price":    _parse_price(raw[col["Price per share"]]),
-            "currency": str(raw[col["Currency"]]).strip() if col.get("Currency") is not None and raw[col.get("Currency", 0)] else "USD",
+            "currency": str(raw[col["Currency"]]).strip() if "Currency" in col and raw[col["Currency"]] else "USD",
         })
 
     positions = net_positions_from_rows(rows)
