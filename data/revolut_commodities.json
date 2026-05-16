@@ -1,0 +1,21 @@
+{
+  "imported_at": "2026-05-16 15:30 UTC",
+  "positions": [
+    {
+      "commodity": "XAG",
+      "name": "Silver",
+      "amount": 20.343847,
+      "unit": "oz",
+      "yf_ticker": "SI=F",
+      "source": "revolut_commodities"
+    },
+    {
+      "commodity": "XAU",
+      "name": "Gold",
+      "amount": 0.463241,
+      "unit": "oz",
+      "yf_ticker": "GC=F",
+      "source": "revolut_commodities"
+    }
+  ]
+}

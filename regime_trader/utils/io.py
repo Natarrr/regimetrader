@@ -51,8 +51,7 @@ def atomic_write_json(path: Path | str, obj: Any, mode: int = 0o644) -> None:
     """
     save_json_atomic(path, obj)
     try:
-        import os as _os
-        _os.chmod(str(path), mode)
+        os.chmod(str(path), mode)
     except (OSError, NotImplementedError):
         pass
 

@@ -1,0 +1,238 @@
+{
+  "imported_at": "2026-05-16 15:01 UTC",
+  "positions": [
+    {
+      "ticker": "4MMR",
+      "revolut_ticker": "4MMR",
+      "net_qty": 19.07668828,
+      "avg_cost": 26.21,
+      "currency": "EUR",
+      "source": "revolut"
+    },
+    {
+      "ticker": "AJG",
+      "revolut_ticker": "AJG",
+      "net_qty": 1.7854865,
+      "avg_cost": 244.6,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "ARQQ",
+      "revolut_ticker": "ARQQ",
+      "net_qty": 12.53545845,
+      "avg_cost": 27.92,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "AVXL",
+      "revolut_ticker": "AVXL",
+      "net_qty": 133.58825113,
+      "avg_cost": 9.4223,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "CAG",
+      "revolut_ticker": "CAG",
+      "net_qty": 13.55146558,
+      "avg_cost": 14.67,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "CORT",
+      "revolut_ticker": "CORT",
+      "net_qty": 5.51293729,
+      "avg_cost": 45.23,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "ENXB",
+      "revolut_ticker": "ENXB",
+      "net_qty": 1.95974744,
+      "avg_cost": 126.7,
+      "currency": "EUR",
+      "source": "revolut"
+    },
+    {
+      "ticker": "FDMT",
+      "revolut_ticker": "FDMT",
+      "net_qty": 35.0,
+      "avg_cost": 10.1,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "GZF",
+      "revolut_ticker": "GZF",
+      "net_qty": 11.58330993,
+      "avg_cost": 19.6109,
+      "currency": "EUR",
+      "source": "revolut"
+    },
+    {
+      "ticker": "IGMS",
+      "revolut_ticker": "IGMS",
+      "net_qty": 90.28484848,
+      "avg_cost": 1.65,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "IREN",
+      "revolut_ticker": "IREN",
+      "net_qty": 5.41112957,
+      "avg_cost": 58.9064,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "JD",
+      "revolut_ticker": "JD",
+      "net_qty": 15.42205666,
+      "avg_cost": 28.8068,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "JPM",
+      "revolut_ticker": "JPM",
+      "net_qty": 1.4592071,
+      "avg_cost": 308.3867,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "KEP",
+      "revolut_ticker": "KEP",
+      "net_qty": 27.29499217,
+      "avg_cost": 9.3846,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "MSFT",
+      "revolut_ticker": "MSFT",
+      "net_qty": 1.26834851,
+      "avg_cost": 393.22,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "MSTR",
+      "revolut_ticker": "MSTR",
+      "net_qty": 1.06726434,
+      "avg_cost": 139.71,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "MT",
+      "revolut_ticker": "MT",
+      "net_qty": 3.19422336,
+      "avg_cost": 38.95,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "NOW",
+      "revolut_ticker": "NOW",
+      "net_qty": 8.64373917,
+      "avg_cost": 92.32,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "NUVL",
+      "revolut_ticker": "NUVL",
+      "net_qty": 2.38458604,
+      "avg_cost": 104.84,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "OXY",
+      "revolut_ticker": "OXY",
+      "net_qty": 7.31761468,
+      "avg_cost": 54.5,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "PANW",
+      "revolut_ticker": "PANW",
+      "net_qty": 2.69220225,
+      "avg_cost": 176.2015,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "PYPL",
+      "revolut_ticker": "PYPL",
+      "net_qty": 7.88332676,
+      "avg_cost": 50.74,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "SLI",
+      "revolut_ticker": "SLI",
+      "net_qty": 106.38297872,
+      "avg_cost": 3.0469,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "SOFI",
+      "revolut_ticker": "SOFI",
+      "net_qty": 18.82075472,
+      "avg_cost": 26.5,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "UBER",
+      "revolut_ticker": "UBER",
+      "net_qty": 4.02264107,
+      "avg_cost": 87.01,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "UDIV1",
+      "revolut_ticker": "UDIV1",
+      "net_qty": 28.00492887,
+      "avg_cost": 8.93,
+      "currency": "EUR",
+      "source": "revolut"
+    },
+    {
+      "ticker": "URA",
+      "revolut_ticker": "URNU",
+      "net_qty": 16.40687229,
+      "avg_cost": 23.2297,
+      "currency": "EUR",
+      "source": "revolut"
+    },
+    {
+      "ticker": "VALE",
+      "revolut_ticker": "VALE",
+      "net_qty": 21.48557397,
+      "avg_cost": 16.29,
+      "currency": "USD",
+      "source": "revolut"
+    },
+    {
+      "ticker": "ZETA",
+      "revolut_ticker": "ZETA",
+      "net_qty": 14.72129538,
+      "avg_cost": 20.38,
+      "currency": "USD",
+      "source": "revolut"
+    }
+  ],
+  "cash_usd": 11590.6
+}

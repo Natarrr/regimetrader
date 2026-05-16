@@ -10,7 +10,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from backend.market_intel.generate_top_lists import _cross_sectional_normalize, FACTOR_FIELDS
+from backend.market_intel.generate_top_lists import (
+    _apply_vix_overlay,
+    _cross_sectional_normalize,
+    FACTOR_FIELDS,
+)
 
 
 def _make_results(n: int, overrides: dict | None = None) -> list:
@@ -87,3 +91,56 @@ class TestCrossSectionalNormalize:
         # The 49 normal tickers should not all map to near-zero
         normal_scores = [normed[i]["macro"] for i in range(49)]
         assert max(normal_scores) > 0.30   # not all collapsed
+
+    def test_all_zero_values_penalised_not_neutral(self):
+        """A fully dead API feed (all 0.0) must return 0.0, not the neutral 0.5."""
+        results = _make_results(5, {"edgar_score": [0.0, 0.0, 0.0, 0.0, 0.0]})
+        normed  = _cross_sectional_normalize(results)
+        for row in normed:
+            assert row["edgar"] == pytest.approx(0.0, abs=1e-9)
+
+    def test_null_values_penalised_not_neutral(self):
+        """Explicit JSON null (None) must be treated as 0.0 — same as dead API feed."""
+        base = {
+            "edgar_score": None, "insider_score": None,
+            "congress_score": None, "news_score": None, "momentum_score": None,
+        }
+        results = [dict(base) for _ in range(4)]
+        normed  = _cross_sectional_normalize(results)
+        for row in normed:
+            for v in row.values():
+                assert v == pytest.approx(0.0, abs=1e-9)
+
+    def test_null_mixed_with_real_values_does_not_get_neutral_credit(self):
+        """Tickers with None score must rank below tickers with a real positive score."""
+        results = _make_results(3, {"edgar_score": [None, None, 0.80]})
+        normed  = _cross_sectional_normalize(results)
+        # Real score should normalise higher than null-coerced 0.0
+        assert normed[2]["edgar"] > normed[0]["edgar"]
+        assert normed[2]["edgar"] > normed[1]["edgar"]
+
+
+class TestVixOverlay:
+    def test_normal_regime_no_dampening(self):
+        assert _apply_vix_overlay(0.80, 24.9) == pytest.approx(0.80)
+
+    def test_bear_regime_mild_penalty(self):
+        assert _apply_vix_overlay(1.0, 25.0) == pytest.approx(0.80)
+
+    def test_bear_regime_upper_boundary(self):
+        assert _apply_vix_overlay(1.0, 29.9) == pytest.approx(0.80)
+
+    def test_panic_regime_half_score(self):
+        assert _apply_vix_overlay(1.0, 30.0) == pytest.approx(0.50)
+
+    def test_crash_regime_severe_dampening(self):
+        assert _apply_vix_overlay(1.0, 40.0) == pytest.approx(0.20)
+
+    def test_vix_none_no_change(self):
+        assert _apply_vix_overlay(0.75, None) == pytest.approx(0.75)
+
+    def test_dampening_preserves_relative_ranking(self):
+        """Higher raw score stays higher after dampening (monotone transform)."""
+        high = _apply_vix_overlay(0.80, 35.0)
+        low  = _apply_vix_overlay(0.40, 35.0)
+        assert high > low

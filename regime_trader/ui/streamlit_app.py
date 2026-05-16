@@ -44,7 +44,8 @@ log = logging.getLogger(__name__)
 # Pages directory (project root / pages/)
 _PAGES_DIR = _ROOT / "pages"
 
-_REVOLUT_PORTFOLIO_PATH = _ROOT / "data" / "revolut_portfolio.json"
+_REVOLUT_PORTFOLIO_PATH     = _ROOT / "data" / "revolut_portfolio.json"
+_REVOLUT_COMMODITIES_PATH  = _ROOT / "data" / "revolut_commodities.json"
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -52,6 +53,12 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
+)
+
+# Hide Streamlit's auto-generated multi-page nav that appears when a pages/ directory exists
+st.markdown(
+    "<style>[data-testid='stSidebarNav']{display:none}</style>",
+    unsafe_allow_html=True,
 )
 
 _FMP_KEY = os.getenv("FMP_API_KEY", "")
@@ -349,6 +356,18 @@ def _load_revolut_positions() -> Optional[Dict[str, Any]]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _load_revolut_commodities() -> Optional[Dict[str, Any]]:
+    """Load persisted Revolut commodities. Returns None if not yet imported."""
+    try:
+        return json.loads(_REVOLUT_COMMODITIES_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        log.warning("revolut_commodities.json read failed: %s", exc)
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _load_portfolio_history(period: str = "1M") -> Optional[Dict[str, Any]]:
     """Fetch Alpaca portfolio equity history for the given period.
 
@@ -417,8 +436,8 @@ def _fetch_live_prices(tickers: list[str]) -> Dict[str, float]:
         return {}
 
 
-def _render_revolut_portfolio() -> None:
-    """Render Revolut portfolio block — live prices + P&L vs avg cost."""
+def _render_revolut_portfolio(prices: Optional[Dict[str, float]] = None) -> float:
+    """Render Revolut portfolio block — live prices + P&L vs avg cost. Returns total market value."""
     import pandas as pd
 
     data = _load_revolut_positions()
@@ -428,20 +447,21 @@ def _render_revolut_portfolio() -> None:
             "No Revolut portfolio imported yet. "
             "Go to **Portfolio Sync** tab to upload your statement."
         )
-        return
+        return 0.0
 
-    positions = data.get("positions", [])
+    positions   = data.get("positions", [])
     imported_at = data.get("imported_at", "—")
 
     st.caption(f"Revolut portfolio · Imported: **{imported_at}** · {len(positions)} positions")
 
-    us_tickers = [p["ticker"] for p in positions]
-    with st.spinner("Fetching live prices…"):
-        prices = _fetch_live_prices(us_tickers)
+    if prices is None:
+        us_tickers = [p["ticker"] for p in positions]
+        with st.spinner("Fetching live prices…"):
+            prices = _fetch_live_prices(us_tickers)
 
     rows = []
-    total_cost   = 0.0
-    total_value  = 0.0
+    total_cost  = 0.0
+    total_value = 0.0
 
     for pos in positions:
         ticker   = pos["ticker"]
@@ -469,16 +489,67 @@ def _render_revolut_portfolio() -> None:
             "Unreal. %":   f"{unreal_pct:+.2f}%" if unreal_pct is not None else "—",
         })
 
-    has_prices = bool(prices)
-    total_pl  = (total_value - total_cost) if has_prices else 0.0
+    total_pl  = (total_value - total_cost) if total_value else 0.0
     total_pct = (total_pl / total_cost * 100) if total_cost > 0 else 0.0
+    cash_usd  = float(data.get("cash_usd", 0.0))
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Portfolio Value",  f"{total_value:,.2f}" if total_value else "—")
-    c2.metric("Total Cost Basis", f"{total_cost:,.2f}")
-    c3.metric("Total P&L",        f"{total_pl:+,.2f}", f"{total_pct:+.2f}%")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Market Value",    f"{total_value:,.2f}" if total_value else "—")
+    c2.metric("Cash Invested",   f"{total_cost:,.2f}")
+    c3.metric("Unrealised P&L",  f"{total_pl:+,.2f}", f"{total_pct:+.2f}%")
+    c4.metric("Cash to Invest",  f"${cash_usd:,.2f}" if cash_usd else "—",
+              help="Uninvested cash computed from full transaction history")
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    return total_value
+
+
+def _render_revolut_commodities(prices: Optional[Dict[str, float]] = None) -> float:
+    """Render Revolut metals/commodities block — live spot prices + quantity. Returns total value."""
+    import pandas as pd
+
+    data = _load_revolut_commodities()
+
+    if data is None:
+        st.info(
+            "No commodities imported yet. "
+            "Go to **Portfolio Sync** tab to upload your metals account statement."
+        )
+        return 0.0
+
+    positions   = data.get("positions", [])
+    imported_at = data.get("imported_at", "—")
+
+    if not positions:
+        st.info("No commodity holdings found in the last import.")
+        return 0.0
+
+    st.caption(f"Revolut commodities · Imported: **{imported_at}** · {len(positions)} holdings")
+
+    if prices is None:
+        yf_tickers = [p["yf_ticker"] for p in positions if p.get("yf_ticker")]
+        with st.spinner("Fetching spot prices…"):
+            prices = _fetch_live_prices(yf_tickers) if yf_tickers else {}
+
+    rows = []
+    total_value = 0.0
+    for pos in positions:
+        yf    = pos.get("yf_ticker")
+        price = prices.get(yf) if yf else None
+        amount = pos["amount"]
+        value  = amount * price if price is not None else None
+        if value is not None:
+            total_value += value
+        rows.append({
+            "Commodity":        pos["name"],
+            "Code":             pos["commodity"],
+            "Amount":           f"{amount:.6f} {pos['unit']}",
+            "Spot Price (USD)": f"{price:,.2f}" if price is not None else "—",
+            "Value (USD)":      f"{value:,.2f}"  if value is not None else "—",
+        })
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    return total_value
 
 
 def _render_portfolio_chart(history: Dict[str, Any]) -> None:
@@ -721,6 +792,7 @@ def _render_live_monitor() -> None:
         _load_vix_history.clear()
         _load_portfolio_history.clear()
         _load_revolut_positions.clear()
+        _load_revolut_commodities.clear()
 
     regime_data = _load_regime()
     regime      = regime_data.get("regime", "Unknown")
@@ -732,21 +804,63 @@ def _render_live_monitor() -> None:
     }
     regime_icon = _REGIME_COLOR.get(regime, "❓")
 
-    # ── Row 1: Regime metric row ──────────────────────────────────────────────
+    # ── Pre-fetch all prices (stocks + metals) in a single call ───────────────
+    _revolut_data    = _load_revolut_positions()
+    _commodities_data = _load_revolut_commodities()
+    _stock_tickers   = [p["ticker"] for p in (_revolut_data or {}).get("positions", [])]
+    _comm_tickers    = [p["yf_ticker"] for p in (_commodities_data or {}).get("positions", []) if p.get("yf_ticker")]
+    _all_tickers     = _stock_tickers + _comm_tickers
+    with st.spinner("Fetching live prices…"):
+        _all_prices = _fetch_live_prices(_all_tickers) if _all_tickers else {}
+
+    _stock_val = sum(
+        p["net_qty"] * _all_prices.get(p["ticker"], 0)
+        for p in (_revolut_data or {}).get("positions", [])
+        if _all_prices.get(p["ticker"])
+    )
+    _comm_val = sum(
+        p["amount"] * _all_prices.get(p.get("yf_ticker", ""), 0)
+        for p in (_commodities_data or {}).get("positions", [])
+        if p.get("yf_ticker") and _all_prices.get(p["yf_ticker"])
+    )
+    _cash_usd = float((_revolut_data or {}).get("cash_usd", 0.0))
+    _invested_val = sum(
+        p["net_qty"] * p["avg_cost"]
+        for p in (_revolut_data or {}).get("positions", [])
+    )
+    _total_val = _stock_val + _comm_val + _cash_usd
+    _total_pl  = (_total_val - _invested_val - _cash_usd) if _total_val else 0.0
+    _total_pct = (_total_pl / _invested_val * 100) if _invested_val else 0.0
+
+    # ── Row 1: Regime + combined portfolio value ───────────────────────────────
     col1, col2, col3 = st.columns(3)
     col1.metric(
         "Regime",
         f"{regime_icon} {regime}",
         f"VIX {vix:.1f}" if vix else None,
     )
-    col2.metric("Portfolio Value", "—")
-    col3.metric("Daily P&L", "—")
+    col2.metric(
+        "Total Portfolio",
+        f"${_total_val:,.2f}" if _total_val else "—",
+        f"Stocks ${_stock_val:,.2f}  ·  Metals ${_comm_val:,.2f}  ·  Cash ${_cash_usd:,.2f}" if _total_val else None,
+    )
+    col3.metric(
+        "Unrealised P&L",
+        f"${_total_pl:+,.2f}" if _invested_val else "—",
+        f"{_total_pct:+.2f}% on invested capital" if _invested_val else None,
+    )
 
     st.divider()
 
     # ── Revolut Portfolio (primary) ───────────────────────────────────────────
     st.subheader("📈 Revolut Portfolio")
-    _render_revolut_portfolio()
+    _render_revolut_portfolio(prices=_all_prices)
+
+    st.divider()
+
+    # ── Revolut Commodities ───────────────────────────────────────────────────
+    st.subheader("🪙 Commodities & Metals")
+    _render_revolut_commodities(prices=_all_prices)
 
     st.divider()
 
@@ -845,7 +959,6 @@ def _render_vix_sparkline() -> None:
         line_color = "#ff4d6d" if latest_vix >= 25 else "#f5a623" if latest_vix >= 18 else "#00d26a"
         fill_rgba  = f"rgba(245,166,35,0.10)" if latest_vix >= 18 else "rgba(0,210,106,0.10)"
 
-        import plotly.graph_objects as go
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             y=history,
@@ -1157,90 +1270,145 @@ def _render_macro_intel() -> None:
 
 
 def _render_portfolio_sync() -> None:
-    """Render the Portfolio Sync tab — Revolut XLSX importer."""
-    from regime_trader.services.revolut_parser import parse_xlsx
+    """Render the Portfolio Sync tab — two upload sections: stocks + commodities."""
     from regime_trader.utils.io import save_json_atomic
     import pandas as pd
+    from datetime import datetime, timezone
 
     st.header("Portfolio Sync — Revolut Import")
 
-    # ── Last import badge ──────────────────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # Section 1 — Stocks
+    # ════════════════════════════════════════════════════════
+    st.subheader("📈 Stocks")
+
     if _REVOLUT_PORTFOLIO_PATH.exists():
         try:
             existing = json.loads(_REVOLUT_PORTFOLIO_PATH.read_text(encoding="utf-8"))
             imported_at = existing.get("imported_at", "unknown")
             n_pos = len(existing.get("positions", []))
-            st.info(f"📋 Last import: **{imported_at}** · {n_pos} positions loaded")
+            st.info(f"📋 Last import: **{imported_at}** · {n_pos} positions")
         except Exception:
             pass
 
     st.markdown(
-        "Upload your Revolut trading account statement (`.xlsx`). "
+        "Upload your **Revolut trading account statement** (`.xlsx`). "
         "The parser nets all BUY/SELL transactions to derive your current holdings."
     )
 
-    uploaded = st.file_uploader(
-        "Revolut account statement",
+    uploaded_stocks = st.file_uploader(
+        "Revolut trading account statement",
         type=["xlsx"],
-        key="revolut_upload",
+        key="revolut_stocks_upload",
     )
 
-    if not uploaded:
-        return
-
-    # ── Parse ──────────────────────────────────────────────────────────────────
-    try:
-        import tempfile
-        import shutil
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-            shutil.copyfileobj(uploaded, tmp)
-            tmp_path = tmp.name
+    if uploaded_stocks:
+        from regime_trader.services.revolut_parser import parse_xlsx, compute_cash_balance_usd
+        import io
         try:
-            positions = parse_xlsx(tmp_path)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-    except Exception as exc:
-        st.error(f"Failed to parse file: {exc}")
-        return
-
-    if not positions:
-        st.warning("No open positions found in this statement.")
-        return
-
-    # ── Preview ────────────────────────────────────────────────────────────────
-    st.subheader(f"Preview — {len(positions)} positions")
-    try:
-        df = pd.DataFrame(positions)
-        df_display = df[["ticker", "revolut_ticker", "net_qty", "avg_cost", "currency"]].copy()
-        df_display.columns = ["Ticker", "Revolut Symbol", "Net Qty", "Avg Cost", "Currency"]
-        df_display["Avg Cost"] = df_display["Avg Cost"].map("{:.4f}".format)
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
-    except Exception as exc:
-        st.error(f"Failed to build preview table: {exc}")
-        return
-
-    # ── Confirm ────────────────────────────────────────────────────────────────
-    if st.button("✅ Confirm & Save Portfolio", type="primary"):
-        from datetime import datetime, timezone
-        payload = {
-            "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            "positions":   positions,
-        }
-        _REVOLUT_PORTFOLIO_PATH.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            save_json_atomic(_REVOLUT_PORTFOLIO_PATH, payload)
+            raw_bytes = uploaded_stocks.read()
+            positions  = parse_xlsx(io.BytesIO(raw_bytes))
+            cash_usd   = compute_cash_balance_usd(io.BytesIO(raw_bytes))
         except Exception as exc:
-            st.error(f"Failed to save portfolio: {exc}")
-            return
-        st.success(
-            f"Portfolio saved — {len(positions)} positions. "
-            "Live Monitor and Portfolio Advisor will now use your Revolut data."
-        )
-        _load_revolut_positions.clear()
-        st.rerun()
+            st.error(f"Failed to parse file: {exc}")
+        else:
+            if not positions:
+                st.warning("No open positions found in this statement.")
+            else:
+                st.subheader(f"Preview — {len(positions)} positions")
+                try:
+                    df = pd.DataFrame(positions)
+                    df_display = df[["ticker", "revolut_ticker", "net_qty", "avg_cost", "currency"]].copy()
+                    df_display.columns = ["Ticker", "Revolut Symbol", "Net Qty", "Avg Cost", "Currency"]
+                    df_display["Avg Cost"] = df_display["Avg Cost"].map("{:.4f}".format)
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.error(f"Failed to build preview table: {exc}")
+                else:
+                    st.info(f"💵 Estimated uninvested cash: **${cash_usd:,.2f}** (computed from full transaction history)")
+                    if st.button("✅ Confirm & Save Portfolio", type="primary", key="save_stocks"):
+                        payload = {
+                            "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                            "positions":   positions,
+                            "cash_usd":    cash_usd,
+                        }
+                        _REVOLUT_PORTFOLIO_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        try:
+                            save_json_atomic(_REVOLUT_PORTFOLIO_PATH, payload)
+                        except Exception as exc:
+                            st.error(f"Failed to save portfolio: {exc}")
+                        else:
+                            st.success(
+                                f"Stocks portfolio saved — {len(positions)} positions · ${cash_usd:,.2f} uninvested cash."
+                            )
+                            _load_revolut_positions.clear()
+                            st.rerun()
+
+    st.divider()
+
+    # ════════════════════════════════════════════════════════
+    # Section 2 — Commodities & Metals
+    # ════════════════════════════════════════════════════════
+    st.subheader("🪙 Commodities & Metals")
+
+    if _REVOLUT_COMMODITIES_PATH.exists():
+        try:
+            existing_c = json.loads(_REVOLUT_COMMODITIES_PATH.read_text(encoding="utf-8"))
+            imported_at_c = existing_c.get("imported_at", "unknown")
+            n_comm = len(existing_c.get("positions", []))
+            st.info(f"📋 Last import: **{imported_at_c}** · {n_comm} holdings")
+        except Exception:
+            pass
+
+    st.markdown(
+        "Upload your **Revolut metals account statement** (`.xlsx`). "
+        "The parser reads your XAU/XAG balances from COMPLETED transactions."
+    )
+
+    uploaded_commodities = st.file_uploader(
+        "Revolut metals account statement",
+        type=["xlsx"],
+        key="revolut_commodities_upload",
+    )
+
+    if uploaded_commodities:
+        from regime_trader.services.revolut_commodities_parser import parse_commodities_xlsx
+        import io
+        try:
+            commodity_positions = parse_commodities_xlsx(io.BytesIO(uploaded_commodities.read()))
+        except Exception as exc:
+            st.error(f"Failed to parse commodities file: {exc}")
+        else:
+            if not commodity_positions:
+                st.warning("No commodity holdings found in this statement.")
+            else:
+                st.subheader(f"Preview — {len(commodity_positions)} holdings")
+                try:
+                    df_c = pd.DataFrame(commodity_positions)[
+                        ["commodity", "name", "amount", "unit", "yf_ticker"]
+                    ].copy()
+                    df_c.columns = ["Code", "Name", "Amount", "Unit", "YF Ticker"]
+                    df_c["Amount"] = df_c["Amount"].map("{:.6f}".format)
+                    st.dataframe(df_c, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.error(f"Failed to build preview: {exc}")
+                else:
+                    if st.button("✅ Confirm & Save Commodities", type="primary", key="save_commodities"):
+                        payload_c = {
+                            "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                            "positions":   commodity_positions,
+                        }
+                        _REVOLUT_COMMODITIES_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        try:
+                            save_json_atomic(_REVOLUT_COMMODITIES_PATH, payload_c)
+                        except Exception as exc:
+                            st.error(f"Failed to save commodities: {exc}")
+                        else:
+                            st.success(
+                                f"Commodities saved — {len(commodity_positions)} holdings."
+                            )
+                            _load_revolut_commodities.clear()
+                            st.rerun()
 
 
 def _render_dashboard() -> None:

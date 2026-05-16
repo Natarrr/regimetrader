@@ -20,6 +20,13 @@ import openpyxl
 _BUY_TYPES  = {"BUY - MARKET", "BUY - LIMIT", "BUY - STOP"}
 _SELL_TYPES = {"SELL - MARKET", "SELL - LIMIT", "SELL - STOP"}
 
+# Transaction types that ADD cash (positive) or REMOVE cash (negative Total Amount already embedded)
+_CASH_FLOW_TYPES = {
+    "CASH TOP-UP", "CASH WITHDRAWAL",
+    "SELL - MARKET", "SELL - LIMIT", "SELL - STOP",
+    "DIVIDEND", "REWARD", "RETURN OF CAPITAL", "MERGER - CASH",
+}
+
 _DEFAULT_MAP = Path(__file__).parent.parent.parent / "data" / "revolut_ticker_map.json"
 
 
@@ -88,6 +95,62 @@ def net_positions_from_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
 
     return sorted(positions, key=lambda p: p["ticker"])
+
+
+def compute_cash_balance_usd(filepath: str | Path) -> float:
+    """Compute net uninvested cash balance in USD from a full Revolut trading XLSX.
+
+    Logic:
+      CASH TOP-UP / SELL / DIVIDEND / REWARD etc. → add amount (income or inflow)
+      BUY → subtract amount (Total Amount is positive but represents outflow)
+      CASH WITHDRAWAL → add amount (already negative in Total Amount field)
+      Non-USD amounts are converted to USD using the stored FX Rate column.
+
+    Returns the net cash balance in USD (may be approximate due to FX rounding).
+    """
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+
+    headers: Optional[List[str]] = None
+    header_row_idx = 0
+    for i, row in enumerate(ws.iter_rows(values_only=True), 1):
+        if row and str(row[0]).strip() == "Date":
+            headers = [str(c).strip() if c is not None else "" for c in row]
+            header_row_idx = i
+            break
+
+    if headers is None:
+        return 0.0
+
+    col = {h: i for i, h in enumerate(headers)}
+    if "Total Amount" not in col:
+        return 0.0
+
+    cash_usd = 0.0
+    for raw in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+        tx_type   = str(raw[col["Type"]]).strip() if "Type" in col and raw[col["Type"]] is not None else ""
+        total_raw = raw[col["Total Amount"]]
+        currency  = str(raw[col["Currency"]]).strip() if "Currency" in col and raw[col["Currency"]] else "USD"
+        fx_raw    = raw[col["FX Rate"]] if "FX Rate" in col else None
+        fx_rate   = float(fx_raw) if fx_raw is not None else 1.0
+
+        if not tx_type or total_raw is None:
+            continue
+        parts = str(total_raw).strip().split()
+        try:
+            amount = float(parts[-1].replace(",", ""))
+        except (ValueError, IndexError):
+            continue
+
+        # Convert non-USD to USD using the stored FX Rate
+        amount_usd = amount * fx_rate if currency != "USD" else amount
+
+        if tx_type in _BUY_TYPES:
+            cash_usd -= amount_usd  # BUY: data shows positive, but it is cash OUT
+        elif tx_type in _CASH_FLOW_TYPES:
+            cash_usd += amount_usd  # WITHDRAWAL already carries negative sign
+
+    return round(cash_usd, 2)
 
 
 def parse_xlsx(

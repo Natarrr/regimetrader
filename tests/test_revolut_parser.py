@@ -1,15 +1,18 @@
 """tests/test_revolut_parser.py — unit tests for Revolut XLSX parser"""
 from __future__ import annotations
 
-import json
+import io
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import openpyxl
 import pytest
 
-from regime_trader.services.revolut_parser import parse_xlsx, net_positions_from_rows
+from regime_trader.services.revolut_parser import (
+    compute_cash_balance_usd,
+    net_positions_from_rows,
+    parse_xlsx,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -24,6 +27,19 @@ def _make_xlsx(rows: list[tuple]) -> Path:
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     wb.save(tmp.name)
     return Path(tmp.name)
+
+
+def _make_cash_xlsx(rows: list[tuple]) -> io.BytesIO:
+    """Write a BytesIO XLSX with the full Revolut header (including Total Amount) for cash tests."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(("Date", "Ticker", "Type", "Quantity", "Price per share", "Total Amount", "Currency", "FX Rate"))
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -133,8 +149,60 @@ class TestParseXlsx:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.append(("Date", "Ticker", "Type"))  # Missing Quantity and Price per share
-        import tempfile
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
         wb.save(tmp.name)
         with pytest.raises(ValueError, match="missing required columns"):
             parse_xlsx(Path(tmp.name), ticker_map={})
+
+
+class TestComputeCashBalanceUsd:
+    def test_cash_top_up_adds_to_balance(self):
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP", None, None, "USD 5000", "USD", 1.0),
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(5000.0)
+
+    def test_buy_reduces_cash(self):
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP",  None, None, "USD 2000", "USD", 1.0),
+            ("2026-01-02", "OXY", "BUY - MARKET", 10, "USD 50", "USD 500", "USD", 1.0),
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(1500.0)
+
+    def test_sell_adds_back_to_cash(self):
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP",   None, None, "USD 1000", "USD", 1.0),
+            ("2026-01-02", "OXY", "BUY - MARKET",  5, "USD 50", "USD 250", "USD", 1.0),
+            ("2026-01-03", "OXY", "SELL - MARKET", 5, "USD 60", "USD 300", "USD", 1.0),
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(1050.0)
+
+    def test_fx_conversion_applied(self):
+        """EUR amount * FX rate should give USD equivalent."""
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP", None, None, "EUR 1000", "EUR", 1.10),
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(1100.0)
+
+    def test_blank_rows_ignored(self):
+        """Rows with empty Type must not affect the balance."""
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP", None, None, "USD 1000", "USD", 1.0),
+            (None, None, None, None, None, "USD 999", "USD", 1.0),  # blank type row
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(1000.0)
+
+    def test_withdrawal_already_negative(self):
+        """Revolut encodes withdrawals with a negative Total Amount."""
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP",    None, None, "USD 2000", "USD", 1.0),
+            ("2026-01-02", None, "CASH WITHDRAWAL", None, None, "USD -500", "USD", 1.0),
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(1500.0)
+
+    def test_missing_total_amount_row_skipped(self):
+        buf = _make_cash_xlsx([
+            ("2026-01-01", None, "CASH TOP-UP", None, None, "USD 800", "USD", 1.0),
+            ("2026-01-02", None, "DIVIDEND",    None, None, None,       "USD", 1.0),
+        ])
+        assert compute_cash_balance_usd(buf) == pytest.approx(800.0)

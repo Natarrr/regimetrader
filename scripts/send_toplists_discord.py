@@ -71,7 +71,7 @@ _BADGE_EMOJI = {
 
 def _score_bar(score: float, width: int = 8) -> str:
     """Compact ASCII progress bar: ████░░░░"""
-    filled = round(score * width)
+    filled = min(width, max(0, round(score * width)))
     return "█" * filled + "░" * (width - filled)
 
 
@@ -174,6 +174,19 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
             "Check the `edgar_3x` workflow on GitHub Actions."
         )
         color = _COLOR_RED
+
+    # Macro kill-switch — override color and warn when VIX >= 30
+    kill_switch = top_lists.get("kill_switch", False)
+    if kill_switch:
+        color = _COLOR_RED
+        vix_val  = top_lists.get("vix")
+        vix_mult = top_lists.get("vix_multiplier", 1.0)
+        vix_note = f" VIX {vix_val:.1f} ·" if vix_val is not None else ""
+        stale_warning += (
+            f"\n⛔ **MACRO KILL-SWITCH ACTIVE** —{vix_note} "
+            f"all scores dampened ×{vix_mult:.2f}. "
+            "Do NOT act on HIGH BUY signals."
+        )
 
     description = (
         f"**Universe:** {ticker_count} tickers  |  "

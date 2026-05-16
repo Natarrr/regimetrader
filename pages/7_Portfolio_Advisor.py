@@ -107,13 +107,14 @@ def _get_claude_narrative(ticker: str, advice: PositionAdvice, regime: str) -> s
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=_ANTHROPIC_KEY)
-        f = advice.factors
+        factors = advice.factors
+        score_display = f"{advice.final_score:.3f}" if advice.final_score is not None else "N/A"
         prompt = (
             f"You are a quantitative analyst. In exactly 2 sentences, explain why "
             f"{ticker} signals {advice.signal} in the current {regime} regime. "
-            f"Factor scores: Edgar={f.get('edgar', 0):.2f}, Insider={f.get('insider', 0):.2f}, "
-            f"Congress={f.get('congress', 0):.2f}, News={f.get('news', 0):.2f}, "
-            f"Macro={f.get('macro', 0):.2f}. Overall score: {advice.final_score:.3f if advice.final_score is not None else 'N/A'}. "
+            f"Factor scores: Edgar={factors.get('edgar', 0):.2f}, Insider={factors.get('insider', 0):.2f}, "
+            f"Congress={factors.get('congress', 0):.2f}, News={factors.get('news', 0):.2f}, "
+            f"Macro={factors.get('macro', 0):.2f}. Overall score: {score_display}. "
             f"Be specific about which factor drives the signal."
         )
         msg = client.messages.create(
@@ -217,36 +218,50 @@ def render() -> None:
 
     st.divider()
 
-    # ── Position table — sorted by urgency ────────────────────────────────────
-    sort_order = {"EXIT": 0, "REDUCE": 1, "ADD": 2, "HOLD": 3, "—": 4}
-    advice_list.sort(key=lambda a: sort_order.get(a.signal, 9))
+    # ── Position table — scored first (EXIT→REDUCE→ADD→HOLD), unscored last ────
+    sort_order = {"EXIT": 0, "REDUCE": 1, "ADD": 2, "HOLD": 3, "—": 9}
+    advice_list.sort(key=lambda a: (1 if a.not_in_universe else 0, sort_order.get(a.signal, 9)))
 
-    for adv in advice_list:
-        signal_color = _SIGNAL_COLOR.get(adv.signal, "#888")
-        signal_icon  = _SIGNAL_ICON.get(adv.signal, "—")
-        score_str    = f"{adv.final_score:.3f}" if adv.final_score is not None else "N/A"
-        price        = prices.get(adv.ticker)
-        cost_basis   = adv.net_qty * adv.avg_cost
-        unreal_pl    = (adv.market_value - cost_basis) if price is not None else None
-        unreal_pct   = (unreal_pl / cost_basis * 100) if (unreal_pl is not None and cost_basis > 0) else None
+    # Divider between scored and unscored sections
+    scored_count = sum(1 for a in advice_list if not a.not_in_universe)
+    shown_divider = False
 
-        age_str  = f"Signal: {adv.signal_age_days}d old" if adv.signal_age_days is not None else ""
-        age_warn = adv.signal_age_days is not None and adv.signal_age_days > 30
+    for idx, adv in enumerate(advice_list):
+        if not shown_divider and adv.not_in_universe:
+            st.divider()
+            st.caption(f"❓ {len(advice_list) - scored_count} positions not in scoring universe — held but unscored")
+            shown_divider = True
 
-        header = (
-            f"**{adv.ticker}**"
-            + (f" *(Revolut: {adv.revolut_ticker})*" if adv.revolut_ticker != adv.ticker else "")
-            + "  ·  "
-            + f"<span style='color:{signal_color};font-weight:700;'>{signal_icon} {adv.signal}</span>"
-            + f"  ·  Score: **{score_str}**"
-            + (f"  ·  {unreal_pl:+,.2f} ({unreal_pct:+.1f}%)" if unreal_pl is not None else "")
-            + (f"  ·  ⚠️ {age_str}" if age_warn else (f"  ·  {age_str}" if age_str else ""))
-            + ("  ·  *not in universe*" if adv.not_in_universe else "")
-        )
+        price      = prices.get(adv.ticker)
+        cost_basis = adv.net_qty * adv.avg_cost
+        unreal_pl  = (adv.market_value - cost_basis) if price is not None else None
+        unreal_pct = (unreal_pl / cost_basis * 100) if (unreal_pl is not None and cost_basis > 0) else None
+
+        if adv.not_in_universe:
+            pl_str     = f"  ·  {unreal_pl:+,.2f} ({unreal_pct:+.1f}%)" if unreal_pl is not None else ""
+            header     = f"❓ {adv.ticker}  ·  Not scored{pl_str}"
+        else:
+            signal_icon = _SIGNAL_ICON.get(adv.signal, "—")
+            score_str   = f"{adv.final_score:.3f}"
+            age_str     = f"Signal: {adv.signal_age_days}d old" if adv.signal_age_days is not None else ""
+            age_warn    = adv.signal_age_days is not None and adv.signal_age_days > 30
+
+            label_parts = [f"{adv.ticker}"]
+            if adv.revolut_ticker != adv.ticker:
+                label_parts.append(f"(Revolut: {adv.revolut_ticker})")
+            label_parts.append(f"{signal_icon} {adv.signal}")
+            label_parts.append(f"Score: {score_str}")
+            if unreal_pl is not None:
+                label_parts.append(f"{unreal_pl:+,.2f} ({unreal_pct:+.1f}%)")
+            if age_warn:
+                label_parts.append(f"⚠️ {age_str}")
+            elif age_str:
+                label_parts.append(age_str)
+            header = "  ·  ".join(label_parts)
 
         with st.expander(header, expanded=False):
             if adv.not_in_universe:
-                st.caption("This ticker is not in the scoring universe — no factor data available.")
+                st.caption("Not in the 5-factor scoring universe — no signal available.")
             else:
                 # Factor bars
                 f = adv.factors

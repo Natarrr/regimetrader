@@ -58,7 +58,11 @@ FACTOR_FIELDS: Dict[str, str] = {
     "insider":  "insider_score",
     "congress": "congress_score",
     "news":     "news_score",
-    "macro":    "momentum_score",  # pipeline writes momentum_score; exposed as macro
+    # NOTE: the pipeline writes this field as "momentum_score" (price momentum alpha
+    # factor), not a true macro/beta factor. A real macro score (VIX, yields, oil)
+    # is applied as a multiplicative overlay via _apply_vix_overlay() below so that
+    # the absolute risk regime is separated from the cross-sectional ranking.
+    "macro":    "momentum_score",
 }
 
 _BADGES = [
@@ -91,8 +95,15 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     """Markowitz (1990 Nobel) — normalize each factor cross-sectionally to [0, 1].
 
     For each of the five factors, winsorizes at the 5th/95th percentile and
-    min-max scales across the full universe. A ticker with no peers (n=1) or
-    all identical scores receives 0.5 (neutral) for that factor.
+    min-max scales across the full universe.
+
+    Edge cases:
+      - Explicit null (None) in JSON → treated as 0.0, NOT as 0.5.
+        A dead API feed must not get a free neutral pass.
+      - All values identical AND zero (fully failed feed) → 0.0, not 0.5.
+        Penalises a completely dead API rather than rewarding it with neutral credit.
+      - All values identical AND non-zero → 0.5 (can't rank cross-sectionally; neutral).
+      - n == 1 with a non-zero value → 0.5 (single ticker, can't rank relatively).
 
     $x_{norm,i} = \\frac{winsorize(x_i) - \\min}{\\max - \\min}$
     """
@@ -102,8 +113,17 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
 
     normed_factors: Dict[str, np.ndarray] = {}
     for factor, field in FACTOR_FIELDS.items():
-        raw = np.array([float(r.get(field, 0.0)) for r in results])
-        if n == 1 or float(np.nanmax(raw)) == float(np.nanmin(raw)):
+        # Fix #1 + #2: safe None handling — explicit null → 0.0 (penalise, not neutral)
+        raw_values = [r.get(field) for r in results]
+        raw = np.array([float(v) if v is not None else 0.0 for v in raw_values])
+
+        rmax, rmin = float(np.nanmax(raw)), float(np.nanmin(raw))
+
+        if rmax == 0.0 and rmin == 0.0:
+            # Entire factor missing / API dead → penalise with 0.0, not neutral 0.5
+            normed_factors[factor] = np.full(n, 0.0)
+        elif n == 1 or rmax == rmin:
+            # Single ticker or all identical non-zero values → neutral 0.5
             normed_factors[factor] = np.full(n, 0.5)
         else:
             scaled = normalize_score(raw, lo_pct=5, hi_pct=95) / 100.0
@@ -118,8 +138,35 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     ]
 
 
-def _to_entry(row: Dict[str, Any], norm_factors: Dict[str, float]) -> Dict[str, Any]:
-    score = round(
+def _apply_vix_overlay(score: float, vix: Optional[float]) -> float:
+    """Multiplicative macro-regime penalty (absolute risk layer).
+
+    Cross-sectional ranking always produces relative winners even during a crash.
+    This overlay converts relative scores to absolute risk-adjusted scores by
+    dampening all signals when the VIX regime is elevated.
+
+      VIX ≥ 40 (Crash)  : ×0.20 — almost nothing should be HIGH BUY in a crash
+      VIX ≥ 30 (Panic)  : ×0.50 — significant systemic risk, dampen all buys
+      VIX ≥ 25 (Bear)   : ×0.80 — elevated risk, mild penalty
+      VIX  < 25 (Normal) : ×1.00 — no adjustment
+    """
+    if vix is None:
+        return score
+    if vix >= 40:
+        return score * 0.20
+    if vix >= 30:
+        return score * 0.50
+    if vix >= 25:
+        return score * 0.80
+    return score
+
+
+def _to_entry(
+    row: Dict[str, Any],
+    norm_factors: Dict[str, float],
+    vix: Optional[float] = None,
+) -> Dict[str, Any]:
+    raw_score = round(
         WEIGHTS["edgar"]    * norm_factors["edgar"] +
         WEIGHTS["insider"]  * norm_factors["insider"] +
         WEIGHTS["congress"] * norm_factors["congress"] +
@@ -127,11 +174,14 @@ def _to_entry(row: Dict[str, Any], norm_factors: Dict[str, float]) -> Dict[str, 
         WEIGHTS["macro"]    * norm_factors["macro"],
         4,
     )
+    # Fix #3: apply absolute macro-regime overlay AFTER cross-sectional ranking
+    score = round(_apply_vix_overlay(raw_score, vix), 4)
     return {
         "ticker":      row.get("ticker", "?"),
         "sector":      row.get("sector", "Unknown"),
         "cap_tier":    row.get("cap_tier", "large"),
         "market_cap":  float(row.get("market_cap", 0.0)),
+        "raw_score":   raw_score,   # pre-overlay, for diagnostics
         "final_score": score,
         "badge":       _badge(score),
         "ceo_buy":     bool(row.get("ceo_buy", False)),
@@ -160,6 +210,40 @@ def _sector_picks(entries: List[Dict[str, Any]], n: int = 3) -> Dict[str, List[D
     return result
 
 
+def _read_vix(log_dir: Path) -> Optional[float]:
+    """Return current VIX from market_state.json, or fall back to a yfinance fetch.
+
+    Keeping the VIX read outside the cross-sectional normaliser preserves the
+    separation between relative ranking (cross-section) and absolute regime risk
+    (VIX overlay).  Returns None only when both sources fail, in which case no
+    overlay is applied and a warning is emitted.
+    """
+    # Primary: market_state.json produced by engine_worker (avoids redundant API call)
+    market_state_path = log_dir / ".." / "data" / "market_state.json"
+    try:
+        ms = json.loads(market_state_path.resolve().read_text(encoding="utf-8"))
+        vix = ms.get("macro_status", {}).get("vix_latest")
+        if vix is not None:
+            log.info("VIX overlay: %.1f (from market_state.json)", float(vix))
+            return float(vix)
+    except Exception:
+        pass
+
+    # Fallback: direct yfinance fetch (adds ~1 s to pipeline but always fresh)
+    try:
+        import yfinance as yf
+        df = yf.download("^VIX", period="2d", interval="1d",
+                         progress=False, auto_adjust=True)
+        if not df.empty:
+            vix = float(df["Close"].squeeze().dropna().iloc[-1])
+            log.info("VIX overlay: %.1f (from yfinance fallback)", vix)
+            return vix
+    except Exception as exc:
+        log.warning("VIX fetch failed — no macro overlay applied: %s", exc)
+
+    return None
+
+
 def generate(
     status: Dict[str, Any],
     run_id: str,
@@ -170,11 +254,20 @@ def generate(
     if not results:
         log.warning("No results found in intel_source_status.json — producing empty top_lists")
 
+    # Fix #3: read current VIX once; passed into _to_entry for the macro overlay
+    current_vix = _read_vix(log_dir)
+    if current_vix is not None:
+        log.info(
+            "Macro overlay active -- VIX %.1f -> multiplier %.2f",
+            current_vix,
+            _apply_vix_overlay(1.0, current_vix),
+        )
+
     norm_factor_list = _cross_sectional_normalize(results)
     assert len(norm_factor_list) == len(results), (
         f"_cross_sectional_normalize returned {len(norm_factor_list)} rows for {len(results)} results"
     )
-    entries = [_to_entry(row, nf) for row, nf in zip(results, norm_factor_list)]
+    entries = [_to_entry(row, nf, vix=current_vix) for row, nf in zip(results, norm_factor_list)]
     _assign_cap_tiers(entries)
 
     score_desc = lambda e: e["final_score"]  # noqa: E731
@@ -189,16 +282,27 @@ def generate(
         key=score_desc, reverse=True,
     )[:5]
 
+    kill_switch = current_vix is not None and current_vix >= 30
     top_lists: Dict[str, Any] = {
-        "generated_at":  datetime.now(timezone.utc).isoformat(),
-        "source_run_id": run_id,
-        "ticker_count":  len(entries),
-        "weights":       WEIGHTS,
-        "top_buys":      top_buys,
-        "mid_caps":      mid_caps,
-        "small_caps":    small_caps,
-        "sector_picks":  _sector_picks(entries),
+        "generated_at":    datetime.now(timezone.utc).isoformat(),
+        "source_run_id":   run_id,
+        "ticker_count":    len(entries),
+        "weights":         WEIGHTS,
+        "vix":             current_vix,
+        "kill_switch":     kill_switch,
+        "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
+        "top_buys":        top_buys,
+        "mid_caps":        mid_caps,
+        "small_caps":      small_caps,
+        "sector_picks":    _sector_picks(entries),
     }
+    if kill_switch:
+        log.warning(
+            "⚠️  MACRO KILL-SWITCH ACTIVE — VIX %.1f — all scores dampened ×%.2f. "
+            "Do NOT send HIGH BUY alerts to Discord.",
+            current_vix,
+            top_lists["vix_multiplier"],
+        )
 
     out_json = log_dir / "top_lists.json"
     save_json_atomic(out_json, top_lists)
