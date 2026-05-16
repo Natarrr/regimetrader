@@ -337,6 +337,18 @@ _PERIOD_MAP = {"1W": ("1W", "1H"), "1M": ("1M", "1D"), "3M": ("3M", "1D"), "1Y":
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _load_revolut_positions() -> Optional[Dict[str, Any]]:
+    """Load persisted Revolut portfolio. Returns None if not yet imported."""
+    try:
+        return json.loads(_REVOLUT_PORTFOLIO_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        log.warning("revolut_portfolio.json read failed: %s", exc)
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _load_portfolio_history(period: str = "1M") -> Optional[Dict[str, Any]]:
     """Fetch Alpaca portfolio equity history for the given period.
 
@@ -376,6 +388,96 @@ def _load_portfolio_history(period: str = "1M") -> Optional[Dict[str, Any]]:
     except Exception as exc:
         log.warning("Portfolio history load failed: %s", exc)
         return None
+
+
+def _fetch_live_prices(tickers: list[str]) -> Dict[str, float]:
+    """Fetch latest close prices for a list of tickers via yfinance. Returns {} on failure."""
+    if not tickers:
+        return {}
+    try:
+        import yfinance as yf
+        ticker_list = list(tickers)
+        raw = yf.download(ticker_list, period="2d", interval="1d",
+                          progress=False, auto_adjust=True,
+                          group_by="ticker" if len(ticker_list) > 1 else None)
+        prices: Dict[str, float] = {}
+        for t in ticker_list:
+            try:
+                if len(ticker_list) == 1:
+                    col_data = raw["Close"].dropna()
+                else:
+                    col_data = raw[t]["Close"].dropna()
+                if not col_data.empty:
+                    prices[t] = float(col_data.iloc[-1])
+            except Exception:
+                pass
+        return prices
+    except Exception as exc:
+        log.warning("live price fetch failed: %s", exc)
+        return {}
+
+
+def _render_revolut_portfolio() -> None:
+    """Render Revolut portfolio block — live prices + P&L vs avg cost."""
+    import pandas as pd
+
+    data = _load_revolut_positions()
+
+    if data is None:
+        st.info(
+            "No Revolut portfolio imported yet. "
+            "Go to **Portfolio Sync** tab to upload your statement."
+        )
+        return
+
+    positions = data.get("positions", [])
+    imported_at = data.get("imported_at", "—")
+
+    st.caption(f"Revolut portfolio · Imported: **{imported_at}** · {len(positions)} positions")
+
+    us_tickers = [p["ticker"] for p in positions]
+    with st.spinner("Fetching live prices…"):
+        prices = _fetch_live_prices(us_tickers)
+
+    rows = []
+    total_cost   = 0.0
+    total_value  = 0.0
+
+    for pos in positions:
+        ticker   = pos["ticker"]
+        qty      = pos["net_qty"]
+        avg_cost = pos["avg_cost"]
+        price    = prices.get(ticker)
+
+        cost_basis = qty * avg_cost
+        mkt_value  = qty * price if price else None
+        unreal_pl  = (mkt_value - cost_basis) if mkt_value is not None else None
+        unreal_pct = (unreal_pl / cost_basis * 100) if (unreal_pl is not None and cost_basis > 0) else None
+
+        total_cost  += cost_basis
+        if mkt_value:
+            total_value += mkt_value
+
+        rows.append({
+            "Ticker":      ticker,
+            "Revolut":     pos.get("revolut_ticker", ticker),
+            "Qty":         f"{qty:.4f}",
+            "Avg Cost":    f"{avg_cost:.2f} {pos.get('currency','USD')}",
+            "Price":       f"{price:.2f}" if price else "—",
+            "Mkt Value":   f"{mkt_value:,.2f}" if mkt_value else "—",
+            "Unreal. P&L": f"{unreal_pl:+,.2f}" if unreal_pl is not None else "—",
+            "Unreal. %":   f"{unreal_pct:+.2f}%" if unreal_pct is not None else "—",
+        })
+
+    total_pl  = total_value - total_cost if total_value else 0.0
+    total_pct = (total_pl / total_cost * 100) if total_cost > 0 else 0.0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Portfolio Value",  f"{total_value:,.2f}" if total_value else "—")
+    c2.metric("Total Cost Basis", f"{total_cost:,.2f}")
+    c3.metric("Total P&L",        f"{total_pl:+,.2f}", f"{total_pct:+.2f}%")
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def _render_portfolio_chart(history: Dict[str, Any]) -> None:
@@ -601,11 +703,12 @@ def _render_live_monitor() -> None:
     """Render the Live Monitor tab — Revolut-style layout.
 
     Layout:
-      Row 1  : Regime  |  Portfolio Value  |  Daily P&L   (primary KPIs)
-      Section: Portfolio performance chart  (Revolut-style, period selectable)
-      Row 2  : Invested  |  Cash  |  Open Positions        (balance breakdown)
+      Row 1  : Regime metric row
+      Divider
+      Section: Revolut Portfolio (primary)
+      Divider
       Section: VIX 10-day sparkline
-      Section: Positions table
+      Section: Paper Trading (Alpaca) — collapsed expander
     """
     st.markdown(_CSS, unsafe_allow_html=True)
 
@@ -616,6 +719,7 @@ def _render_live_monitor() -> None:
         _load_regime.clear()
         _load_vix_history.clear()
         _load_portfolio_history.clear()
+        _load_revolut_positions.clear()
 
     regime_data = _load_regime()
     regime      = regime_data.get("regime", "Unknown")
@@ -627,99 +731,105 @@ def _render_live_monitor() -> None:
     }
     regime_icon = _REGIME_COLOR.get(regime, "❓")
 
-    # ── No Alpaca credentials — show regime only ──────────────────────────────
-    if not _HAS_ALPACA:
-        st.warning(
-            "**ALPACA_API_KEY / ALPACA_SECRET_KEY not set.** "
-            "Add them to `.env` and restart the app.",
-            icon="⚠️",
-        )
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Regime",          f"{regime_icon} {regime}",
-                    f"VIX {vix:.1f}" if vix else None)
-        col2.metric("Portfolio Value",  "—")
-        col3.metric("Daily P&L",        "—")
-        _render_vix_sparkline()
-        return
-
-    with st.spinner("Loading account…"):
-        acct = _load_alpaca_account()
-
-    if "error" in acct:
-        st.error(f"Alpaca connection failed: {acct['error']}")
-        return
-
-    paper_tag = " · Paper" if acct["paper"] else ""
-    pnl       = acct["daily_pnl"]
-    pnl_pct   = acct["daily_pnl_pct"]
-
-    # ── Row 1: Primary KPIs ───────────────────────────────────────────────────
+    # ── Row 1: Regime metric row ──────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
     col1.metric(
         "Regime",
         f"{regime_icon} {regime}",
         f"VIX {vix:.1f}" if vix else None,
     )
-    col2.metric(
-        "Portfolio Value",
-        f"${acct['portfolio_value']:,.2f}",
-        f"{pnl_pct:+.2f}% today",
-    )
-    col3.metric(
-        "Daily P&L",
-        f"${pnl:+,.2f}",
-        f"{pnl_pct:+.2f}%",
-    )
+    col2.metric("Portfolio Value", "—")
+    col3.metric("Daily P&L", "—")
 
-    st.caption(f"Alpaca · Status: **{acct['status']}**{paper_tag}")
+    st.divider()
 
-    # ── Portfolio performance chart ───────────────────────────────────────────
-    period_col, spacer = st.columns([3, 7])
-    period = period_col.radio(
-        "period",
-        ["1W", "1M", "3M", "1Y"],
-        index=1,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="portfolio_period",
-    )
+    # ── Revolut Portfolio (primary) ───────────────────────────────────────────
+    st.subheader("📈 Revolut Portfolio")
+    _render_revolut_portfolio()
 
-    with st.spinner("Loading chart…"):
-        port_history = _load_portfolio_history(period)
+    st.divider()
 
-    if port_history:
-        _render_portfolio_chart(port_history)
-    else:
-        _render_vix_sparkline()
-
-    # ── Row 2: Balance breakdown ──────────────────────────────────────────────
-    col4, col5, col6 = st.columns(3)
-    col4.metric("Invested",       f"${acct['amount_invested']:,.2f}")
-    col5.metric("Cash",           f"${acct['cash']:,.2f}")
-    col6.metric("Open Positions", len(acct["positions"]))
-
-    # ── VIX sparkline (always shown below the portfolio chart) ────────────────
+    # ── VIX sparkline ─────────────────────────────────────────────────────────
     _render_vix_sparkline()
 
-    # ── Positions table ───────────────────────────────────────────────────────
-    st.subheader(f"Positions ({len(acct['positions'])})")
-    positions = acct["positions"]
-    if not positions:
-        st.info("No open positions.")
-        return
+    # ── Paper Trading (Alpaca) — collapsed expander ───────────────────────────
+    with st.expander("📋 Paper Trading (Alpaca)", expanded=False):
+        if not _HAS_ALPACA:
+            st.warning(
+                "**ALPACA_API_KEY / ALPACA_SECRET_KEY not set.** "
+                "Add them to `.env` and restart the app.",
+                icon="⚠️",
+            )
+            return
 
-    import pandas as pd
+        with st.spinner("Loading account…"):
+            acct = _load_alpaca_account()
 
-    df = pd.DataFrame(positions)
-    df["Entry"]       = df["Entry"].map("${:,.2f}".format)
-    df["Price"]       = df["Price"].map("${:,.2f}".format)
-    df["Mkt Value"]   = df["Mkt Value"].map("${:,.2f}".format)
-    df["Unreal. P&L"] = df["Unreal. P&L"].map("${:+,.2f}".format)
-    df["Unreal. %"]   = df["Unreal. %"].map("{:+.2f}%".format)
-    df["Day P&L"]     = df["Day P&L"].map("${:+,.2f}".format)
-    df["Day %"]       = df["Day %"].map("{:+.2f}%".format)
+        if "error" in acct:
+            st.error(f"Alpaca connection failed: {acct['error']}")
+            return
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+        paper_tag = " · Paper" if acct["paper"] else ""
+        pnl       = acct["daily_pnl"]
+        pnl_pct   = acct["daily_pnl_pct"]
+
+        # ── Account metrics ───────────────────────────────────────────────────
+        a1, a2, a3 = st.columns(3)
+        a1.metric(
+            "Portfolio Value",
+            f"${acct['portfolio_value']:,.2f}",
+            f"{pnl_pct:+.2f}% today",
+        )
+        a2.metric(
+            "Daily P&L",
+            f"${pnl:+,.2f}",
+            f"{pnl_pct:+.2f}%",
+        )
+        a3.metric("Buying Power", f"${acct['buying_power']:,.2f}")
+
+        st.caption(f"Alpaca · Status: **{acct['status']}**{paper_tag}")
+
+        # ── Portfolio performance chart ───────────────────────────────────────
+        period_col, spacer = st.columns([3, 7])
+        period = period_col.radio(
+            "period",
+            ["1W", "1M", "3M", "1Y"],
+            index=1,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="portfolio_period",
+        )
+
+        with st.spinner("Loading chart…"):
+            port_history = _load_portfolio_history(period)
+
+        if port_history:
+            _render_portfolio_chart(port_history)
+
+        # ── Balance breakdown ─────────────────────────────────────────────────
+        col4, col5, col6 = st.columns(3)
+        col4.metric("Invested",       f"${acct['amount_invested']:,.2f}")
+        col5.metric("Cash",           f"${acct['cash']:,.2f}")
+        col6.metric("Open Positions", len(acct["positions"]))
+
+        # ── Positions table ───────────────────────────────────────────────────
+        st.subheader(f"Positions ({len(acct['positions'])})")
+        positions = acct["positions"]
+        if not positions:
+            st.info("No open positions.")
+        else:
+            import pandas as pd
+
+            df = pd.DataFrame(positions)
+            df["Entry"]       = df["Entry"].map("${:,.2f}".format)
+            df["Price"]       = df["Price"].map("${:,.2f}".format)
+            df["Mkt Value"]   = df["Mkt Value"].map("${:,.2f}".format)
+            df["Unreal. P&L"] = df["Unreal. P&L"].map("${:+,.2f}".format)
+            df["Unreal. %"]   = df["Unreal. %"].map("{:+.2f}%".format)
+            df["Day P&L"]     = df["Day P&L"].map("${:+,.2f}".format)
+            df["Day %"]       = df["Day %"].map("{:+.2f}%".format)
+
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 def _render_vix_sparkline() -> None:
