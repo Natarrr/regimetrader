@@ -454,26 +454,68 @@ def _render_portfolio_chart(history: Dict[str, Any]) -> None:
 # ── Sidebar: navigation + settings ───────────────────────────────────────────
 
 _NAV_PAGES = [
-    ("📊 Dashboard",          None,                    None),
-    ("💰 Monetary Pulse",     "1_Monetary_Pulse.py",   "monetary_pulse"),
-    ("📈 Volatility Brain",   "2_Volatility_Brain.py", "volatility_brain"),
-    ("🔭 Valuation Radar",    "3_Valuation_Radar.py",  "valuation_radar"),
-    ("🕸️ Contagion Web",      "4_Contagion_Web.py",    "contagion_web"),
-    ("🎯 Regime Prediction",  "5_Regime_Prediction.py","regime_prediction"),
+    ("📊 Dashboard",              None,                    None),
+    ("📅 Stock Picker",           "6_Stock_Picker.py",     "stock_picker"),
+    ("💼 Portfolio Advisor",      "7_Portfolio_Advisor.py","portfolio_advisor"),
+    ("💰 Monetary Pulse",         "1_Monetary_Pulse.py",   "monetary_pulse"),
+    ("📈 Volatility Brain",       "2_Volatility_Brain.py", "volatility_brain"),
+    ("🔭 Valuation Radar",        "3_Valuation_Radar.py",  "valuation_radar"),
+    ("🕸️ Contagion Web",          "4_Contagion_Web.py",    "contagion_web"),
+    ("🎯 Regime Prediction",      "5_Regime_Prediction.py","regime_prediction"),
 ]
 
 
+_NAV_SECTION_CSS = """
+<style>
+.rt-nav-section {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: rgba(255,255,255,0.30);
+    padding: 10px 4px 3px;
+    text-transform: uppercase;
+}
+</style>
+"""
+
+_ALPHA_ENGINE_PAGES = {"📅 Stock Picker", "💼 Portfolio Advisor"}
+_QUANT_MODEL_PAGES  = {"💰 Monetary Pulse", "📈 Volatility Brain",
+                        "🔭 Valuation Radar", "🕸️ Contagion Web", "🎯 Regime Prediction"}
+
+
 def _render_sidebar() -> str:
-    """Render sidebar navigation + settings. Returns selected page label."""
+    """Render sidebar navigation with section headers. Returns selected page label."""
     with st.sidebar:
+        st.markdown(_NAV_SECTION_CSS, unsafe_allow_html=True)
         st.markdown("## 🧭 Navigate")
-        labels = [label for label, _, _ in _NAV_PAGES]
-        selected = st.radio(
-            "page",
-            labels,
-            label_visibility="collapsed",
-            key="_sidebar_nav",
-        )
+
+        if "_nav_page" not in st.session_state:
+            st.session_state["_nav_page"] = "📊 Dashboard"
+
+        def _nav_btn(label: str) -> None:
+            is_active = st.session_state["_nav_page"] == label
+            if st.button(
+                label,
+                key=f"_nav_{label}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state["_nav_page"] = label
+                st.rerun()
+
+        st.markdown('<div class="rt-nav-section">── Alpha Engine ──</div>', unsafe_allow_html=True)
+        _nav_btn("📅 Stock Picker")
+        _nav_btn("💼 Portfolio Advisor")
+
+        st.markdown('<div class="rt-nav-section">── Quant Models ──</div>', unsafe_allow_html=True)
+        _nav_btn("💰 Monetary Pulse")
+        _nav_btn("📈 Volatility Brain")
+        _nav_btn("🔭 Valuation Radar")
+        _nav_btn("🕸️ Contagion Web")
+        _nav_btn("🎯 Regime Prediction")
+
+        st.markdown('<div class="rt-nav-section">── Dashboard ──</div>', unsafe_allow_html=True)
+        _nav_btn("📊 Dashboard")
 
         st.divider()
         st.markdown("## ⚙️ Settings")
@@ -500,7 +542,7 @@ def _render_sidebar() -> str:
             st.caption(f"Paper trading: **{_ALPACA_PAPER}**")
             st.caption(f"EDGAR User-Agent: `{_EDGAR_USER_AGENT}`")
 
-    return selected
+    return st.session_state.get("_nav_page", "📊 Dashboard")
 
 
 # ── Helper: API key warning banner ────────────────────────────────────────────
@@ -1033,14 +1075,12 @@ def _render_portfolio_sync() -> None:
 
 
 def _render_dashboard() -> None:
-    """Render the main dashboard with all six tabs."""
+    """Render the main dashboard with four tabs."""
     st.title("Regime Trader Dashboard")
     tabs = st.tabs([
         "📊 Live Monitor",
         "🧠 Market Intel",
         "🌍 Macro Intel",
-        "📋 Trade Log",
-        "📈 Regime History",
         "🔄 Portfolio Sync",
     ])
     with tabs[0]:
@@ -1050,10 +1090,6 @@ def _render_dashboard() -> None:
     with tabs[2]:
         _render_macro_intel()
     with tabs[3]:
-        _render_trade_log()
-    with tabs[4]:
-        _render_regime_history()
-    with tabs[5]:
         _render_portfolio_sync()
 
 
@@ -1067,8 +1103,6 @@ def main() -> None:
     whole dashboard.
     """
     selected = _render_sidebar()
-
-    # Build lookup from label → (filename, mod_name)
     _page_map = {label: (fn, mn) for label, fn, mn in _NAV_PAGES}
 
     if selected == "📊 Dashboard" or selected not in _page_map:
@@ -1086,12 +1120,6 @@ def main() -> None:
             f"**{selected}** could not be loaded. "
             "Check that all backend dependencies are installed and try again."
         )
-        with st.expander("Troubleshooting"):
-            st.markdown(
-                "This page requires packages from `backend/`. "
-                "Ensure `backend/data/fred_service.py`, `backend/quant_models/`, "
-                "and related modules are present in the project root."
-            )
         return
 
     if not hasattr(mod, "render"):
