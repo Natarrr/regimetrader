@@ -208,6 +208,53 @@ class TestQuiverClientCongressByTicker:
         assert result["NVDA"]["recency_days"] < 30
 
 
+class TestEnrichWithQuiver:
+    def test_no_api_key_sets_empty_quiver(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("QUIVER_API_KEY", raising=False)
+        from regime_trader.scanners.discovery_scanner import _enrich_with_quiver
+        results = [{"symbol": "NVDA"}, {"symbol": "AAPL"}]
+        enriched = _enrich_with_quiver(results)
+        for r in enriched:
+            assert r["quiver"] == {}
+
+    def test_with_api_key_attaches_quiver_keys(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from regime_trader.scanners.discovery_scanner import _enrich_with_quiver
+        from regime_trader.services.quiver_client import QuiverClient
+
+        with patch.object(QuiverClient, "congress_by_ticker", return_value={}), \
+             patch.object(QuiverClient, "get_insider_trades", return_value=[]), \
+             patch.object(QuiverClient, "get_13f_summary", return_value=[]), \
+             patch.object(QuiverClient, "get_lobbying", return_value=[]), \
+             patch.object(QuiverClient, "get_gov_contracts", return_value=[]):
+            results = [{"symbol": "NVDA"}]
+            enriched = _enrich_with_quiver(results)
+
+        q = enriched[0]["quiver"]
+        assert "congress" in q
+        assert "insider" in q
+        assert "f13" in q
+        assert "lobbying" in q
+        assert "gov_contracts" in q
+
+    def test_congress_data_attached_per_ticker(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from regime_trader.scanners.discovery_scanner import _enrich_with_quiver
+        from regime_trader.services.quiver_client import QuiverClient
+
+        congress = {"NVDA": {"purchases": 3, "sales": 0, "total": 3, "net": 3,
+                              "representatives": ["Pelosi"], "recency_days": 5}}
+        with patch.object(QuiverClient, "congress_by_ticker", return_value=congress), \
+             patch.object(QuiverClient, "get_insider_trades", return_value=[]), \
+             patch.object(QuiverClient, "get_13f_summary", return_value=[]), \
+             patch.object(QuiverClient, "get_lobbying", return_value=[]), \
+             patch.object(QuiverClient, "get_gov_contracts", return_value=[]):
+            results = [{"symbol": "NVDA"}]
+            enriched = _enrich_with_quiver(results)
+
+        assert enriched[0]["quiver"]["congress"]["purchases"] == 3
+
+
 class TestCIIsolation:
     def test_client_is_constructible_in_ci(self, tmp_path, monkeypatch):
         monkeypatch.setenv("QUIVER_API_KEY", "test-key")
