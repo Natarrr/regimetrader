@@ -884,10 +884,11 @@ def _render_explainability(results: List[Dict]) -> None:
     no additional network calls are made.
     """
     _WEIGHTS = {
-        "insider_score":       ("Insider",       0.25),
-        "institutional_score": ("Institutional", 0.20),
-        "momentum_score":      ("Momentum",      0.20),
-        "smart_money_score":   ("Smart Money",   0.35),
+        "edgar_score":    ("Edgar",    0.30),
+        "insider_score":  ("Insider",  0.25),
+        "congress_score": ("Congress", 0.20),
+        "news_score":     ("News",     0.15),
+        "macro_score":    ("Macro",    0.10),
     }
 
     for r in results:
