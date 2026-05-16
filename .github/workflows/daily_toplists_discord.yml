@@ -10,8 +10,9 @@ name: daily_toplists_discord
 # Inngest, or a cron VM) that converts local time to UTC before triggering
 # workflow_dispatch. See README → Operation Daily Checkup → DST.
 #
-# Artifact download: uses dawidd6/action-download-artifact@v3 to fetch the
+# Artifact download: uses dawidd6/action-download-artifact@v8 to fetch the
 # "top-lists" artifact from the most recent successful edgar_3x run.
+# @v8 supports the artifact API used by actions/upload-artifact@v4 in edgar_3x.yml.
 # If no artifact is found (edgar_3x never ran), sends an alert embed instead.
 # ─────────────────────────────────────────────────────────────────────────────
 
