@@ -9,13 +9,11 @@ Pages (sidebar navigation):
   Contagion Web   — Leontief I-O shock propagation
   Regime Prediction — Lucas/Sargent HMM composite regime + Minsky alert
 
-Dashboard tabs:
+Dashboard tabs (4 total):
   Live Monitor    — regime / portfolio + VIX sparkline
   Market Intel    — Smart Money discovery picks + explainability panel
   Macro Intel     — Commodity conviction + macro shocks + partial-data badge
-  Trade Log       — stub
-  Regime History  — stub
-  Portfolio Sync  — stub
+  Portfolio Sync  — brokerage CSV upload + position reconciliation
 
 Run:
   streamlit run regime_trader/ui/streamlit_app.py
@@ -478,11 +476,6 @@ _NAV_SECTION_CSS = """
 </style>
 """
 
-_ALPHA_ENGINE_PAGES = {"📅 Stock Picker", "💼 Portfolio Advisor"}
-_QUANT_MODEL_PAGES  = {"💰 Monetary Pulse", "📈 Volatility Brain",
-                        "🔭 Valuation Radar", "🕸️ Contagion Web", "🎯 Regime Prediction"}
-
-
 def _render_sidebar() -> str:
     """Render sidebar navigation with section headers. Returns selected page label."""
     with st.sidebar:
@@ -504,6 +497,7 @@ def _render_sidebar() -> str:
                 st.rerun()
 
         st.markdown('<div class="rt-nav-section">── Alpha Engine ──</div>', unsafe_allow_html=True)
+        # Keep _nav_btn calls in sync with _NAV_PAGES — one call per non-Dashboard entry
         _nav_btn("📅 Stock Picker")
         _nav_btn("💼 Portfolio Advisor")
 
@@ -1049,18 +1043,6 @@ def _render_macro_intel() -> None:
             "5d": f"{data['ret_5d']:+.2%}" if data else "—",
         })
     st.dataframe(pd.DataFrame(ind_rows), use_container_width=True, hide_index=True)
-
-
-def _render_trade_log() -> None:
-    """Render the Trade Log tab (stub — requires broker NDJSON output)."""
-    st.header("Trade Log")
-    st.info("Parses trades.log (NDJSON) — connect your broker output to enable this tab.")
-
-
-def _render_regime_history() -> None:
-    """Render the Regime History tab (stub — requires HMM engine output)."""
-    st.header("Regime History")
-    st.info("Requires HMM engine output logs. Run the regime pipeline to populate.")
 
 
 def _render_portfolio_sync() -> None:
