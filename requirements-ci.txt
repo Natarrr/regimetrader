@@ -19,6 +19,7 @@ pandas-datareader>=0.10.0
 
 # ── Data validation / IO ──────────────────────────────────────────────────────
 pydantic>=2.5.0
+openpyxl>=3.1.0
 requests>=2.31.0
 urllib3>=2.0.0
 beautifulsoup4>=4.12.0
