@@ -71,6 +71,14 @@ _BADGES = [
 _LARGE_CUTOFF = 20   # ranks 1–20
 _MID_CUTOFF   = 35   # ranks 21–35; 36+ → small
 
+_TARGET_SECTORS = [
+    "Energy",
+    "Materials",
+    "Communication Services",
+    "Healthcare",
+    "Information Technology",
+]
+
 
 def _badge(score: float) -> str:
     for threshold, label in _BADGES:
@@ -143,6 +151,15 @@ def _assign_cap_tiers(entries: List[Dict[str, Any]]) -> None:
             entry["cap_tier"] = "small"
 
 
+def _sector_picks(entries: List[Dict[str, Any]], n: int = 3) -> Dict[str, List[Dict[str, Any]]]:
+    """Select top n tickers per target sector, ranked by final_score descending."""
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for sector in _TARGET_SECTORS:
+        candidates = [e for e in entries if e.get("sector") == sector]
+        result[sector] = sorted(candidates, key=lambda e: e["final_score"], reverse=True)[:n]
+    return result
+
+
 def generate(
     status: Dict[str, Any],
     run_id: str,
@@ -180,6 +197,7 @@ def generate(
         "top_buys":      top_buys,
         "mid_caps":      mid_caps,
         "small_caps":    small_caps,
+        "sector_picks":  _sector_picks(entries),
     }
 
     out_json = log_dir / "top_lists.json"
