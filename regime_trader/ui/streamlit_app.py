@@ -1090,12 +1090,22 @@ def _render_market_intel() -> None:
 
     rows = []
     for r in alpha_picks:
+        # Congress signal from Quiver data attached to result
+        quiver = r.get("quiver", {})
+        congress = quiver.get("congress", {})
+        congress_net = congress.get("net", 0)
+        congress_label = (
+            f"+{congress_net} buys" if congress_net > 0
+            else f"{congress_net} sells" if congress_net < 0
+            else "neutral"
+        ) if congress else "—"
         rows.append({
             "Symbol":        r.get("symbol", ""),
             "Smart Money":   float(r.get("smart_money_score", 0.0)),
             "Insider (45%)": float(r.get("insider_score", 0.0)),
             "Inst. (35%)":   float(r.get("institutional_score", 0.0)),
             "Momentum (20%)":float(r.get("momentum_score", 0.0)),
+            "Congress":      congress_label,
             "Insider $":     float(r.get("insider_value_usd", 0.0)),
             "Insider % Cap": _fmt_insider_pct(r.get("insider_value_pct_mcap")),
             "Vol Spike":     f"{r.get('volume_spike', 0.0):.2f}x",
@@ -1183,6 +1193,49 @@ def _render_explainability(results: List[Dict]) -> None:
                     st.markdown(f"- `[{ev_type}]` **{ev_id}** — {ev_summary}")
             else:
                 st.caption("No detailed evidence available for this ticker.")
+
+            # ── Quiver evidence section ────────────────────────────────────────
+            quiver = r.get("quiver", {})
+            if quiver:
+                st.markdown("**Quiver Quantitative Evidence**")
+                congress = quiver.get("congress", {})
+                if congress:
+                    net   = congress.get("net", 0)
+                    buys  = congress.get("purchases", 0)
+                    sells = congress.get("sales", 0)
+                    recency = congress.get("recency_days", "?")
+                    reps  = congress.get("representatives", [])
+                    direction = "🟢 Net buy" if net > 0 else "🔴 Net sell" if net < 0 else "⚪ Neutral"
+                    st.markdown(
+                        f"- **Congress:** {direction} ({buys} buys / {sells} sells) "
+                        f"— most recent {recency} days ago"
+                    )
+                    if reps:
+                        st.markdown(f"  Representatives: {', '.join(reps[:5])}")
+
+                insider_trades = quiver.get("insider", [])
+                if insider_trades:
+                    n_buy = sum(1 for t in insider_trades if t.get("AcquisitionOrDisposition") == "A")
+                    n_sell = sum(1 for t in insider_trades if t.get("AcquisitionOrDisposition") == "D")
+                    st.markdown(f"- **Insider (Quiver):** {n_buy} acquisitions / {n_sell} dispositions (Form 4)")
+
+                f13 = quiver.get("f13", [])
+                if f13:
+                    latest = f13[0]
+                    pct = latest.get("Pct", "?")
+                    chg = latest.get("PctChange", "?")
+                    direction_13f = "▲" if isinstance(chg, (int, float)) and chg > 0 else "▼"
+                    st.markdown(f"- **Institutional 13F:** {pct}% held {direction_13f} {chg}% change (latest quarter)")
+
+                lobbying = quiver.get("lobbying", [])
+                if lobbying:
+                    total = sum(r2.get("Amount", 0) for r2 in lobbying[:4] if isinstance(r2.get("Amount"), (int, float)))
+                    st.markdown(f"- **Lobbying:** ${total:,.0f} (last 4 quarters)")
+
+                contracts = quiver.get("gov_contracts", [])
+                if contracts:
+                    total = sum(r2.get("Amount", 0) for r2 in contracts[:4] if isinstance(r2.get("Amount"), (int, float)))
+                    st.markdown(f"- **Gov Contracts:** ${total:,.0f} (last 4 quarters)")
 
 
 def _render_macro_intel() -> None:
