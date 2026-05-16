@@ -157,17 +157,93 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
 
 
 
-def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
-    """Stiglitz (2001 Nobel) — fetch congressional trading from House/Senate Stock Watcher.
+def _parse_congress_transactions(
+    transactions: List[Dict],
+    cutoff: str,
+    by_ticker: Dict[str, Dict],
+    date_key: str = "transaction_date",
+    type_key: str = "type",
+    ticker_key: str = "ticker",
+) -> None:
+    """Shared parser for Stock Watcher (S3) and Quiver Quantitative transaction lists."""
+    for tx in transactions:
+        date_str = str(tx.get(date_key) or tx.get("date") or "")
+        if date_str[:10] < cutoff:
+            continue
+        ticker = str(tx.get(ticker_key) or "").upper().strip()
+        if not ticker or ticker in _INVALID_TICKERS:
+            continue
+        tx_type = str(tx.get(type_key) or "").lower()
+        is_purchase = "purchase" in tx_type
+        is_sale = "sale" in tx_type
+        if not (is_purchase or is_sale):
+            continue
+        if ticker not in by_ticker:
+            by_ticker[ticker] = {"purchases": 0, "sales": 0, "total": 0}
+        if is_purchase:
+            by_ticker[ticker]["purchases"] += 1
+        else:
+            by_ticker[ticker]["sales"] += 1
+        by_ticker[ticker]["total"] += 1
 
-    Downloads both chamber feeds from public S3 (no API key required), filters
-    to the lookback window, and counts purchase vs sale transactions per ticker.
-    Results are cached for 24 h to avoid redundant downloads within a trading day.
+
+def _fetch_quiver_congress(cutoff: str) -> Optional[Dict[str, Dict]]:
+    """Quiver Quantitative fallback — requires QUIVER_API_KEY env variable.
+
+    Endpoint: GET /beta/live/congresstrading
+    Returns last ~1000 congressional trades (all chambers).
+    Response fields used: Ticker, Transaction ("Purchase"/"Sale"),
+    TransactionDate (YYYY-MM-DD), TickerType ("ST" = stock).
+
+    Returns populated by_ticker dict on success, None if key is absent or call fails.
+    """
+    import requests as _req
+
+    api_key = os.getenv("QUIVER_API_KEY", "")
+    if not api_key:
+        return None
+
+    try:
+        resp = _req.get(
+            "https://api.quiverquant.com/beta/live/congresstrading",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        transactions = resp.json()
+        by_ticker: Dict[str, Dict] = {}
+        _parse_congress_transactions(
+            transactions, cutoff, by_ticker,
+            date_key="TransactionDate",
+            type_key="Transaction",
+            ticker_key="Ticker",
+        )
+        n_tickers = len(by_ticker)
+        n_tx      = sum(v["total"] for v in by_ticker.values())
+        log.info(
+            "Quiver congress: %d transactions across %d tickers since %s",
+            n_tx, n_tickers, cutoff,
+        )
+        return by_ticker
+    except Exception as exc:
+        log.warning("Quiver congress fetch failed: %s", exc)
+        return None
+
+
+def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
+    """Stiglitz (2001 Nobel) — fetch congressional trading data.
+
+    Primary:  House/Senate Stock Watcher public S3 feeds (no API key).
+    Fallback: Quiver Quantitative /beta/live/congresstrading (QUIVER_API_KEY).
+
+    Filters to the lookback window and counts purchase vs sale transactions
+    per ticker.  Results are cached for 24 h.
 
     $\\text{net\\_score} = \\frac{(purchases - sales)}{total + 1}$
 
     Returns:
         Dict keyed by ticker → {"purchases": int, "sales": int, "total": int}
+        Returns {} when all sources fail (score_congress will return 0.0).
     """
     import requests as _req
 
@@ -183,40 +259,37 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
     by_ticker: Dict[str, Dict] = {}
+    s3_ok = False
 
+    # ── Primary: Stock Watcher S3 feeds ──────────────────────────────────────
     for url, label in [(_HOUSE_URL, "house"), (_SENATE_URL, "senate")]:
         try:
             resp = _req.get(url, timeout=30)
             if resp.status_code == 403:
                 log.warning(
-                    "Congress feed %s returned 403 Forbidden — S3 bucket may be restricted. "
-                    "Set QUIVER_API_KEY secret to enable Quiver Quantitative fallback.",
+                    "Congress feed %s returned 403 — S3 bucket restricted; "
+                    "will use Quiver Quantitative fallback (QUIVER_API_KEY).",
                     label,
                 )
                 continue
             resp.raise_for_status()
-            transactions = resp.json()
-            for tx in transactions:
-                date_str = str(tx.get("transaction_date") or tx.get("date") or "")
-                if date_str[:10] < cutoff:
-                    continue
-                ticker = str(tx.get("ticker") or "").upper().strip()
-                if not ticker or ticker in _INVALID_TICKERS:
-                    continue
-                tx_type = str(tx.get("type") or "").lower()
-                is_purchase = "purchase" in tx_type
-                is_sale = "sale" in tx_type
-                if not (is_purchase or is_sale):
-                    continue
-                if ticker not in by_ticker:
-                    by_ticker[ticker] = {"purchases": 0, "sales": 0, "total": 0}
-                if is_purchase:
-                    by_ticker[ticker]["purchases"] += 1
-                else:
-                    by_ticker[ticker]["sales"] += 1
-                by_ticker[ticker]["total"] += 1
+            _parse_congress_transactions(resp.json(), cutoff, by_ticker)
+            s3_ok = True
+            log.info("Congress feed %s: OK — %d tickers", label, len(by_ticker))
         except Exception as exc:
             log.warning("Congress feed %s failed: %s", label, exc)
+
+    # ── Fallback: Quiver Quantitative (when S3 yields nothing) ───────────────
+    if not s3_ok or not by_ticker:
+        log.info("S3 congress feeds unavailable — trying Quiver Quantitative fallback…")
+        quiver_data = _fetch_quiver_congress(cutoff)
+        if quiver_data:
+            by_ticker = quiver_data
+        elif not os.getenv("QUIVER_API_KEY"):
+            log.warning(
+                "No QUIVER_API_KEY set and S3 feeds are down — "
+                "congress factor will be 0.0 (penalised) for all tickers."
+            )
 
     # ── Persist cache ─────────────────────────────────────────────────────────
     try:

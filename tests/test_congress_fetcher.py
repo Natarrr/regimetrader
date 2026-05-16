@@ -48,98 +48,108 @@ class TestScoreCongress:
 
 
 class TestFetchCongressBuys:
-    def _make_mock_get(self, house_data, senate_data):
+    _QUIVER_URL = "quiverquant.com"
+
+    def _make_mock_get(self, house_data, senate_data, quiver_data=None):
+        """Mock requests.get for S3 + Quiver endpoints."""
         def side_effect(url, **kwargs):
             resp = MagicMock()
             resp.status_code = 200
             resp.raise_for_status = MagicMock()
             if "house" in url:
                 resp.json.return_value = house_data
-            else:
+            elif "senate" in url:
                 resp.json.return_value = senate_data
+            elif self._QUIVER_URL in url:
+                if quiver_data is None:
+                    resp.raise_for_status.side_effect = Exception("no quiver mock")
+                else:
+                    resp.json.return_value = quiver_data
             return resp
         return side_effect
 
+    def _no_quiver(self, monkeypatch):
+        """Ensure QUIVER_API_KEY is absent so fallback doesn't fire unexpectedly."""
+        monkeypatch.delenv("QUIVER_API_KEY", raising=False)
+
     def test_counts_house_purchases(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            "scripts.run_pipeline.CONGRESS_CACHE_PATH",
-            tmp_path / "congress_cache.json",
-        )
+        self._no_quiver(monkeypatch)
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         house = [
             {"transaction_date": "2026-04-01", "ticker": "AAPL", "type": "purchase"},
             {"transaction_date": "2026-04-10", "ticker": "AAPL", "type": "purchase"},
         ]
         with patch("requests.get", side_effect=self._make_mock_get(house, [])):
             result = fetch_congress_buys(lookback_days=90)
-
-        assert "AAPL" in result
         assert result["AAPL"]["purchases"] == 2
         assert result["AAPL"]["sales"] == 0
 
     def test_counts_senate_sales(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            "scripts.run_pipeline.CONGRESS_CACHE_PATH",
-            tmp_path / "congress_cache.json",
-        )
-        senate = [
-            {"transaction_date": "2026-04-05", "ticker": "MSFT", "type": "sale"},
-        ]
+        self._no_quiver(monkeypatch)
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        senate = [{"transaction_date": "2026-04-05", "ticker": "MSFT", "type": "sale"}]
         with patch("requests.get", side_effect=self._make_mock_get([], senate)):
             result = fetch_congress_buys(lookback_days=90)
-
-        assert "MSFT" in result
         assert result["MSFT"]["sales"] == 1
 
     def test_ignores_transactions_outside_lookback(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            "scripts.run_pipeline.CONGRESS_CACHE_PATH",
-            tmp_path / "congress_cache.json",
-        )
-        house = [
-            # 200 days ago — outside 90-day window
-            {"transaction_date": "2025-10-01", "ticker": "NVDA", "type": "purchase"},
-        ]
+        self._no_quiver(monkeypatch)
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        house = [{"transaction_date": "2025-10-01", "ticker": "NVDA", "type": "purchase"}]
         with patch("requests.get", side_effect=self._make_mock_get(house, [])):
             result = fetch_congress_buys(lookback_days=90)
-
         assert "NVDA" not in result
 
     def test_skips_invalid_tickers(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            "scripts.run_pipeline.CONGRESS_CACHE_PATH",
-            tmp_path / "congress_cache.json",
-        )
+        self._no_quiver(monkeypatch)
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         house = [
             {"transaction_date": "2026-04-01", "ticker": "N/A", "type": "purchase"},
-            {"transaction_date": "2026-04-01", "ticker": "", "type": "purchase"},
-            {"transaction_date": "2026-04-01", "ticker": "--", "type": "purchase"},
+            {"transaction_date": "2026-04-01", "ticker": "",    "type": "purchase"},
+            {"transaction_date": "2026-04-01", "ticker": "--",  "type": "purchase"},
         ]
         with patch("requests.get", side_effect=self._make_mock_get(house, [])):
             result = fetch_congress_buys(lookback_days=90)
-
         assert result == {}
 
-    def test_network_failure_returns_empty(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            "scripts.run_pipeline.CONGRESS_CACHE_PATH",
-            tmp_path / "congress_cache.json",
-        )
+    def test_s3_403_falls_back_to_quiver(self, tmp_path, monkeypatch):
+        """When S3 returns 403, Quiver data is used."""
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        quiver = [
+            {"TransactionDate": "2026-04-01", "Ticker": "TSLA", "Transaction": "Purchase",
+             "TickerType": "ST"},
+        ]
+
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            if "quiverquant" in url:
+                resp.status_code = 200
+                resp.raise_for_status = MagicMock()
+                resp.json.return_value = quiver
+            else:
+                resp.status_code = 403
+                resp.raise_for_status.side_effect = Exception("403")
+            return resp
+
+        with patch("requests.get", side_effect=mock_get):
+            result = fetch_congress_buys(lookback_days=90)
+        assert "TSLA" in result
+        assert result["TSLA"]["purchases"] == 1
+
+    def test_all_sources_fail_returns_empty(self, tmp_path, monkeypatch):
+        self._no_quiver(monkeypatch)
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         with patch("requests.get", side_effect=Exception("timeout")):
             result = fetch_congress_buys(lookback_days=90)
-
         assert result == {}
 
     def test_cache_is_used_on_second_call(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            "scripts.run_pipeline.CONGRESS_CACHE_PATH",
-            tmp_path / "congress_cache.json",
-        )
-        house = [
-            {"transaction_date": "2026-04-01", "ticker": "JPM", "type": "purchase"},
-        ]
+        self._no_quiver(monkeypatch)
+        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        house = [{"transaction_date": "2026-04-01", "ticker": "JPM", "type": "purchase"}]
         with patch("requests.get", side_effect=self._make_mock_get(house, [])) as mock_get:
             fetch_congress_buys(lookback_days=90)
-            call_count_first = mock_get.call_count
+            first_count = mock_get.call_count
             fetch_congress_buys(lookback_days=90)
-            # Second call should not hit network
-            assert mock_get.call_count == call_count_first
+            assert mock_get.call_count == first_count
