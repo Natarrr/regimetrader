@@ -399,7 +399,7 @@ def _fetch_live_prices(tickers: list[str]) -> Dict[str, float]:
         ticker_list = list(tickers)
         raw = yf.download(ticker_list, period="2d", interval="1d",
                           progress=False, auto_adjust=True,
-                          group_by="ticker" if len(ticker_list) > 1 else None)
+                          **({"group_by": "ticker"} if len(ticker_list) > 1 else {}))
         prices: Dict[str, float] = {}
         for t in ticker_list:
             try:
@@ -455,7 +455,7 @@ def _render_revolut_portfolio() -> None:
         unreal_pct = (unreal_pl / cost_basis * 100) if (unreal_pl is not None and cost_basis > 0) else None
 
         total_cost  += cost_basis
-        if mkt_value:
+        if mkt_value is not None:
             total_value += mkt_value
 
         rows.append({
@@ -469,7 +469,8 @@ def _render_revolut_portfolio() -> None:
             "Unreal. %":   f"{unreal_pct:+.2f}%" if unreal_pct is not None else "—",
         })
 
-    total_pl  = total_value - total_cost if total_value else 0.0
+    has_prices = bool(prices)
+    total_pl  = (total_value - total_cost) if has_prices else 0.0
     total_pct = (total_pl / total_cost * 100) if total_cost > 0 else 0.0
 
     c1, c2, c3 = st.columns(3)
@@ -760,76 +761,74 @@ def _render_live_monitor() -> None:
                 "Add them to `.env` and restart the app.",
                 icon="⚠️",
             )
-            return
-
-        with st.spinner("Loading account…"):
-            acct = _load_alpaca_account()
-
-        if "error" in acct:
-            st.error(f"Alpaca connection failed: {acct['error']}")
-            return
-
-        paper_tag = " · Paper" if acct["paper"] else ""
-        pnl       = acct["daily_pnl"]
-        pnl_pct   = acct["daily_pnl_pct"]
-
-        # ── Account metrics ───────────────────────────────────────────────────
-        a1, a2, a3 = st.columns(3)
-        a1.metric(
-            "Portfolio Value",
-            f"${acct['portfolio_value']:,.2f}",
-            f"{pnl_pct:+.2f}% today",
-        )
-        a2.metric(
-            "Daily P&L",
-            f"${pnl:+,.2f}",
-            f"{pnl_pct:+.2f}%",
-        )
-        a3.metric("Buying Power", f"${acct['buying_power']:,.2f}")
-
-        st.caption(f"Alpaca · Status: **{acct['status']}**{paper_tag}")
-
-        # ── Portfolio performance chart ───────────────────────────────────────
-        period_col, spacer = st.columns([3, 7])
-        period = period_col.radio(
-            "period",
-            ["1W", "1M", "3M", "1Y"],
-            index=1,
-            horizontal=True,
-            label_visibility="collapsed",
-            key="portfolio_period",
-        )
-
-        with st.spinner("Loading chart…"):
-            port_history = _load_portfolio_history(period)
-
-        if port_history:
-            _render_portfolio_chart(port_history)
-
-        # ── Balance breakdown ─────────────────────────────────────────────────
-        col4, col5, col6 = st.columns(3)
-        col4.metric("Invested",       f"${acct['amount_invested']:,.2f}")
-        col5.metric("Cash",           f"${acct['cash']:,.2f}")
-        col6.metric("Open Positions", len(acct["positions"]))
-
-        # ── Positions table ───────────────────────────────────────────────────
-        st.subheader(f"Positions ({len(acct['positions'])})")
-        positions = acct["positions"]
-        if not positions:
-            st.info("No open positions.")
         else:
-            import pandas as pd
+            with st.spinner("Loading account…"):
+                acct = _load_alpaca_account()
 
-            df = pd.DataFrame(positions)
-            df["Entry"]       = df["Entry"].map("${:,.2f}".format)
-            df["Price"]       = df["Price"].map("${:,.2f}".format)
-            df["Mkt Value"]   = df["Mkt Value"].map("${:,.2f}".format)
-            df["Unreal. P&L"] = df["Unreal. P&L"].map("${:+,.2f}".format)
-            df["Unreal. %"]   = df["Unreal. %"].map("{:+.2f}%".format)
-            df["Day P&L"]     = df["Day P&L"].map("${:+,.2f}".format)
-            df["Day %"]       = df["Day %"].map("{:+.2f}%".format)
+            if "error" in acct:
+                st.error(f"Alpaca connection failed: {acct['error']}")
+            else:
+                paper_tag = " · Paper" if acct["paper"] else ""
+                pnl       = acct["daily_pnl"]
+                pnl_pct   = acct["daily_pnl_pct"]
 
-            st.dataframe(df, use_container_width=True, hide_index=True)
+                # ── Account metrics ───────────────────────────────────────────────────
+                a1, a2, a3 = st.columns(3)
+                a1.metric(
+                    "Portfolio Value",
+                    f"${acct['portfolio_value']:,.2f}",
+                    f"{pnl_pct:+.2f}% today",
+                )
+                a2.metric(
+                    "Daily P&L",
+                    f"${pnl:+,.2f}",
+                    f"{pnl_pct:+.2f}%",
+                )
+                a3.metric("Buying Power", f"${acct['buying_power']:,.2f}")
+
+                st.caption(f"Alpaca · Status: **{acct['status']}**{paper_tag}")
+
+                # ── Portfolio performance chart ───────────────────────────────────────
+                period_col, spacer = st.columns([3, 7])
+                period = period_col.radio(
+                    "period",
+                    ["1W", "1M", "3M", "1Y"],
+                    index=1,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="portfolio_period",
+                )
+
+                with st.spinner("Loading chart…"):
+                    port_history = _load_portfolio_history(period)
+
+                if port_history:
+                    _render_portfolio_chart(port_history)
+
+                # ── Balance breakdown ─────────────────────────────────────────────────
+                col4, col5, col6 = st.columns(3)
+                col4.metric("Invested",       f"${acct['amount_invested']:,.2f}")
+                col5.metric("Cash",           f"${acct['cash']:,.2f}")
+                col6.metric("Open Positions", len(acct["positions"]))
+
+                # ── Positions table ───────────────────────────────────────────────────
+                st.subheader(f"Positions ({len(acct['positions'])})")
+                positions = acct["positions"]
+                if not positions:
+                    st.info("No open positions.")
+                else:
+                    import pandas as pd
+
+                    df = pd.DataFrame(positions)
+                    df["Entry"]       = df["Entry"].map("${:,.2f}".format)
+                    df["Price"]       = df["Price"].map("${:,.2f}".format)
+                    df["Mkt Value"]   = df["Mkt Value"].map("${:,.2f}".format)
+                    df["Unreal. P&L"] = df["Unreal. P&L"].map("${:+,.2f}".format)
+                    df["Unreal. %"]   = df["Unreal. %"].map("{:+.2f}%".format)
+                    df["Day P&L"]     = df["Day P&L"].map("${:+,.2f}".format)
+                    df["Day %"]       = df["Day %"].map("{:+.2f}%".format)
+
+                    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 def _render_vix_sparkline() -> None:
@@ -1240,6 +1239,7 @@ def _render_portfolio_sync() -> None:
             f"Portfolio saved — {len(positions)} positions. "
             "Live Monitor and Portfolio Advisor will now use your Revolut data."
         )
+        _load_revolut_positions.clear()
         st.rerun()
 
 
