@@ -44,6 +44,8 @@ log = logging.getLogger(__name__)
 # Pages directory (project root / pages/)
 _PAGES_DIR = _ROOT / "pages"
 
+_REVOLUT_PORTFOLIO_PATH = _ROOT / "data" / "revolut_portfolio.json"
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Regime Trader",
@@ -1046,14 +1048,75 @@ def _render_macro_intel() -> None:
 
 
 def _render_portfolio_sync() -> None:
-    """Render the Portfolio Sync tab — upload a brokerage CSV for reconciliation."""
-    st.header("Portfolio Sync")
-    st.info("Upload a brokerage CSV to preview and execute position sync.")
-    uploaded = st.file_uploader("Upload brokerage CSV", type=["csv"])
-    if uploaded:
-        import pandas as pd
-        df = pd.read_csv(uploaded)
-        st.dataframe(df.head(20), use_container_width=True)
+    """Render the Portfolio Sync tab — Revolut XLSX importer."""
+    from regime_trader.services.revolut_parser import parse_xlsx
+    from regime_trader.utils.io import save_json_atomic
+    import pandas as pd
+
+    st.header("Portfolio Sync — Revolut Import")
+
+    # ── Last import badge ──────────────────────────────────────────────────────
+    if _REVOLUT_PORTFOLIO_PATH.exists():
+        try:
+            existing = json.loads(_REVOLUT_PORTFOLIO_PATH.read_text(encoding="utf-8"))
+            imported_at = existing.get("imported_at", "unknown")
+            n_pos = len(existing.get("positions", []))
+            st.info(f"📋 Last import: **{imported_at}** · {n_pos} positions loaded")
+        except Exception:
+            pass
+
+    st.markdown(
+        "Upload your Revolut trading account statement (`.xlsx`). "
+        "The parser nets all BUY/SELL transactions to derive your current holdings."
+    )
+
+    uploaded = st.file_uploader(
+        "Revolut account statement",
+        type=["xlsx"],
+        key="revolut_upload",
+    )
+
+    if not uploaded:
+        return
+
+    # ── Parse ──────────────────────────────────────────────────────────────────
+    try:
+        import tempfile, shutil
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            shutil.copyfileobj(uploaded, tmp)
+            tmp_path = tmp.name
+        positions = parse_xlsx(tmp_path)
+    except Exception as exc:
+        st.error(f"Failed to parse file: {exc}")
+        return
+
+    if not positions:
+        st.warning("No open positions found in this statement.")
+        return
+
+    # ── Preview ────────────────────────────────────────────────────────────────
+    st.subheader(f"Preview — {len(positions)} positions")
+    df = pd.DataFrame(positions)
+    df_display = df[["ticker", "revolut_ticker", "net_qty", "avg_cost", "currency"]].copy()
+    df_display.columns = ["Ticker", "Revolut Symbol", "Net Qty", "Avg Cost", "Currency"]
+    df_display["Avg Cost"] = df_display["Avg Cost"].map("{:.4f}".format)
+
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    # ── Confirm ────────────────────────────────────────────────────────────────
+    if st.button("✅ Confirm & Save Portfolio", type="primary"):
+        from datetime import datetime, timezone
+        payload = {
+            "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "positions":   positions,
+        }
+        _REVOLUT_PORTFOLIO_PATH.parent.mkdir(parents=True, exist_ok=True)
+        save_json_atomic(_REVOLUT_PORTFOLIO_PATH, payload)
+        st.success(
+            f"Portfolio saved — {len(positions)} positions. "
+            "Live Monitor and Portfolio Advisor will now use your Revolut data."
+        )
+        st.rerun()
 
 
 def _render_dashboard() -> None:
