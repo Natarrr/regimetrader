@@ -46,6 +46,21 @@ class TestScoreCongress:
         score = score_congress({"purchases": 0, "sales": 0, "total": 0})
         assert score == pytest.approx(0.5, abs=1e-4)
 
+    def test_recent_trade_scores_higher_than_old(self):
+        recent = score_congress({"purchases": 3, "sales": 0, "total": 3, "recency_days": 5})
+        old    = score_congress({"purchases": 3, "sales": 0, "total": 3, "recency_days": 150})
+        assert recent > old
+
+    def test_recency_dampens_towards_neutral_not_zero(self):
+        # Old but net-purchase signal should still be > 0.5 (direction preserved)
+        score = score_congress({"purchases": 5, "sales": 0, "total": 5, "recency_days": 180})
+        assert score > 0.5
+
+    def test_no_recency_key_no_change(self):
+        score_with    = score_congress({"purchases": 3, "sales": 0, "total": 3})
+        score_recent  = score_congress({"purchases": 3, "sales": 0, "total": 3, "recency_days": 10})
+        assert score_with == pytest.approx(score_recent, abs=1e-4)
+
 
 class TestFetchCongressBuys:
     _QUIVER_URL = "quiverquant.com"

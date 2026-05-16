@@ -36,6 +36,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from regime_trader.utils.io import save_json_atomic
+from regime_trader.services.quiver_client import QuiverClient as _QuiverClient
 
 log = logging.getLogger("run_pipeline")
 
@@ -188,45 +189,26 @@ def _parse_congress_transactions(
 
 
 def _fetch_quiver_congress(cutoff: str) -> Optional[Dict[str, Dict]]:
-    """Quiver Quantitative fallback — requires QUIVER_API_KEY env variable.
+    """Delegate to QuiverClient.congress_by_ticker() — avoids duplicating HTTP/cache logic.
 
-    Endpoint: GET /beta/live/congresstrading
-    Returns last ~1000 congressional trades (all chambers).
-    Response fields used: Ticker, Transaction ("Purchase"/"Sale"),
-    TransactionDate (YYYY-MM-DD), TickerType ("ST" = stock).
-
-    Returns populated by_ticker dict on success, None if key is absent or call fails.
+    Returns populated by_ticker dict (with recency_days) on success,
+    None if key is absent or call fails.
     """
-    import requests as _req
-
-    api_key = os.getenv("QUIVER_API_KEY", "")
-    if not api_key:
-        return None
-
     try:
-        resp = _req.get(
-            "https://api.quiverquant.com/beta/live/congresstrading",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        transactions = resp.json()
-        by_ticker: Dict[str, Dict] = {}
-        _parse_congress_transactions(
-            transactions, cutoff, by_ticker,
-            date_key="TransactionDate",
-            type_key="Transaction",
-            ticker_key="Ticker",
-        )
-        n_tickers = len(by_ticker)
-        n_tx      = sum(v["total"] for v in by_ticker.values())
-        log.info(
-            "Quiver congress: %d transactions across %d tickers since %s",
-            n_tx, n_tickers, cutoff,
-        )
-        return by_ticker
+        client = _QuiverClient()
+        if not client._api_key:
+            return None
+        result = client.congress_by_ticker(lookback_days=180)
+        if result:
+            n_tickers = len(result)
+            n_tx = sum(v["total"] for v in result.values())
+            log.info(
+                "Quiver congress: %d transactions across %d tickers (via QuiverClient)",
+                n_tx, n_tickers,
+            )
+        return result or None
     except Exception as exc:
-        log.warning("Quiver congress fetch failed: %s", exc)
+        log.warning("Quiver congress delegation failed: %s", exc)
         return None
 
 
@@ -309,6 +291,10 @@ def score_congress(data: Optional[Dict]) -> float:
     Equal purchases/sales (truly neutral) scores 0.5.
     Missing data (None / empty dict) scores 0.0 so the cross-sectional
     normaliser sees a dead feed and penalises rather than grants neutral credit.
+
+    Recency weighting: trades within 30 days get full credit; older trades
+    decay linearly to 0.70× signal strength at 180 days (dampens towards 0.5,
+    not towards 0, so the direction is preserved but urgency is lower).
     """
     if not data:
         # Dead API or ticker not traded by congress → 0.0, not 0.5.
@@ -322,7 +308,16 @@ def score_congress(data: Optional[Dict]) -> float:
     if total == 0:
         return 0.50   # data present but no net activity → genuinely neutral
     raw = (purchases - sales) / (total + 1)   # $\in (-1, 1)$
-    return round((raw + 1) / 2, 4)             # $\to (0, 1)$
+    base_score = round((raw + 1) / 2, 4)       # $\to (0, 1)$
+
+    # Recency multiplier: full credit ≤30 days, decay to 0.70× at 180 days.
+    # Dampens *towards neutral (0.5)*, not towards zero — direction is preserved.
+    recency_days = data.get("recency_days")
+    if recency_days is not None and recency_days > 30:
+        decay = max(0.70, 1.0 - 0.30 * min(recency_days - 30, 150) / 150)
+        base_score = 0.5 + (base_score - 0.5) * decay
+
+    return round(base_score, 4)
 
 
 def fetch_price_data(ticker: str) -> Dict[str, float]:
