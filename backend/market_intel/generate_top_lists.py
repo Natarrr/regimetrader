@@ -138,6 +138,48 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     ]
 
 
+def _effective_weights(
+    norm_factor_list: List[Dict[str, float]],
+    weights: Dict[str, float],
+) -> Dict[str, float]:
+    """Redistribute weight from dead factors (all 0.0) to live ones proportionally.
+
+    When a data feed is completely down every ticker receives the same contribution
+    from that factor (0.0), wasting its allocated weight.  This function detects
+    all-zero factors and rolls their weight to the live factors so the remaining
+    signals retain full discriminating power.
+
+    Example: congress dead (all 0.0), weight=0.20 →
+        edgar  0.30 → 0.30 + 0.20*(0.30/0.80) = 0.375
+        insider 0.25 → 0.25 + 0.20*(0.25/0.80) = 0.3125
+        news   0.15 → 0.15 + 0.20*(0.15/0.80) = 0.1875
+        macro  0.10 → 0.10 + 0.20*(0.10/0.80) = 0.125  (sum = 1.0)
+    """
+    if not norm_factor_list:
+        return dict(weights)
+
+    dead: set = set()
+    for factor in weights:
+        vals = [row.get(factor, 0.0) for row in norm_factor_list]
+        if max(vals) == 0.0 and min(vals) == 0.0:
+            dead.add(factor)
+
+    if not dead:
+        return dict(weights)
+
+    live = {k: v for k, v in weights.items() if k not in dead}
+    dead_total = sum(weights[f] for f in dead)
+    live_total = sum(live.values())
+
+    if live_total <= 0:
+        return dict(weights)   # everything dead — fall back to original
+
+    for k in live:
+        live[k] = round(live[k] + dead_total * (live[k] / live_total), 6)
+
+    return live
+
+
 def _apply_vix_overlay(score: float, vix: Optional[float]) -> float:
     """Multiplicative macro-regime penalty (absolute risk layer).
 
@@ -165,13 +207,11 @@ def _to_entry(
     row: Dict[str, Any],
     norm_factors: Dict[str, float],
     vix: Optional[float] = None,
+    weights: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
+    w = weights if weights is not None else WEIGHTS
     raw_score = round(
-        WEIGHTS["edgar"]    * norm_factors["edgar"] +
-        WEIGHTS["insider"]  * norm_factors["insider"] +
-        WEIGHTS["congress"] * norm_factors["congress"] +
-        WEIGHTS["news"]     * norm_factors["news"] +
-        WEIGHTS["macro"]    * norm_factors["macro"],
+        sum(w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in WEIGHTS),
         4,
     )
     # Fix #3: apply absolute macro-regime overlay AFTER cross-sectional ranking
@@ -267,7 +307,22 @@ def generate(
     assert len(norm_factor_list) == len(results), (
         f"_cross_sectional_normalize returned {len(norm_factor_list)} rows for {len(results)} results"
     )
-    entries = [_to_entry(row, nf, vix=current_vix) for row, nf in zip(results, norm_factor_list)]
+
+    # Redistribute weight from dead factors (all 0.0) to live ones
+    eff_weights = _effective_weights(norm_factor_list, WEIGHTS)
+    dead_factors = [f for f in WEIGHTS if f not in eff_weights]
+    if dead_factors:
+        log.warning(
+            "Dead factor(s) detected — weight redistributed: %s",
+            ", ".join(
+                f"{f} {WEIGHTS[f]:.0%}→{eff_weights.get(f, 0):.0%}"
+                if f not in dead_factors
+                else f"{f} {WEIGHTS[f]:.0%}→dead"
+                for f in WEIGHTS
+            ),
+        )
+
+    entries = [_to_entry(row, nf, vix=current_vix, weights=eff_weights) for row, nf in zip(results, norm_factor_list)]
     _assign_cap_tiers(entries)
 
     score_desc = lambda e: e["final_score"]  # noqa: E731
@@ -287,7 +342,7 @@ def generate(
         "generated_at":    datetime.now(timezone.utc).isoformat(),
         "source_run_id":   run_id,
         "ticker_count":    len(entries),
-        "weights":         WEIGHTS,
+        "weights":         eff_weights,   # actual weights used (may differ from WEIGHTS if dead factors)
         "vix":             current_vix,
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,

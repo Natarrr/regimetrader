@@ -187,6 +187,13 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
     for url, label in [(_HOUSE_URL, "house"), (_SENATE_URL, "senate")]:
         try:
             resp = _req.get(url, timeout=30)
+            if resp.status_code == 403:
+                log.warning(
+                    "Congress feed %s returned 403 Forbidden — S3 bucket may be restricted. "
+                    "Set QUIVER_API_KEY secret to enable Quiver Quantitative fallback.",
+                    label,
+                )
+                continue
             resp.raise_for_status()
             transactions = resp.json()
             for tx in transactions:
@@ -225,16 +232,22 @@ def score_congress(data: Optional[Dict]) -> float:
 
     $score = \\frac{(purchases - sales) / (total + 1) + 1}{2}$
 
-    A ticker with only purchases scores >0.5; only sales scores <0.5;
-    no congressional activity or equal purchases/sales scores 0.5.
+    A ticker with only purchases scores >0.5; only sales scores <0.5.
+    Equal purchases/sales (truly neutral) scores 0.5.
+    Missing data (None / empty dict) scores 0.0 so the cross-sectional
+    normaliser sees a dead feed and penalises rather than grants neutral credit.
     """
     if not data:
-        return 0.50
+        # Dead API or ticker not traded by congress → 0.0, not 0.5.
+        # When ALL tickers return 0.0, _cross_sectional_normalize treats it as
+        # a fully-failed feed (all-zero branch) rather than the "all identical
+        # non-zero → neutral 0.5" branch, which would silently waste 20% weight.
+        return 0.0
     purchases = int(data.get("purchases", 0))
     sales     = int(data.get("sales", 0))
     total     = purchases + sales   # compute from actual values, not stored field
     if total == 0:
-        return 0.50
+        return 0.50   # data present but no net activity → genuinely neutral
     raw = (purchases - sales) / (total + 1)   # $\in (-1, 1)$
     return round((raw + 1) / 2, 4)             # $\to (0, 1)$
 
@@ -573,8 +586,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         # — that is valid data, not a failure, so _edgar_ok stays True.
         edgar_ok    = False
         form4_count = 0
-        i_score     = 0.50
-        ceo_buy     = False
+        i_score     = 0.0    # 0.0 not 0.5: if EDGAR is globally unreachable, all
+        ceo_buy     = False  # tickers stay at 0.0 → normaliser penalises dead feed
         try:
             form4_count, i_score, ceo_buy = fetch_edgar_data(ticker)
             edgar_ok = True
@@ -609,8 +622,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "cap_tier": cap_tier.get(ticker, "large"),
                 "market_cap": 0.0,
                 "edgar_score": 0.30, "insider_score": i_score,
-                "congress_score": 0.50, "news_score": 0.50,
-                "momentum_score": 0.50, "ceo_buy": ceo_buy,
+                "congress_score": 0.0, "news_score": 0.0,
+                "momentum_score": 0.0, "ceo_buy": ceo_buy,
                 "form4_count": form4_count,
                 "_edgar_ok":      edgar_ok,
                 "_scoring_error": True,

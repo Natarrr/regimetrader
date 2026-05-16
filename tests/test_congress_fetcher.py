@@ -18,11 +18,12 @@ from scripts.run_pipeline import fetch_congress_buys, score_congress
 
 
 class TestScoreCongress:
-    def test_no_data_returns_neutral(self):
-        assert score_congress(None) == pytest.approx(0.5, abs=1e-4)
+    def test_no_data_returns_zero_not_neutral(self):
+        # Dead API / ticker not traded → 0.0 so the normaliser penalises dead feeds
+        assert score_congress(None) == pytest.approx(0.0, abs=1e-9)
 
-    def test_empty_dict_returns_neutral(self):
-        assert score_congress({}) == pytest.approx(0.5, abs=1e-4)
+    def test_empty_dict_returns_zero_not_neutral(self):
+        assert score_congress({}) == pytest.approx(0.0, abs=1e-9)
 
     def test_all_purchases_above_neutral(self):
         score = score_congress({"purchases": 4, "sales": 0, "total": 4})

@@ -13,8 +13,11 @@ import pytest
 from backend.market_intel.generate_top_lists import (
     _apply_vix_overlay,
     _cross_sectional_normalize,
+    _effective_weights,
     FACTOR_FIELDS,
+    WEIGHTS,
 )
+from scripts.run_pipeline import score_congress
 
 
 def _make_results(n: int, overrides: dict | None = None) -> list:
@@ -118,6 +121,61 @@ class TestCrossSectionalNormalize:
         # Real score should normalise higher than null-coerced 0.0
         assert normed[2]["edgar"] > normed[0]["edgar"]
         assert normed[2]["edgar"] > normed[1]["edgar"]
+
+
+class TestScoreCongress:
+    """score_congress() must return 0.0 for missing data, not the old neutral 0.5."""
+
+    def test_none_returns_zero_not_neutral(self):
+        assert score_congress(None) == pytest.approx(0.0)
+
+    def test_empty_dict_returns_zero_not_neutral(self):
+        assert score_congress({}) == pytest.approx(0.0)
+
+    def test_equal_buys_sells_is_neutral(self):
+        """When congress has traded but bought = sold, result is 0.5 (genuine neutral)."""
+        assert score_congress({"purchases": 2, "sales": 2, "total": 4}) == pytest.approx(0.5, abs=1e-4)
+
+    def test_all_purchases_high_signal(self):
+        result = score_congress({"purchases": 5, "sales": 0, "total": 5})
+        assert result > 0.5
+
+    def test_all_sales_low_signal(self):
+        result = score_congress({"purchases": 0, "sales": 5, "total": 5})
+        assert result < 0.5
+
+
+class TestEffectiveWeights:
+    """Dead-factor weight redistribution."""
+
+    def test_no_dead_factors_returns_original(self):
+        norm = [{"edgar": 0.3, "insider": 0.5, "congress": 0.7, "news": 0.4, "macro": 0.6}]
+        w = _effective_weights(norm, WEIGHTS)
+        assert w == pytest.approx(WEIGHTS, abs=1e-6)
+
+    def test_dead_congress_redistributes_to_live(self):
+        """All-zero congress → its 20% weight rolls to edgar/insider/news/macro."""
+        norm = [{"edgar": 0.5, "insider": 0.5, "congress": 0.0, "news": 0.5, "macro": 0.5}]
+        w = _effective_weights(norm, WEIGHTS)
+        assert "congress" not in w
+        assert abs(sum(w.values()) - 1.0) < 1e-5   # weights still sum to 1
+
+    def test_live_weights_increase_proportionally(self):
+        """Each live factor gets an equal relative boost when congress is dead."""
+        norm = [{"edgar": 0.5, "insider": 0.5, "congress": 0.0, "news": 0.5, "macro": 0.5}]
+        w = _effective_weights(norm, WEIGHTS)
+        # edgar / insider ratio must stay constant
+        assert w["edgar"] / w["insider"] == pytest.approx(WEIGHTS["edgar"] / WEIGHTS["insider"], rel=1e-4)
+
+    def test_all_dead_returns_original_fallback(self):
+        """If everything is dead, fall back to original weights rather than divide by zero."""
+        norm = [{"edgar": 0.0, "insider": 0.0, "congress": 0.0, "news": 0.0, "macro": 0.0}]
+        w = _effective_weights(norm, WEIGHTS)
+        assert w == pytest.approx(WEIGHTS, abs=1e-6)
+
+    def test_empty_norm_list_returns_original(self):
+        w = _effective_weights([], WEIGHTS)
+        assert w == pytest.approx(WEIGHTS, abs=1e-6)
 
 
 class TestVixOverlay:
