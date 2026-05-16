@@ -143,27 +143,31 @@ jobs:
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 
-      # ── 8. Write job summary ─────────────────────────────────────────────────
-      - name: Write job summary
+      # ── 8. Generate run execution summary ────────────────────────────────────
+      # Factor key 'macro' maps to momentum_score in intel_source_status.json
+      # (0.10 weight). Using heredoc avoids nested quote escaping in -c "...".
+      - name: Generate Run Execution Summary
         if: always()
         run: |
           echo "## EDGAR 3× Run — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f logs/top_lists.json ]; then
-            echo "### Top 5 Buys" >> "$GITHUB_STEP_SUMMARY"
-            python -c "
-          import json, sys
-          d = json.load(open('logs/top_lists.json'))
-          print('| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Macro |')
-          print('|---|---|---|---|---|---|---|---|---|')
+            echo "### 📊 Pipeline Ranking Metrics (Top 5 Buys)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Macro |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          with open("logs/top_lists.json") as f:
+              d = json.load(f)
           for i, t in enumerate(d.get('top_buys', [])[:5], 1):
               f = t.get('factors', {})
-              print(f'| {i} | **{t[\"ticker\"]}** | {t[\"final_score\"]:.4f} | {t[\"badge\"]} |'
-                    f' {f.get(\"edgar\",0):.2f} | {f.get(\"insider\",0):.2f} |'
-                    f' {f.get(\"congress\",0):.2f} | {f.get(\"news\",0):.2f} | {f.get(\"macro\",0):.2f} |')
-          " >> "$GITHUB_STEP_SUMMARY"
+              print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | {t['badge']} | "
+                    f"{f.get('edgar', 0):.2f} | {f.get('insider', 0):.2f} | "
+                    f"{f.get('congress', 0):.2f} | {f.get('news', 0):.2f} | {f.get('macro', 0):.2f} |")
+          EOF
           else
-            echo "_top_lists.json not produced — check generate step._" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # ── 9. Upload artifacts ──────────────────────────────────────────────────

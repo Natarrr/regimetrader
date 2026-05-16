@@ -374,22 +374,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.error("Could not parse intel_source_status.json: %s", exc)
         return 1
 
-    # Skip if fresh enough (avoids redundant re-ranks within same pipeline run)
+    # Skip if fresh enough AND structurally valid.
+    # A mid-write crash or empty payload must not block re-runs.
     out = args.log_dir / "top_lists.json"
     if out.exists() and not args.force:
         try:
             existing = json.loads(out.read_text(encoding="utf-8"))
-            ts = datetime.fromisoformat(
-                existing.get("generated_at", "").replace("Z", "+00:00")
-            )
-            age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-            if age_h < 2.0:
-                log.info(
-                    "top_lists.json is %.1fh old — skipping (use --force to override)", age_h
+            if "top_buys" not in existing or not existing.get("top_buys"):
+                log.warning(
+                    "top_lists.json exists but has no top_buys — treating as corrupted, regenerating"
                 )
-                return 0
+            else:
+                ts = datetime.fromisoformat(
+                    existing.get("generated_at", "").replace("Z", "+00:00")
+                )
+                age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                if age_h < 2.0:
+                    log.info(
+                        "top_lists.json is %.1fh old and valid — skipping (use --force to override)",
+                        age_h,
+                    )
+                    return 0
         except Exception:
-            pass
+            log.warning("top_lists.json unreadable or malformed — forcing regeneration")
 
     try:
         generate(status, args.run_id, args.log_dir)

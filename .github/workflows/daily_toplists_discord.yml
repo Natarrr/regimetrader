@@ -62,14 +62,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests>=2.31.0
 
-      # ── 4. Download latest top-lists artifact from edgar_3x ─────────────────
+      # ── 4. Verify London local timing ────────────────────────────────────────
       #
-      # dawidd6/action-download-artifact@v3 searches across workflow runs and
-      # downloads the most recent artifact with the given name.
+      # Diagnostic only — prints current London time so run logs show whether
+      # the GCF scheduler fired at the correct local hour (14:00 BST / 13:00 GMT).
+      # No exit-code gate here; the GCF scheduler is the authoritative clock.
+      - name: Verify London Local Timing Gate
+        run: |
+          python3 -c "
+          from datetime import datetime
+          import zoneinfo
+          london_time = datetime.now(zoneinfo.ZoneInfo('Europe/London'))
+          print(f'Current London Time: {london_time.strftime(\"%H:%M %Z\")}')
+          print(f'UTC offset: {london_time.strftime(\"%z\")}')
+          "
+
+      # ── 5. Download latest top-lists artifact from edgar_3x ─────────────────
+      #
+      # dawidd6/action-download-artifact@v8 supports the v4 artifact API used
+      # by actions/upload-artifact@v4 in edgar_3x.yml. Prior v3 was incompatible.
       # "if_no_artifact_found: warn" prevents the step from failing — instead,
       # the send step detects the missing file and sends an alert.
       - name: Download top-lists artifact
-        uses: dawidd6/action-download-artifact@v3
+        uses: dawidd6/action-download-artifact@v8
         with:
           workflow: edgar_3x.yml
           name: top-lists
@@ -78,7 +93,7 @@ jobs:
           # Allow artifacts up to 2 days old (3 runs/day → always fresh)
           workflow_conclusion: success
 
-      # ── 5. Send to Discord (3 retries, 30s/60s backoff) ──────────────────────
+      # ── 6. Send to Discord (3 retries, 30s/60s backoff) ──────────────────────
       - name: Send daily market checkup
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
@@ -92,7 +107,7 @@ jobs:
             --log-dir logs \
             $DRY_RUN_FLAG
 
-      # ── 6. Upload send log on failure (always, for debugging) ────────────────
+      # ── 7. Upload send log on failure (always, for debugging) ────────────────
       - name: Upload Discord send log
         if: always()
         uses: actions/upload-artifact@v4

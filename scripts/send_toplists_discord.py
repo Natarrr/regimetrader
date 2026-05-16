@@ -284,9 +284,15 @@ def send_to_discord(
             if 200 <= resp.status_code < 300:
                 log.info("Discord message sent (status=%d)", resp.status_code)
                 return True
-            # 429 = rate-limited: wait the Retry-After header if present
+            # 429 = rate-limited: prefer JSON body retry_after (Discord standard),
+            # fall back to the Retry-After header, then a 30s default.
             if resp.status_code == 429:
-                retry_after = float(resp.headers.get("Retry-After", 5))
+                try:
+                    retry_after = float(resp.json().get("retry_after", 0))
+                except Exception:
+                    retry_after = 0.0
+                if not retry_after:
+                    retry_after = float(resp.headers.get("Retry-After", 30))
                 log.warning("Discord rate-limited — waiting %.1fs", retry_after)
                 time.sleep(retry_after)
                 continue

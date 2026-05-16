@@ -163,10 +163,56 @@ jobs:
           path: data/pipeline/
           retention-days: 7
 
-  # ── 2. Claude analysis ──────────────────────────────────────────────────────
+  # ── 2. Preflight cost gate ──────────────────────────────────────────────────
+  preflight_cost_gate:
+    name: Preflight Cost Gate
+    needs: quant
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download shortlist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.quant.outputs.shortlist_artifact }}
+          path: data/pipeline/
+
+      - name: Evaluate inbound shortlist cost surface
+        env:
+          CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
+        run: |
+          python3 -c "
+          import json, os, sys
+
+          with open('data/pipeline/shortlist.json') as f:
+              pipeline_data = json.load(f)
+
+          shortlist = pipeline_data.get('shortlist', [])
+          # Conservative estimate: ~1k input + 300 output tokens per symbol
+          # at claude-sonnet-4-6 pricing (\$3/Mtoken input, \$15/Mtoken output)
+          input_cost  = len(shortlist) * 1000 * 3.00  / 1_000_000
+          output_cost = len(shortlist) * 300  * 15.00 / 1_000_000
+          estimated_cost = round(input_cost + output_cost, 4)
+
+          cap = float(os.getenv('CLAUDE_COST_CAP_USD', '2.00'))
+          print(f'Shortlist size: {len(shortlist)} symbols')
+          print(f'Estimated API cost: \${estimated_cost:.4f} (cap: \${cap:.2f})')
+
+          if estimated_cost > cap:
+              print(f'CRITICAL: Estimated cost \${estimated_cost:.4f} exceeds cap \${cap:.2f}. Aborting.')
+              sys.exit(1)
+
+          print('Preflight cost validation cleared.')
+          "
+
+  # ── 3. Claude analysis ──────────────────────────────────────────────────────
   claude:
     name: Claude Analysis
-    needs: quant
+    needs: [quant, preflight_cost_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -317,7 +363,7 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  # ── 3. Gate & human review summary ─────────────────────────────────────────
+  # ── 4. Gate & human review summary ─────────────────────────────────────────
   gate:
     name: Gate & Audit Summary
     needs: [quant, claude]
