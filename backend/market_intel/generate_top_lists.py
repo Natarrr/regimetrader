@@ -208,6 +208,7 @@ def _to_entry(
     norm_factors: Dict[str, float],
     vix: Optional[float] = None,
     weights: Optional[Dict[str, float]] = None,
+    quiver_evidence: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     w = weights if weights is not None else WEIGHTS
     raw_score = round(
@@ -217,16 +218,17 @@ def _to_entry(
     # Fix #3: apply absolute macro-regime overlay AFTER cross-sectional ranking
     score = round(_apply_vix_overlay(raw_score, vix), 4)
     return {
-        "ticker":      row.get("ticker", "?"),
-        "sector":      row.get("sector", "Unknown"),
-        "cap_tier":    row.get("cap_tier", "large"),
-        "market_cap":  float(row.get("market_cap", 0.0)),
-        "raw_score":   raw_score,   # pre-overlay, for diagnostics
-        "final_score": score,
-        "badge":       _badge(score),
-        "ceo_buy":     bool(row.get("ceo_buy", False)),
-        "form4_count": int(row.get("form4_count", 0)),
-        "factors":     norm_factors,
+        "ticker":          row.get("ticker", "?"),
+        "sector":          row.get("sector", "Unknown"),
+        "cap_tier":        row.get("cap_tier", "large"),
+        "market_cap":      float(row.get("market_cap", 0.0)),
+        "raw_score":       raw_score,   # pre-overlay, for diagnostics
+        "final_score":     score,
+        "badge":           _badge(score),
+        "ceo_buy":         bool(row.get("ceo_buy", False)),
+        "form4_count":     int(row.get("form4_count", 0)),
+        "factors":         norm_factors,
+        "quiver_evidence": quiver_evidence or {},
     }
 
 
@@ -322,7 +324,11 @@ def generate(
             ),
         )
 
-    entries = [_to_entry(row, nf, vix=current_vix, weights=eff_weights) for row, nf in zip(results, norm_factor_list)]
+    entries = [
+        _to_entry(row, nf, vix=current_vix, weights=eff_weights,
+                  quiver_evidence=row.get("quiver_evidence"))
+        for row, nf in zip(results, norm_factor_list)
+    ]
     _assign_cap_tiers(entries)
 
     score_desc = lambda e: e["final_score"]  # noqa: E731

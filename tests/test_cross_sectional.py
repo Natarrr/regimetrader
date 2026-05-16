@@ -202,3 +202,42 @@ class TestVixOverlay:
         high = _apply_vix_overlay(0.80, 35.0)
         low  = _apply_vix_overlay(0.40, 35.0)
         assert high > low
+
+
+class TestQuiverEvidence:
+    def _make_row(self, ticker="NVDA", **overrides):
+        base = {
+            "ticker": ticker, "market_cap": 1e12, "sector": "Technology",
+            "edgar_score": 0.7, "insider_score": 0.6, "congress_score": 0.8,
+            "news_score": 0.5, "momentum_score": 0.5,
+        }
+        base.update(overrides)
+        return base
+
+    def _make_norm(self):
+        return {"edgar": 0.7, "insider": 0.6, "congress": 0.8, "news": 0.5, "macro": 0.5}
+
+    def test_to_entry_includes_quiver_evidence(self):
+        from backend.market_intel.generate_top_lists import _to_entry
+        evidence = {"politicians": ["Nancy Pelosi"], "recency_days": 5}
+        entry = _to_entry(self._make_row(), self._make_norm(), vix=None, quiver_evidence=evidence)
+        assert entry["quiver_evidence"]["politicians"] == ["Nancy Pelosi"]
+        assert entry["quiver_evidence"]["recency_days"] == 5
+
+    def test_to_entry_no_evidence_gives_empty_dict(self):
+        from backend.market_intel.generate_top_lists import _to_entry
+        entry = _to_entry(self._make_row(), self._make_norm(), vix=None)
+        assert entry.get("quiver_evidence") == {}
+
+    def test_to_entry_none_evidence_gives_empty_dict(self):
+        from backend.market_intel.generate_top_lists import _to_entry
+        entry = _to_entry(self._make_row(), self._make_norm(), vix=None, quiver_evidence=None)
+        assert entry.get("quiver_evidence") == {}
+
+    def test_to_entry_row_quiver_evidence_passthrough(self):
+        """generate() passes row.get('quiver_evidence') — verify full roundtrip via row key."""
+        from backend.market_intel.generate_top_lists import _to_entry
+        row = self._make_row()
+        row["quiver_evidence"] = {"congress": {"purchases": 3, "sales": 0}}
+        entry = _to_entry(row, self._make_norm(), vix=None, quiver_evidence=row.get("quiver_evidence"))
+        assert entry["quiver_evidence"]["congress"]["purchases"] == 3
