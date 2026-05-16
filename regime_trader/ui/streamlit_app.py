@@ -1081,11 +1081,18 @@ def _render_portfolio_sync() -> None:
 
     # ── Parse ──────────────────────────────────────────────────────────────────
     try:
-        import tempfile, shutil
+        import tempfile
+        import shutil
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             shutil.copyfileobj(uploaded, tmp)
             tmp_path = tmp.name
-        positions = parse_xlsx(tmp_path)
+        try:
+            positions = parse_xlsx(tmp_path)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
     except Exception as exc:
         st.error(f"Failed to parse file: {exc}")
         return
@@ -1096,12 +1103,15 @@ def _render_portfolio_sync() -> None:
 
     # ── Preview ────────────────────────────────────────────────────────────────
     st.subheader(f"Preview — {len(positions)} positions")
-    df = pd.DataFrame(positions)
-    df_display = df[["ticker", "revolut_ticker", "net_qty", "avg_cost", "currency"]].copy()
-    df_display.columns = ["Ticker", "Revolut Symbol", "Net Qty", "Avg Cost", "Currency"]
-    df_display["Avg Cost"] = df_display["Avg Cost"].map("{:.4f}".format)
-
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    try:
+        df = pd.DataFrame(positions)
+        df_display = df[["ticker", "revolut_ticker", "net_qty", "avg_cost", "currency"]].copy()
+        df_display.columns = ["Ticker", "Revolut Symbol", "Net Qty", "Avg Cost", "Currency"]
+        df_display["Avg Cost"] = df_display["Avg Cost"].map("{:.4f}".format)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.error(f"Failed to build preview table: {exc}")
+        return
 
     # ── Confirm ────────────────────────────────────────────────────────────────
     if st.button("✅ Confirm & Save Portfolio", type="primary"):
@@ -1111,7 +1121,11 @@ def _render_portfolio_sync() -> None:
             "positions":   positions,
         }
         _REVOLUT_PORTFOLIO_PATH.parent.mkdir(parents=True, exist_ok=True)
-        save_json_atomic(_REVOLUT_PORTFOLIO_PATH, payload)
+        try:
+            save_json_atomic(_REVOLUT_PORTFOLIO_PATH, payload)
+        except Exception as exc:
+            st.error(f"Failed to save portfolio: {exc}")
+            return
         st.success(
             f"Portfolio saved — {len(positions)} positions. "
             "Live Monitor and Portfolio Advisor will now use your Revolut data."
