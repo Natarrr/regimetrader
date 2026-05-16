@@ -113,7 +113,7 @@ def _get_claude_narrative(ticker: str, advice: PositionAdvice, regime: str) -> s
             f"{ticker} signals {advice.signal} in the current {regime} regime. "
             f"Factor scores: Edgar={f.get('edgar', 0):.2f}, Insider={f.get('insider', 0):.2f}, "
             f"Congress={f.get('congress', 0):.2f}, News={f.get('news', 0):.2f}, "
-            f"Macro={f.get('macro', 0):.2f}. Overall score: {advice.final_score:.3f}. "
+            f"Macro={f.get('macro', 0):.2f}. Overall score: {advice.final_score:.3f if advice.final_score is not None else 'N/A'}. "
             f"Be specific about which factor drives the signal."
         )
         msg = client.messages.create(
@@ -127,6 +127,11 @@ def _get_claude_narrative(ticker: str, advice: PositionAdvice, regime: str) -> s
     except Exception as exc:
         log.warning("Claude narrative failed for %s: %s", ticker, exc)
         return ""
+
+
+def _factor_bar(score: float, width: int = 10) -> str:
+    filled = min(width, max(0, round(score * width)))
+    return "█" * filled + "░" * (width - filled)
 
 
 def _render_regime_banner(regime: str) -> None:
@@ -222,7 +227,7 @@ def render() -> None:
         score_str    = f"{adv.final_score:.3f}" if adv.final_score is not None else "N/A"
         price        = prices.get(adv.ticker)
         cost_basis   = adv.net_qty * adv.avg_cost
-        unreal_pl    = (adv.market_value - cost_basis) if adv.market_value else None
+        unreal_pl    = (adv.market_value - cost_basis) if price is not None else None
         unreal_pct   = (unreal_pl / cost_basis * 100) if (unreal_pl is not None and cost_basis > 0) else None
 
         age_str  = f"Signal: {adv.signal_age_days}d old" if adv.signal_age_days is not None else ""
@@ -246,11 +251,11 @@ def render() -> None:
                 # Factor bars
                 f = adv.factors
                 factor_data = [
-                    {"Factor": "📋 Edgar",    "Weight": "30%", "Score": f"{f.get('edgar',    0):.3f}", "Bar": "█" * round(f.get('edgar',    0) * 10) + "░" * (10 - round(f.get('edgar',    0) * 10))},
-                    {"Factor": "🏦 Insider",  "Weight": "25%", "Score": f"{f.get('insider',  0):.3f}", "Bar": "█" * round(f.get('insider',  0) * 10) + "░" * (10 - round(f.get('insider',  0) * 10))},
-                    {"Factor": "🏛️ Congress", "Weight": "20%", "Score": f"{f.get('congress', 0):.3f}", "Bar": "█" * round(f.get('congress', 0) * 10) + "░" * (10 - round(f.get('congress', 0) * 10))},
-                    {"Factor": "📰 News",     "Weight": "15%", "Score": f"{f.get('news',     0):.3f}", "Bar": "█" * round(f.get('news',     0) * 10) + "░" * (10 - round(f.get('news',     0) * 10))},
-                    {"Factor": "📈 Macro",    "Weight": "10%", "Score": f"{f.get('macro',    0):.3f}", "Bar": "█" * round(f.get('macro',    0) * 10) + "░" * (10 - round(f.get('macro',    0) * 10))},
+                    {"Factor": "📋 Edgar",    "Weight": "30%", "Score": f"{f.get('edgar',    0):.3f}", "Bar": _factor_bar(f.get('edgar',    0))},
+                    {"Factor": "🏦 Insider",  "Weight": "25%", "Score": f"{f.get('insider',  0):.3f}", "Bar": _factor_bar(f.get('insider',  0))},
+                    {"Factor": "🏛️ Congress", "Weight": "20%", "Score": f"{f.get('congress', 0):.3f}", "Bar": _factor_bar(f.get('congress', 0))},
+                    {"Factor": "📰 News",     "Weight": "15%", "Score": f"{f.get('news',     0):.3f}", "Bar": _factor_bar(f.get('news',     0))},
+                    {"Factor": "📈 Macro",    "Weight": "10%", "Score": f"{f.get('macro',    0):.3f}", "Bar": _factor_bar(f.get('macro',    0))},
                 ]
                 st.dataframe(pd.DataFrame(factor_data), use_container_width=True, hide_index=True)
 
