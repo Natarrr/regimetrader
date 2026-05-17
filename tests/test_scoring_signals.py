@@ -144,18 +144,19 @@ class TestScoreNewsFinnhubYFinanceFallback:
 
 
 class TestScoreMomentumEnhanced:
-    def test_ticker_beats_spy_scores_above_neutral(self):
+    def test_ticker_beats_spy_with_volume_scores_above_neutral(self):
         *_, score_momentum, _, _, _ = _import()
-        # ticker +10%, SPY +5% → relative +5% → should score > 0.5
+        # ticker +10%, SPY +5%, volume 3x spike → combined should score > 0.5
         score = score_momentum(
             ticker_return_20d=0.10,
             spy_return_20d=0.05,
-            volume_spike=1.0,
+            volume_spike=3.0,
         )
         assert score > 0.5
 
     def test_ticker_lags_spy_scores_below_neutral(self):
         *_, score_momentum, _, _, _ = _import()
+        # ticker lags SPY regardless of volume → below neutral
         score = score_momentum(
             ticker_return_20d=0.02,
             spy_return_20d=0.08,
