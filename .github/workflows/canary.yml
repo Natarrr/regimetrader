@@ -52,6 +52,7 @@ jobs:
         env:
           EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+          QUIVER_API_KEY: ${{ secrets.QUIVER_API_KEY || '' }}
           EDGAR_FIRST: "true"
         run: |
           set -euo pipefail
