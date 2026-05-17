@@ -224,7 +224,11 @@ def _to_entry(
         "ceo_buy":         bool(row.get("ceo_buy", False)),
         "form4_count":     int(row.get("form4_count", 0)),
         "factors":         norm_factors,
-        "quiver_evidence": quiver_evidence or {},
+        "quiver_evidence":         quiver_evidence or {},
+        "news_source":             row.get("news_source", "none"),
+        "insider_usd":             float(row.get("insider_usd", 0.0)),
+        "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
+        "volume_spike":            float(row.get("volume_spike", 1.0)),
     }
 
 

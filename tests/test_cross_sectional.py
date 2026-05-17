@@ -241,3 +241,36 @@ class TestQuiverEvidence:
         row["quiver_evidence"] = {"congress": {"purchases": 3, "sales": 0}}
         entry = _to_entry(row, self._make_norm(), vix=None, quiver_evidence=row.get("quiver_evidence"))
         assert entry["quiver_evidence"]["congress"]["purchases"] == 3
+
+
+class TestToEntryEvidencePassthrough:
+    def test_evidence_fields_present_in_entry(self):
+        from backend.market_intel.generate_top_lists import _to_entry
+
+        row = {
+            "ticker": "AAPL", "sector": "Tech", "cap_tier": "large",
+            "market_cap": 3e12, "ceo_buy": True, "form4_count": 3,
+            "news_source": "finnhub",
+            "insider_usd": 2_500_000.0,
+            "momentum_spy_relative": 0.042,
+            "volume_spike": 2.3,
+        }
+        norm = {"edgar": 0.8, "insider": 0.7, "congress": 0.6, "news": 0.5, "momentum": 0.4}
+        entry = _to_entry(row, norm)
+
+        assert entry["news_source"] == "finnhub"
+        assert entry["insider_usd"] == pytest.approx(2_500_000.0)
+        assert entry["momentum_spy_relative"] == pytest.approx(0.042)
+        assert entry["volume_spike"] == pytest.approx(2.3)
+
+    def test_evidence_fields_default_when_absent(self):
+        from backend.market_intel.generate_top_lists import _to_entry
+
+        row = {"ticker": "X", "sector": "?", "cap_tier": "large", "market_cap": 0}
+        norm = {"edgar": 0.5, "insider": 0.5, "congress": 0.5, "news": 0.5, "momentum": 0.5}
+        entry = _to_entry(row, norm)
+
+        assert entry["news_source"] == "none"
+        assert entry["insider_usd"] == pytest.approx(0.0)
+        assert entry["momentum_spy_relative"] == pytest.approx(0.0)
+        assert entry["volume_spike"] == pytest.approx(1.0)
