@@ -211,28 +211,26 @@ class TestFetchPriceDataEnhanced:
         import pandas as pd
         import numpy as np
 
-        # Build fake yfinance data for both ticker and SPY
+        # SPY return is now pre-fetched externally and passed as a parameter.
+        # fetch_price_data only downloads the ticker itself.
         dates = pd.date_range("2026-04-01", periods=30, freq="B")
         ticker_close = pd.Series(np.linspace(100, 110, 30), index=dates)
-        spy_close    = pd.Series(np.linspace(500, 505, 30), index=dates)
         ticker_vol   = pd.Series([1_000_000] * 25 + [3_000_000] * 5, index=dates)
 
         fake_ticker_df = pd.DataFrame({
             "Close":  ticker_close,
             "Volume": ticker_vol,
         })
-        fake_spy_df = pd.DataFrame({"Close": spy_close})
 
-        def fake_download(symbol, **kwargs):
-            return fake_spy_df if symbol == "SPY" else fake_ticker_df
+        spy_return_3m = 0.01  # simulate 1% SPY gain passed in from caller
 
-        with patch("yfinance.download", side_effect=fake_download):
-            result = fetch_price_data("AAPL")
+        with patch("yfinance.download", return_value=fake_ticker_df):
+            result = fetch_price_data("AAPL", spy_return=spy_return_3m)
 
         assert "return_20d" in result
         assert "spy_return_20d" in result
         assert "volume_spike" in result
-        assert result["spy_return_20d"] > 0.0
+        assert result["spy_return_20d"] == pytest.approx(spy_return_3m)
         assert result["volume_spike"] > 1.0   # recent vol higher than avg
 
     def test_returns_zeros_on_failure(self):
@@ -240,6 +238,30 @@ class TestFetchPriceDataEnhanced:
         with patch("yfinance.download", side_effect=Exception("network")):
             result = fetch_price_data("FAIL")
         assert result == {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0}
+
+
+class TestFetchSpyReturn:
+    def test_success_returns_float(self):
+        from scripts.run_pipeline import _fetch_spy_return
+        import pandas as pd, numpy as np
+
+        dates = pd.date_range("2026-02-01", periods=65, freq="B")
+        spy_close = pd.Series(np.linspace(500, 510, 65), index=dates)
+        fake_spy_df = pd.DataFrame({"Close": spy_close})
+
+        with patch("yfinance.download", return_value=fake_spy_df):
+            result = _fetch_spy_return()
+
+        assert isinstance(result, float)
+        assert result > 0.0
+
+    def test_failure_returns_zero(self):
+        from scripts.run_pipeline import _fetch_spy_return
+
+        with patch("yfinance.download", side_effect=Exception("network")):
+            result = _fetch_spy_return()
+
+        assert result == pytest.approx(0.0)
 
 
 class TestQuiverEvidenceInResults:

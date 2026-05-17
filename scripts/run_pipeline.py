@@ -320,16 +320,38 @@ def score_congress(data: Optional[Dict]) -> float:
     return round(base_score, 4)
 
 
-def fetch_price_data(ticker: str) -> Dict[str, float]:
+def _fetch_spy_return() -> float:
+    """Fetch SPY 3-month return once before the thread pool starts.
+
+    Called once in run() and passed as a closure to _score_ticker() so all
+    160 worker threads share the same SPY baseline instead of each downloading
+    it separately (which causes yfinance cache collisions under concurrency).
+    Returns 0.0 on any failure so momentum still scores relative to flat market.
+    """
+    try:
+        import yfinance as yf
+        spy_df = yf.download("SPY", period="3mo", interval="1d",
+                              progress=False, auto_adjust=True)
+        if spy_df is None or spy_df.empty or len(spy_df) < 2:
+            return 0.0
+        spy_close = spy_df["Close"].squeeze().dropna()
+        return float((spy_close.iloc[-1] - spy_close.iloc[0]) / spy_close.iloc[0])
+    except Exception as exc:
+        log.warning("SPY baseline fetch failed: %s — momentum will use 0.0 baseline", exc)
+        return 0.0
+
+
+def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, float]:
     """Thaler (2017 Nobel) — 20-day SPY-relative return + volume spike.
 
-    Fetches ticker and SPY for fair comparison.
+    `spy_return` should be pre-fetched via _fetch_spy_return() before the thread
+    pool starts so all workers share a consistent SPY baseline.
     Volume spike = 5-day avg volume / full-window avg volume.
 
     Returns {"return_20d": float, "spy_return_20d": float, "volume_spike": float}.
     Returns {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0} on any error.
     """
-    _default = {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0}
+    _default = {"return_20d": 0.0, "spy_return_20d": spy_return, "volume_spike": 1.0}
     try:
         import yfinance as yf
 
@@ -354,17 +376,9 @@ def fetch_price_data(ticker: str) -> Dict[str, float]:
         else:
             volume_spike = 1.0
 
-        spy_df = yf.download("SPY", period="3mo", interval="1d",
-                              progress=False, auto_adjust=True)
-        if spy_df is None or spy_df.empty or len(spy_df) < 2:
-            spy_ret = 0.0
-        else:
-            spy_close = spy_df["Close"].squeeze().dropna()
-            spy_ret = float((spy_close.iloc[-1] - spy_close.iloc[0]) / spy_close.iloc[0])
-
         return {
             "return_20d":     round(ret, 6),
-            "spy_return_20d": round(spy_ret, 6),
+            "spy_return_20d": round(spy_return, 6),
             "volume_spike":   volume_spike,
         }
     except Exception as exc:
@@ -745,6 +759,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     log.info("Fetching congress trading data…")
     congress_data = fetch_congress_buys()
 
+    # ── SPY baseline — fetched once so all threads share same benchmark ───────
+    log.info("Fetching SPY 3-month return (shared baseline for momentum)…")
+    spy_return_baseline = _fetch_spy_return()
+    log.info("SPY 3-month return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
+
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
     errors  = 0
@@ -775,7 +794,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 if finnhub_key
                 else _score_news_yfinance(ticker)
             )
-            price_data = fetch_price_data(ticker)
+            price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
             m_score = score_momentum(
                 price_data["return_20d"],
                 price_data["spy_return_20d"],

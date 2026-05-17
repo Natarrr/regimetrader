@@ -119,7 +119,7 @@ jobs:
 
       # ── 6. Generate top_lists.json ───────────────────────────────────────────
       #
-      # Five-factor scoring: edgar(0.30) insider(0.25) congress(0.20) news(0.15) macro(0.10)
+      # Five-factor scoring: edgar(0.28) insider(0.23) congress(0.22) news(0.15) momentum(0.12)
       # Congress data from House/Senate Stock Watcher S3 (no API key needed).
       # Market cap tiers assigned relative to the 160-ticker universe.
       - name: Generate top lists
@@ -146,8 +146,6 @@ jobs:
           python -m monitoring.minsky_alert --log-dir logs
 
       # ── 8. Generate run execution summary ────────────────────────────────────
-      # Factor key 'macro' maps to momentum_score in intel_source_status.json
-      # (0.10 weight). Using heredoc avoids nested quote escaping in -c "...".
       - name: Generate Run Execution Summary
         if: always()
         run: |
@@ -156,7 +154,7 @@ jobs:
           if [ -f logs/top_lists.json ]; then
             echo "### 📊 Pipeline Ranking Metrics (Top 5 Buys)" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo '| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Macro |' >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Momentum |' >> "$GITHUB_STEP_SUMMARY"
             echo '|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json
@@ -166,7 +164,7 @@ jobs:
               f = t.get('factors', {})
               print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | {t['badge']} | "
                     f"{f.get('edgar', 0):.2f} | {f.get('insider', 0):.2f} | "
-                    f"{f.get('congress', 0):.2f} | {f.get('news', 0):.2f} | {f.get('macro', 0):.2f} |")
+                    f"{f.get('congress', 0):.2f} | {f.get('news', 0):.2f} | {f.get('momentum', 0):.2f} |")
           EOF
           else
             echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
