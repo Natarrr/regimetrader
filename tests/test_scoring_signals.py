@@ -290,7 +290,8 @@ class TestEvidencePassthroughFields:
 
     def test_score_ticker_result_contains_evidence_fields(self):
         from scripts.run_pipeline import run
-        import tempfile, csv, json
+        import tempfile, csv
+        import os
         from pathlib import Path
         from unittest.mock import patch
 
@@ -319,7 +320,8 @@ class TestEvidencePassthroughFields:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55):
+                 patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55), \
+                 patch.dict(os.environ, {"FINNHUB_API_KEY": "test-key"}):
                 mock_ticker.return_value.news = []
                 status = run(tickers_file, log_dir, max_workers=1)
 
@@ -328,7 +330,7 @@ class TestEvidencePassthroughFields:
             assert "insider_usd" in r,           "insider_usd missing"
             assert "momentum_spy_relative" in r, "momentum_spy_relative missing"
             assert "volume_spike" in r,          "volume_spike missing"
-            assert r["news_source"] in ("finnhub", "yfinance", "none")
+            assert r["news_source"] == "finnhub"
             assert isinstance(r["insider_usd"], float)
             assert isinstance(r["momentum_spy_relative"], float)
             assert isinstance(r["volume_spike"], float)

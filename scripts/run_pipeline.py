@@ -798,7 +798,6 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "source": "quiver" if (congress_raw and congress_raw.get("recency_days") is not None) else "s3",
             }
 
-            news_source = "none"
             if finnhub_key:
                 news_source = "finnhub" if n_score > 0.0 else "none"
             else:
