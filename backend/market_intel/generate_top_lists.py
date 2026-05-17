@@ -122,7 +122,18 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
             # Single ticker or all identical non-zero values → neutral 0.5
             normed_factors[factor] = np.full(n, 0.5)
         else:
-            scaled = normalize_score(raw, lo_pct=5, hi_pct=95) / 100.0
+            # Sparse-signal guard: insider (and similar) factors have many exact
+            # zeros (dead tickers) and a small minority with real signal.  When
+            # >90% of values are exactly 0.0, the 5th-percentile lower winsorize
+            # clips the max to 0, collapsing everything and incorrectly triggering
+            # the neutral-0.5 branch.  Disable winsorization only when the floor
+            # is literally 0 (i.e. the zero tickers are "absent", not "low").
+            frac_at_zero = float(np.mean(raw == 0.0))
+            if frac_at_zero > 0.90:
+                lo, hi = 0, 100   # no winsorization — preserve sparse signal
+            else:
+                lo, hi = 5, 95
+            scaled = normalize_score(raw, lo_pct=lo, hi_pct=hi) / 100.0
             if float(np.nanmax(scaled)) == float(np.nanmin(scaled)):
                 normed_factors[factor] = np.full(n, 0.5)
             else:
