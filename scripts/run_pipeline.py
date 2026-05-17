@@ -389,7 +389,7 @@ def score_momentum(
     """
     r = max(-0.30, min(0.30, ticker_return_20d - spy_return_20d))
     return_score = round((r + 0.30) / 0.60, 4)
-    vol_score    = round(min(1.0, max(0.5, (volume_spike - 1.0) / 4.0)), 4)
+    vol_score    = round(min(1.0, max(0.0, (volume_spike - 1.0) / 4.0)), 4)
     return round(0.65 * return_score + 0.35 * vol_score, 4)
 
 
