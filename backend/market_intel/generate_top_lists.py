@@ -145,11 +145,11 @@ def _effective_weights(
     all-zero factors and rolls their weight to the live factors so the remaining
     signals retain full discriminating power.
 
-    Example: congress dead (all 0.0), weight=0.20 →
-        edgar  0.30 → 0.30 + 0.20*(0.30/0.80) = 0.375
-        insider 0.25 → 0.25 + 0.20*(0.25/0.80) = 0.3125
-        news   0.15 → 0.15 + 0.20*(0.15/0.80) = 0.1875
-        macro  0.10 → 0.10 + 0.20*(0.10/0.80) = 0.125  (sum = 1.0)
+    Example: congress dead (all 0.0), weight=0.22 →
+        edgar    0.28 → 0.28 + 0.22*(0.28/0.78) = 0.3590
+        insider  0.23 → 0.23 + 0.22*(0.23/0.78) = 0.2948
+        news     0.15 → 0.15 + 0.22*(0.15/0.78) = 0.1923
+        momentum 0.12 → 0.12 + 0.22*(0.12/0.78) = 0.1538  (sum = 1.0)
     """
     if not norm_factor_list:
         return dict(weights)
