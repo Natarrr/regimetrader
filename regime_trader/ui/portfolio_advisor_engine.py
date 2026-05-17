@@ -39,6 +39,13 @@ class PositionAdvice:
     not_in_universe:  bool
     market_value:     float = 0.0    # filled by UI from live price
 
+    # Evidence pass-through fields (populated from intel_source_status.json)
+    news_source:             str   = "none"
+    insider_usd:             float = 0.0
+    momentum_spy_relative:   float = 0.0
+    volume_spike:            float = 1.0
+    quiver_evidence:         Dict[str, Any] = field(default_factory=dict)
+
 
 # ── Core logic (pure, testable) ───────────────────────────────────────────────
 
@@ -189,10 +196,15 @@ def build_advice(
                 "news":     round(float(row.get("news_score",    0)), 4),
                 "momentum": round(float(row.get("momentum_score",0)), 4),
             },
-            signal_age_days = age_days,
-            swap_candidate  = swap,
-            narrative       = None,
-            not_in_universe = False,
+            signal_age_days       = age_days,
+            swap_candidate        = swap,
+            narrative             = None,
+            not_in_universe       = False,
+            news_source           = row.get("news_source", "none"),
+            insider_usd           = float(row.get("insider_usd", 0.0)),
+            momentum_spy_relative = float(row.get("momentum_spy_relative", 0.0)),
+            volume_spike          = float(row.get("volume_spike", 1.0)),
+            quiver_evidence       = row.get("quiver_evidence", {}),
         ))
 
     return advice_list

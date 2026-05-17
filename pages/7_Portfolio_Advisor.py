@@ -114,7 +114,7 @@ def _get_claude_narrative(ticker: str, advice: PositionAdvice, regime: str) -> s
             f"{ticker} signals {advice.signal} in the current {regime} regime. "
             f"Factor scores: Edgar={factors.get('edgar', 0):.2f}, Insider={factors.get('insider', 0):.2f}, "
             f"Congress={factors.get('congress', 0):.2f}, News={factors.get('news', 0):.2f}, "
-            f"Macro={factors.get('macro', 0):.2f}. Overall score: {score_display}. "
+            f"Momentum={factors.get('momentum', 0):.2f}. Overall score: {score_display}. "
             f"Be specific about which factor drives the signal."
         )
         msg = client.messages.create(
@@ -266,13 +266,46 @@ def render() -> None:
                 # Factor bars
                 f = adv.factors
                 factor_data = [
-                    {"Factor": "📋 Edgar",    "Weight": "30%", "Score": f"{f.get('edgar',    0):.3f}", "Bar": _factor_bar(f.get('edgar',    0))},
-                    {"Factor": "🏦 Insider",  "Weight": "25%", "Score": f"{f.get('insider',  0):.3f}", "Bar": _factor_bar(f.get('insider',  0))},
-                    {"Factor": "🏛️ Congress", "Weight": "20%", "Score": f"{f.get('congress', 0):.3f}", "Bar": _factor_bar(f.get('congress', 0))},
+                    {"Factor": "📋 Edgar",    "Weight": "28%", "Score": f"{f.get('edgar',    0):.3f}", "Bar": _factor_bar(f.get('edgar',    0))},
+                    {"Factor": "🏦 Insider",  "Weight": "23%", "Score": f"{f.get('insider',  0):.3f}", "Bar": _factor_bar(f.get('insider',  0))},
+                    {"Factor": "🏛️ Congress", "Weight": "22%", "Score": f"{f.get('congress', 0):.3f}", "Bar": _factor_bar(f.get('congress', 0))},
                     {"Factor": "📰 News",     "Weight": "15%", "Score": f"{f.get('news',     0):.3f}", "Bar": _factor_bar(f.get('news',     0))},
-                    {"Factor": "📈 Macro",    "Weight": "10%", "Score": f"{f.get('macro',    0):.3f}", "Bar": _factor_bar(f.get('macro',    0))},
+                    {"Factor": "📈 Momentum", "Weight": "12%", "Score": f"{f.get('momentum', 0):.3f}", "Bar": _factor_bar(f.get('momentum', 0))},
                 ]
                 st.dataframe(pd.DataFrame(factor_data), use_container_width=True, hide_index=True)
+
+                # Evidence section — only shown when at least one evidence field is non-zero
+                cong = adv.quiver_evidence.get("congress", {})
+                cong_net   = cong.get("net", 0)
+                cong_buys  = cong.get("purchases", 0)
+                cong_sales = cong.get("sales", 0)
+                cong_reps  = cong.get("representatives", [])
+                cong_days  = cong.get("recency_days")
+
+                has_insider  = adv.insider_usd > 0 or adv.factors.get("insider", 0) > 0
+                has_congress = (cong_buys > 0 or cong_sales > 0) or adv.factors.get("congress", 0) > 0
+                has_news     = adv.news_source != "none" or adv.factors.get("news", 0) > 0
+                has_momentum = (adv.momentum_spy_relative != 0.0 or adv.volume_spike != 1.0) or adv.factors.get("momentum", 0) > 0
+                has_edgar    = adv.factors.get("edgar", 0) > 0
+
+                if any([has_insider, has_congress, has_news, has_momentum, has_edgar]):
+                    with st.expander("📊 Signal Evidence", expanded=False):
+                        if has_insider:
+                            pct_cap = (adv.insider_usd / adv.market_value * 100) if adv.market_value > 0 else 0.0
+                            st.markdown(f"🏦 **Insider:** ${adv.insider_usd:,.0f} open-market purchase ({pct_cap:.2f}% of position value)")
+                        if has_congress:
+                            reps_str = ", ".join(cong_reps[:3]) if cong_reps else "—"
+                            days_str = f" · {cong_days}d ago" if cong_days is not None else ""
+                            net_str  = f"Net {cong_net:+d} ({cong_buys} buys, {cong_sales} sells){days_str}"
+                            st.markdown(f"🏛️ **Congress:** {net_str} · [{reps_str}]")
+                        if has_news:
+                            source_label = {"finnhub": "Finnhub", "yfinance": "yfinance", "none": "—"}.get(adv.news_source, adv.news_source)
+                            st.markdown(f"📰 **News:** Source: {source_label} · Score: {adv.factors.get('news', 0):.2f}")
+                        if has_momentum:
+                            rel_pct = adv.momentum_spy_relative * 100
+                            st.markdown(f"📈 **Momentum:** {rel_pct:+.1f}% vs SPY · Volume: {adv.volume_spike:.1f}× avg")
+                        if has_edgar:
+                            st.markdown(f"📋 **EDGAR:** Score {adv.factors.get('edgar', 0):.2f}")
 
                 # Claude narrative
                 if _HAS_CLAUDE and adv.signal != "—":
