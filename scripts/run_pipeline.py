@@ -42,11 +42,11 @@ log = logging.getLogger("run_pipeline")
 
 # ── Weights (must sum to 1.0) ──────────────────────────────────────────────────
 WEIGHTS = {
-    "edgar":    0.30,
-    "insider":  0.25,
-    "congress": 0.20,
+    "edgar":    0.28,
+    "insider":  0.23,
+    "congress": 0.22,
     "news":     0.15,
-    "momentum": 0.10,
+    "momentum": 0.12,
 }
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
@@ -321,41 +321,76 @@ def score_congress(data: Optional[Dict]) -> float:
 
 
 def fetch_price_data(ticker: str) -> Dict[str, float]:
-    """Thaler (2017 Nobel) — 20-day price return for behavioral momentum.
+    """Thaler (2017 Nobel) — 20-day SPY-relative return + volume spike.
 
-    $r_{20d} = (P_t - P_{t-20}) / P_{t-20}$
+    Fetches ticker and SPY for fair comparison.
+    Volume spike = 5-day avg volume / full-window avg volume.
 
-    Returns {"return_20d": float} where float ∈ ℝ (unbounded before normalization).
-    Returns {"return_20d": 0.0} on any error — treated as neutral after
-    cross-sectional normalization.
+    Returns {"return_20d": float, "spy_return_20d": float, "volume_spike": float}.
+    Returns {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0} on any error.
     """
+    _default = {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0}
     try:
         import yfinance as yf
-        df = yf.download(ticker, period="1mo", interval="1d",
+        import numpy as np
+
+        df = yf.download(ticker, period="3mo", interval="1d",
                          progress=False, auto_adjust=True)
         if df is None or df.empty or len(df) < 5:
-            return {"return_20d": 0.0}
+            return _default
+
         close = df["Close"].squeeze().dropna()
         if len(close) < 2:
-            return {"return_20d": 0.0}
+            return _default
         ret = float((close.iloc[-1] - close.iloc[0]) / close.iloc[0])
-        return {"return_20d": ret}
+
+        if "Volume" in df.columns:
+            vol = df["Volume"].squeeze().dropna()
+            if len(vol) >= 10:
+                recent_avg = float(vol.iloc[-5:].mean())
+                full_avg   = float(vol.mean())
+                volume_spike = round(recent_avg / full_avg, 4) if full_avg > 0 else 1.0
+            else:
+                volume_spike = 1.0
+        else:
+            volume_spike = 1.0
+
+        spy_df = yf.download("SPY", period="3mo", interval="1d",
+                              progress=False, auto_adjust=True)
+        if spy_df is None or spy_df.empty or len(spy_df) < 2:
+            spy_ret = 0.0
+        else:
+            spy_close = spy_df["Close"].squeeze().dropna()
+            spy_ret = float((spy_close.iloc[-1] - spy_close.iloc[0]) / spy_close.iloc[0])
+
+        return {
+            "return_20d":     round(ret, 6),
+            "spy_return_20d": round(spy_ret, 6),
+            "volume_spike":   volume_spike,
+        }
     except Exception as exc:
         log.debug("fetch_price_data %s failed: %s", ticker, exc)
-        return {"return_20d": 0.0}
+        return _default
 
 
-def score_momentum(return_20d: float) -> float:
-    """Thaler (2017 Nobel) — map 20-day return to pre-normalization score ∈ [0.10, 0.90].
+def score_momentum(
+    ticker_return_20d: float,
+    spy_return_20d: float = 0.0,
+    volume_spike: float = 1.0,
+) -> float:
+    """Thaler (2017 Nobel) — SPY-relative momentum + volume confirmation in [0, 1].
 
-    Clips return at ±30% before mapping:
-    $score = 0.10 + \\frac{clip(r, -0.30, 0.30) + 0.30}{0.60} \\times 0.80$
+    relative_return = ticker_return_20d - spy_return_20d, clipped to +-30%.
+    return_score maps (-0.30, +0.30) linearly to (0, 1).
+    vol_score maps volume_spike (ratio of recent 5d avg to 90d avg) to (0, 1):
+      1.0x (flat) -> 0.0, 5.0x spike -> 1.0.
 
-    This bounded value is subsequently normalized cross-sectionally across the
-    universe in generate_top_lists.py; absolute value matters less than ordering.
+    Combined: 0.65 x return_score + 0.35 x vol_score
     """
-    r = max(-0.30, min(0.30, return_20d))
-    return round(0.10 + (r + 0.30) / 0.60 * 0.80, 4)
+    r = max(-0.30, min(0.30, ticker_return_20d - spy_return_20d))
+    return_score = round((r + 0.30) / 0.60, 4)
+    vol_score    = round(min(1.0, max(0.5, (volume_spike - 1.0) / 4.0)), 4)
+    return round(0.65 * return_score + 0.35 * vol_score, 4)
 
 
 # ── SEC helpers ────────────────────────────────────────────────────────────────
@@ -426,13 +461,13 @@ def _load_cik_map() -> Dict[str, str]:
 
 # ── yfinance scorers ───────────────────────────────────────────────────────────
 
-def score_news(ticker: str, max_items: int = 8) -> float:
-    """Engle (2003 Nobel) — news sentiment from yfinance headlines ∈ [0,1]."""
+def _score_news_yfinance(ticker: str) -> float:
+    """yfinance headline word-count fallback. Returns 0.0 (not 0.5) on any failure."""
     try:
         import yfinance as yf
         news = yf.Ticker(ticker).news or []
         scores = []
-        for item in news[:max_items]:
+        for item in news[:8]:
             content = item.get("content", {})
             title = (
                 content.get("title", "") if isinstance(content, dict)
@@ -448,10 +483,39 @@ def score_news(ticker: str, max_items: int = 8) -> float:
             else:
                 scores.append(max(0.10, min(0.90, 0.50 + 0.20 * (bull - bear))))
         if not scores:
-            return 0.50
+            return 0.0
         return round(sum(scores) / len(scores), 4)
     except Exception:
-        return 0.50
+        return 0.0
+
+
+def score_news_finnhub(ticker: str, api_key: str) -> float:
+    """Engle (2003 Nobel) — Finnhub pre-computed sentiment score in [0, 1].
+
+    Finnhub /news-sentiment returns:
+      buzz.weeklyAverage       — normalized buzz volume (0-1)
+      sentiment.bullishPercent — fraction of bullish articles (0-1)
+
+    Score = 0.60 x bullishPercent + 0.40 x min(1.0, weeklyAverage / 0.5)
+
+    Falls back to _score_news_yfinance() on any API failure.
+    Returns 0.0 (not 0.5) if both sources fail — dead feed is penalised.
+    """
+    import requests as _req
+    url = f"https://finnhub.io/api/v1/news-sentiment?symbol={ticker}&token={api_key}"
+    try:
+        resp = _req.get(url, timeout=10)
+        resp.raise_for_status()
+        d        = resp.json()
+        bullish  = float(d.get("sentiment", {}).get("bullishPercent", 0.5))
+        buzz     = float(d.get("buzz", {}).get("weeklyAverage", 0.0))
+        buzz_norm = min(1.0, buzz / 0.5)
+        return round(0.60 * bullish + 0.40 * buzz_norm, 4)
+    except Exception:
+        try:
+            return _score_news_yfinance(ticker)
+        except Exception:
+            return 0.0
 
 
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
@@ -461,6 +525,37 @@ def score_edgar(form4_count: int) -> float:
     if form4_count <= 0:
         return 0.30
     return round(min(0.90, 0.30 + form4_count * 0.12), 4)
+
+
+def score_insider_value(
+    key_purchases_usd: float,
+    market_cap: float,
+    days_since_most_recent: int = 0,
+) -> float:
+    """Stiglitz (2001 Nobel) — dollar conviction score for insider purchases in [0, 1].
+
+    Maps total open-market purchase value as % of market cap to a score:
+      0%      -> 0.0   (no purchases = dead signal, penalised not neutral)
+      0.01%   -> ~0.30 (floor — small but credible)
+      0.10%   -> ~0.65 (mid — meaningful conviction)
+      1.00%+  -> ~0.90 (ceiling — exceptional conviction)
+
+    Uses log-scale so small buys still count while large buys don't explode.
+    Recency decay: purchases older than 30 days decay toward 0.50 neutral
+    (direction preserved but urgency reduced — same decay as score_congress).
+    """
+    if key_purchases_usd <= 0 or market_cap <= 0:
+        return 0.0
+
+    pct = key_purchases_usd / market_cap
+    raw = min(1.0, math.log1p(pct * 10000) / math.log1p(100))
+    base_score = round(0.30 + 0.60 * raw, 4)
+
+    if days_since_most_recent > 30:
+        decay = max(0.70, 1.0 - 0.30 * min(days_since_most_recent - 30, 150) / 150)
+        base_score = round(0.5 + (base_score - 0.5) * decay, 4)
+
+    return base_score
 
 
 
@@ -532,7 +627,7 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
     return transactions
 
 
-def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float, bool]:
+def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float, bool, int]:
     """Fetch Form 4 count and insider score from the SEC submissions API.
 
     Stiglitz (2001 Nobel) / Akerlof (2001 Nobel) — replaces both the legacy
@@ -544,7 +639,7 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
     insider buy/sell classification.
 
     Returns:
-        (form4_count, insider_score ∈ [0,1], ceo_buy_flag)
+        (form4_count, total_purchases_usd, ceo_buy_flag, days_since_most_recent)
 
     Raises on network failure so the caller can set _edgar_ok=False.
     """
@@ -552,7 +647,7 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
     cik = cik_map.get(ticker.upper())
     if not cik:
         log.debug("No SEC CIK for %s", ticker)
-        return 0, 0.50, False
+        return 0, 0.0, False, 0
 
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     resp = _sec_get(url)   # raises on failure → caller sets _edgar_ok=False
@@ -590,21 +685,29 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
             if any(role in tx["title"].upper() for role in _KEY_ROLES):
                 key_purchases.append(tx["value"])
 
-    insider_score = 0.50
+    total_purchases_usd = 0.0
     ceo_buy = False
+    days_since_most_recent = 0
     if key_purchases:
-        count = len(key_purchases)
-        total_value = sum(key_purchases)
-        insider_score = min(0.90, 0.50 + count * 0.08)
-        if total_value > 100_000:
-            insider_score = max(insider_score, 0.82)
-        ceo_buy = total_value > 25_000
+        total_purchases_usd = sum(key_purchases)
+        ceo_buy = total_purchases_usd > 25_000
         log.debug(
-            "INSIDER %s: %d key purchases $%.0f score=%.2f ceo_buy=%s",
-            ticker, count, total_value, insider_score, ceo_buy,
+            "INSIDER %s: %d key purchases $%.0f ceo_buy=%s",
+            ticker, len(key_purchases), total_purchases_usd, ceo_buy,
         )
+        if form4_filings:
+            most_recent_date_str = form4_filings[0]["date"]
+            try:
+                from datetime import date as _date
+                delta = (
+                    datetime.now(timezone.utc).date()
+                    - _date.fromisoformat(most_recent_date_str)
+                ).days
+                days_since_most_recent = max(0, delta)
+            except Exception:
+                days_since_most_recent = 0
 
-    return form4_count, insider_score, ceo_buy
+    return form4_count, total_purchases_usd, ceo_buy, days_since_most_recent
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -649,52 +752,86 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
     def _score_ticker(row: Dict[str, str]) -> Dict[str, Any]:
         ticker = row["ticker"]
-        # fetch_edgar_data() raises on network failure → _edgar_ok=False.
-        # It returns (0, 0.50, False) when ticker genuinely has no CIK or no filings
-        # — that is valid data, not a failure, so _edgar_ok stays True.
         edgar_ok    = False
         form4_count = 0
-        i_score     = 0.0    # 0.0 not 0.5: if EDGAR is globally unreachable, all
-        ceo_buy     = False  # tickers stay at 0.0 → normaliser penalises dead feed
+        total_purchases_usd = 0.0
+        ceo_buy     = False
+        days_since_most_recent = 0
         try:
-            form4_count, i_score, ceo_buy = fetch_edgar_data(ticker)
+            form4_count, total_purchases_usd, ceo_buy, days_since_most_recent = fetch_edgar_data(ticker)
             edgar_ok = True
         except Exception as exc:
             log.warning("EDGAR unreachable for %s: %s", ticker, exc)
 
+        mktcap = mktcaps.get(ticker, 0.0)
+        congress_raw = congress_data.get(ticker)
+
         try:
-            e_score    = score_edgar(form4_count)
-            c_score    = score_congress(congress_data.get(ticker))
-            n_score    = score_news(ticker)
+            finnhub_key = os.getenv("FINNHUB_API_KEY", "")
+            e_score = score_edgar(form4_count)
+            i_score = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
+            c_score = score_congress(congress_raw)
+            n_score = (
+                score_news_finnhub(ticker, finnhub_key)
+                if finnhub_key
+                else _score_news_yfinance(ticker)
+            )
             price_data = fetch_price_data(ticker)
-            m_score    = score_momentum(price_data["return_20d"])
+            m_score = score_momentum(
+                price_data["return_20d"],
+                price_data["spy_return_20d"],
+                price_data["volume_spike"],
+            )
+
+            quiver_evidence = {
+                "congress": {
+                    "purchases":       int(congress_raw.get("purchases", 0)) if congress_raw else 0,
+                    "sales":           int(congress_raw.get("sales", 0)) if congress_raw else 0,
+                    "net":             int(
+                        congress_raw.get(
+                            "net",
+                            congress_raw.get("purchases", 0) - congress_raw.get("sales", 0),
+                        )
+                    ) if congress_raw else 0,
+                    "recency_days":    congress_raw.get("recency_days") if congress_raw else None,
+                    "representatives": congress_raw.get("representatives", []) if congress_raw else [],
+                },
+                "source": "quiver" if (congress_raw and congress_raw.get("recency_days") is not None) else "s3",
+            }
+
             return {
-                "ticker":           ticker,
-                "sector":           sector.get(ticker, "Unknown"),
-                "cap_tier":         cap_tier.get(ticker, "large"),
-                "market_cap":       mktcaps.get(ticker, 0.0),
-                "edgar_score":      e_score,
-                "insider_score":    i_score,
-                "congress_score":   c_score,
-                "news_score":       n_score,
-                "momentum_score":   m_score,
-                "ceo_buy":          ceo_buy,
-                "form4_count":      form4_count,
-                "_edgar_ok":        edgar_ok,
-                "_scoring_error":   False,
+                "ticker":          ticker,
+                "sector":          sector.get(ticker, "Unknown"),
+                "cap_tier":        cap_tier.get(ticker, "large"),
+                "market_cap":      mktcap,
+                "edgar_score":     e_score,
+                "insider_score":   i_score,
+                "congress_score":  c_score,
+                "news_score":      n_score,
+                "momentum_score":  m_score,
+                "ceo_buy":         ceo_buy,
+                "form4_count":     form4_count,
+                "quiver_evidence": quiver_evidence,
+                "_edgar_ok":       edgar_ok,
+                "_scoring_error":  False,
             }
         except Exception as exc:
             log.warning("Scoring failed for %s: %s", ticker, exc)
             return {
-                "ticker": ticker, "sector": sector.get(ticker, "Unknown"),
-                "cap_tier": cap_tier.get(ticker, "large"),
-                "market_cap": 0.0,
-                "edgar_score": 0.30, "insider_score": i_score,
-                "congress_score": 0.0, "news_score": 0.0,
-                "momentum_score": 0.0, "ceo_buy": ceo_buy,
-                "form4_count": form4_count,
-                "_edgar_ok":      edgar_ok,
-                "_scoring_error": True,
+                "ticker":          ticker,
+                "sector":          sector.get(ticker, "Unknown"),
+                "cap_tier":        cap_tier.get(ticker, "large"),
+                "market_cap":      mktcap,
+                "edgar_score":     0.30,
+                "insider_score":   0.0,
+                "congress_score":  0.0,
+                "news_score":      0.0,
+                "momentum_score":  0.0,
+                "ceo_buy":         ceo_buy,
+                "form4_count":     form4_count,
+                "quiver_evidence": {},
+                "_edgar_ok":       edgar_ok,
+                "_scoring_error":  True,
             }
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
