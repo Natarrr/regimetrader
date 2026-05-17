@@ -4,7 +4,7 @@ Five-factor weighted scoring → top_lists.json + top5.csv
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
 and applies Markowitz (1990 Nobel) portfolio ranking:
 
-  final_score = 0.30×edgar + 0.25×insider + 0.20×congress + 0.15×news + 0.10×macro
+  final_score = 0.28×edgar + 0.23×insider + 0.22×congress + 0.15×news + 0.12×momentum
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -45,11 +45,11 @@ from regime_trader.utils.io import save_json_atomic
 log = logging.getLogger("generate_top_lists")
 
 WEIGHTS: Dict[str, float] = {
-    "edgar":    0.30,
-    "insider":  0.25,
-    "congress": 0.20,
+    "edgar":    0.28,
+    "insider":  0.23,
+    "congress": 0.22,
     "news":     0.15,
-    "macro":    0.10,
+    "momentum": 0.12,
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -58,11 +58,7 @@ FACTOR_FIELDS: Dict[str, str] = {
     "insider":  "insider_score",
     "congress": "congress_score",
     "news":     "news_score",
-    # NOTE: the pipeline writes this field as "momentum_score" (price momentum alpha
-    # factor), not a true macro/beta factor. A real macro score (VIX, yields, oil)
-    # is applied as a multiplicative overlay via _apply_vix_overlay() below so that
-    # the absolute risk regime is separated from the cross-sectional ranking.
-    "macro":    "momentum_score",
+    "momentum": "momentum_score",
 }
 
 _BADGES = [
@@ -381,7 +377,7 @@ def generate(
         writer.writerow([
             "rank", "ticker", "sector", "cap_tier", "market_cap",
             "final_score", "badge", "ceo_buy", "form4_count",
-            "edgar", "insider", "congress", "news", "macro",
+            "edgar", "insider", "congress", "news", "momentum",
         ])
         for rank, entry in enumerate(top_buys, 1):
             f = entry["factors"]
@@ -395,7 +391,7 @@ def generate(
                 entry["badge"],
                 entry["ceo_buy"],
                 entry["form4_count"],
-                f["edgar"], f["insider"], f["congress"], f["news"], f["macro"],
+                f["edgar"], f["insider"], f["congress"], f["news"], f["momentum"],
             ])
     log.info("Wrote %s", out_csv)
 

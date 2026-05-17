@@ -64,7 +64,7 @@ class TestCrossSectionalNormalize:
         results = _make_results(3)
         normed  = _cross_sectional_normalize(results)
         for row in normed:
-            assert set(row.keys()) == {"edgar", "insider", "congress", "news", "macro"}
+            assert set(row.keys()) == {"edgar", "insider", "congress", "news", "momentum"}
 
     def test_output_length_matches_input(self):
         results = _make_results(7)
@@ -80,11 +80,11 @@ class TestCrossSectionalNormalize:
     def test_congress_factor_key_present(self):
         """FACTOR_FIELDS maps 'congress' → congress_score."""
         assert FACTOR_FIELDS.get("congress") == "congress_score"
-        assert "momentum" not in FACTOR_FIELDS
+        assert "macro" not in FACTOR_FIELDS
 
-    def test_macro_factor_present(self):
-        """FACTOR_FIELDS maps 'macro' → momentum_score (pipeline field name)."""
-        assert FACTOR_FIELDS.get("macro") == "momentum_score"
+    def test_momentum_factor_present(self):
+        """FACTOR_FIELDS maps 'momentum' → momentum_score (pipeline field name)."""
+        assert FACTOR_FIELDS.get("momentum") == "momentum_score"
 
     def test_2008_crash_outlier_does_not_collapse_scores(self):
         """2020 COVID analog: one ticker with extreme momentum → others not collapsed to 0."""
@@ -92,7 +92,7 @@ class TestCrossSectionalNormalize:
         results = _make_results(50, {"momentum_score": scores})
         normed  = _cross_sectional_normalize(results)
         # The 49 normal tickers should not all map to near-zero
-        normal_scores = [normed[i]["macro"] for i in range(49)]
+        normal_scores = [normed[i]["momentum"] for i in range(49)]
         assert max(normal_scores) > 0.30   # not all collapsed
 
     def test_all_zero_values_penalised_not_neutral(self):
@@ -149,27 +149,27 @@ class TestEffectiveWeights:
     """Dead-factor weight redistribution."""
 
     def test_no_dead_factors_returns_original(self):
-        norm = [{"edgar": 0.3, "insider": 0.5, "congress": 0.7, "news": 0.4, "macro": 0.6}]
+        norm = [{"edgar": 0.3, "insider": 0.5, "congress": 0.7, "news": 0.4, "momentum": 0.6}]
         w = _effective_weights(norm, WEIGHTS)
         assert w == pytest.approx(WEIGHTS, abs=1e-6)
 
     def test_dead_congress_redistributes_to_live(self):
-        """All-zero congress → its 20% weight rolls to edgar/insider/news/macro."""
-        norm = [{"edgar": 0.5, "insider": 0.5, "congress": 0.0, "news": 0.5, "macro": 0.5}]
+        """All-zero congress → its 22% weight rolls to edgar/insider/news/momentum."""
+        norm = [{"edgar": 0.5, "insider": 0.5, "congress": 0.0, "news": 0.5, "momentum": 0.5}]
         w = _effective_weights(norm, WEIGHTS)
         assert "congress" not in w
         assert abs(sum(w.values()) - 1.0) < 1e-5   # weights still sum to 1
 
     def test_live_weights_increase_proportionally(self):
         """Each live factor gets an equal relative boost when congress is dead."""
-        norm = [{"edgar": 0.5, "insider": 0.5, "congress": 0.0, "news": 0.5, "macro": 0.5}]
+        norm = [{"edgar": 0.5, "insider": 0.5, "congress": 0.0, "news": 0.5, "momentum": 0.5}]
         w = _effective_weights(norm, WEIGHTS)
         # edgar / insider ratio must stay constant
         assert w["edgar"] / w["insider"] == pytest.approx(WEIGHTS["edgar"] / WEIGHTS["insider"], rel=1e-4)
 
     def test_all_dead_returns_original_fallback(self):
         """If everything is dead, fall back to original weights rather than divide by zero."""
-        norm = [{"edgar": 0.0, "insider": 0.0, "congress": 0.0, "news": 0.0, "macro": 0.0}]
+        norm = [{"edgar": 0.0, "insider": 0.0, "congress": 0.0, "news": 0.0, "momentum": 0.0}]
         w = _effective_weights(norm, WEIGHTS)
         assert w == pytest.approx(WEIGHTS, abs=1e-6)
 
@@ -215,7 +215,7 @@ class TestQuiverEvidence:
         return base
 
     def _make_norm(self):
-        return {"edgar": 0.7, "insider": 0.6, "congress": 0.8, "news": 0.5, "macro": 0.5}
+        return {"edgar": 0.7, "insider": 0.6, "congress": 0.8, "news": 0.5, "momentum": 0.5}
 
     def test_to_entry_includes_quiver_evidence(self):
         from backend.market_intel.generate_top_lists import _to_entry
