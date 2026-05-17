@@ -39,3 +39,44 @@ class TestFormatFactorLine:
         line = _format_factor_line(factors)
         for emoji in ("📋", "🏦", "🏛️", "📰", "📈"):
             assert emoji in line, f"{emoji} missing from factor line"
+
+    def test_missing_factor_defaults_to_zero_not_neutral(self):
+        from scripts.send_toplists_discord import _format_factor_line
+        # Missing factors must show 0.00, not 0.50 — dead feed is penalised
+        line = _format_factor_line({})
+        assert "0.00" in line, "missing factor must default to 0.00, not 0.50"
+        assert "0.50" not in line, "missing factor must not default to neutral 0.50"
+
+
+class TestBuildPayloadWeights:
+    def _make_top_lists(self, weights):
+        return {
+            "generated_at":  "2026-05-17T12:00:00+00:00",
+            "source_run_id": "test-run",
+            "ticker_count":  10,
+            "weights":       weights,
+            "kill_switch":   False,
+            "top_buys":      [{"ticker": "AAPL", "final_score": 0.70, "badge": "TACTICAL BUY",
+                               "factors": {"edgar": 0.7, "insider": 0.6, "congress": 0.5,
+                                           "news": 0.6, "momentum": 0.5}, "ceo_buy": False}],
+            "mid_caps":      [],
+            "small_caps":    [],
+        }
+
+    def test_nominal_weights_no_redistribution_label(self):
+        from scripts.send_toplists_discord import build_payload
+        weights = {"edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12}
+        payload = build_payload(self._make_top_lists(weights))
+        desc = payload["embeds"][0]["description"]
+        assert "feed down" not in desc, "nominal weights must not trigger redistribution warning"
+        assert "redistributed" not in desc
+
+    def test_redistributed_weights_shows_warning(self):
+        from scripts.send_toplists_discord import build_payload
+        # Simulate insider feed dead — weight redistributed to other factors
+        weights = {"edgar": 0.359, "congress": 0.282, "news": 0.192, "momentum": 0.154}
+        payload = build_payload(self._make_top_lists(weights))
+        desc = payload["embeds"][0]["description"]
+        assert "feed down" in desc or "redistributed" in desc, (
+            "redistributed weights must show a warning in description"
+        )

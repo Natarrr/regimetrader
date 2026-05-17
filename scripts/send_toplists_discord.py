@@ -79,7 +79,7 @@ def _format_factor_line(factors: Dict[str, float]) -> str:
     """One compact line: 📋0.72 🏦0.90 🏛️0.50 📰0.65 📈0.58"""
     parts = []
     for key in ("edgar", "insider", "congress", "news", "momentum"):
-        v = factors.get(key, 0.50)
+        v = factors.get(key, 0.0)
         parts.append(f"{_FACTOR_EMOJI[key]}`{v:.2f}`")
     return "  ".join(parts)
 
@@ -163,9 +163,19 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
 
     color = _pick_color(top_lists)
 
-    weight_str = " · ".join(
-        f"{k}={v:.0%}" for k, v in weights.items()
-    ) if weights else "default"
+    _NOMINAL_WEIGHTS = {
+        "edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12,
+    }
+    weights_redistributed = bool(weights) and any(
+        abs(weights.get(k, 0) - _NOMINAL_WEIGHTS.get(k, 0)) > 0.001
+        for k in _NOMINAL_WEIGHTS
+    )
+    if weights:
+        weight_str = " · ".join(f"{k}={v:.0%}" for k, v in weights.items())
+        if weights_redistributed:
+            weight_str += " ⚠️ _(feed down — redistributed)_"
+    else:
+        weight_str = "default"
 
     stale_warning = ""
     if age_h is not None and age_h > _STALE_HOURS:
