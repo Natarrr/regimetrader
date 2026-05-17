@@ -97,6 +97,8 @@ Also: the factor legend field text says "📈 Momentum" already — only the cod
 
 ## Backend Evidence Fields (light addition)
 
+**Constraint:** These additions do not alter any scores, only expose already-computed values for UI and Discord. No scoring logic changes.
+
 **File:** `scripts/run_pipeline.py` — `_score_ticker()` return dict
 
 Add 3 pass-through fields to every result row so the frontend can display evidence without re-computing anything:
@@ -118,13 +120,15 @@ news_source = "finnhub" if finnhub_key else "yfinance"
 # Set to "none" if score_news_finnhub returns 0.0 AND yfinance also fails
 ```
 
+Default value is `"none"` (not `"unknown"`) — clearer signal that no source succeeded.
+
 These fields flow through `intel_source_status.json` → `generate_top_lists.py` → `top_lists.json` automatically (generate_top_lists passes them through via `row.get(...)` in `_to_entry()`).
 
 **`generate_top_lists.py` `_to_entry()`** must pass these through:
 ```python
 return {
     # ... existing fields ...
-    "news_source":           row.get("news_source", "unknown"),
+    "news_source":           row.get("news_source", "none"),
     "insider_usd":           float(row.get("insider_usd", 0.0)),
     "momentum_spy_relative": float(row.get("momentum_spy_relative", 0.0)),
     "volume_spike":          float(row.get("volume_spike", 1.0)),
@@ -150,7 +154,10 @@ Under each ticker row (currently a flat table row), add an expander showing:
 
 Data sourced from `quiver_evidence` (congress), `insider_usd` (insider), `news_source` (news), `momentum_spy_relative` + `volume_spike` (momentum), `form4_count` + `ceo_buy` (edgar).
 
-**Rendering rule:** if field is 0/None/empty, show "—" not a number. Never show evidence that misleads (e.g., "0 buys, 0 sales" → show "No congressional activity").
+**Rendering rules:**
+
+- If a field is 0/None/empty, show "—" not a number. Never show evidence that misleads (e.g., "0 buys, 0 sales" → show "No congressional activity").
+- **Hide the entire line** when both the raw evidence value and the factor score are zero/null — e.g., if `insider_usd == 0` and `insider_score == 0`, omit the insider line entirely. Same rule applies to all factors. This avoids fake precision like "$0 purchase · 0.00% of mktcap".
 
 ### Portfolio Advisor — evidence section inside position expander
 After the factor bar table, add a collapsible "📊 Signal Evidence" section:
@@ -198,6 +205,8 @@ top_lists.json → pages/6_Stock_Picker.py  (evidence expanders)
 top_lists.json → scripts/send_toplists_discord.py (factor line uses "momentum" key)
 intel_source_status.json → portfolio_advisor_engine.py → pages/7_Portfolio_Advisor.py
 ```
+
+**Factor order contract:** The canonical factor order is `["edgar", "insider", "congress", "news", "momentum"]`. All UIs (Stock Picker, Portfolio Advisor) and Discord must respect this order when iterating or displaying factors.
 
 ---
 
