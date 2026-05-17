@@ -128,29 +128,33 @@ class TestFetchCongressBuys:
         assert result == {}
 
     def test_s3_403_falls_back_to_quiver(self, tmp_path, monkeypatch):
-        """When S3 returns 403, Quiver data is used."""
+        """When S3 returns 403, QuiverClient.congress_by_ticker() result is used."""
         monkeypatch.setenv("QUIVER_API_KEY", "test-key")
         monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
-        quiver = [
-            {"TransactionDate": "2026-04-01", "Ticker": "TSLA", "Transaction": "Purchase",
-             "TickerType": "ST"},
-        ]
 
-        def mock_get(url, **kwargs):
+        quiver_result = {
+            "TSLA": {
+                "purchases": 1, "sales": 0, "total": 1, "net": 1,
+                "representatives": ["Test Rep"], "recency_days": 5,
+            }
+        }
+
+        def mock_s3_get(url, **kwargs):
             resp = MagicMock()
-            if "quiverquant" in url:
-                resp.status_code = 200
-                resp.raise_for_status = MagicMock()
-                resp.json.return_value = quiver
-            else:
-                resp.status_code = 403
-                resp.raise_for_status.side_effect = Exception("403")
+            resp.status_code = 403
+            resp.raise_for_status.side_effect = Exception("403 Forbidden")
             return resp
 
-        with patch("requests.get", side_effect=mock_get):
+        with patch("requests.get", side_effect=mock_s3_get), \
+             patch(
+                 "regime_trader.services.quiver_client.QuiverClient.congress_by_ticker",
+                 return_value=quiver_result,
+             ):
             result = fetch_congress_buys(lookback_days=90)
+
         assert "TSLA" in result
         assert result["TSLA"]["purchases"] == 1
+        assert result["TSLA"]["sales"] == 0
 
     def test_all_sources_fail_returns_empty(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
