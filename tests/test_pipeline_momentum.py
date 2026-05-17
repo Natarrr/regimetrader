@@ -23,24 +23,28 @@ from scripts.run_pipeline import (
 
 class TestScoreMomentum:
     def test_positive_return_above_neutral(self):
-        assert score_momentum(0.10) > 0.5
+        assert score_momentum(0.10, spy_return_20d=0.0, volume_spike=1.0) > 0.5
 
     def test_negative_return_below_neutral(self):
-        assert score_momentum(-0.10) < 0.5
+        assert score_momentum(-0.10, spy_return_20d=0.0, volume_spike=1.0) < 0.5
 
     def test_zero_return_near_neutral(self):
-        assert score_momentum(0.0) == pytest.approx(0.5, abs=0.02)
+        assert score_momentum(0.0, spy_return_20d=0.0, volume_spike=1.0) == pytest.approx(0.5, abs=0.02)
 
     def test_large_positive_capped(self):
         """Returns > 30% are clamped — score should equal score at +30%."""
-        assert score_momentum(0.99) == pytest.approx(score_momentum(0.30), abs=1e-6)
+        assert score_momentum(0.99, spy_return_20d=0.0, volume_spike=1.0) == pytest.approx(
+            score_momentum(0.30, spy_return_20d=0.0, volume_spike=1.0), abs=1e-6
+        )
 
     def test_large_negative_capped(self):
-        assert score_momentum(-0.99) == pytest.approx(score_momentum(-0.30), abs=1e-6)
+        assert score_momentum(-0.99, spy_return_20d=0.0, volume_spike=1.0) == pytest.approx(
+            score_momentum(-0.30, spy_return_20d=0.0, volume_spike=1.0), abs=1e-6
+        )
 
     def test_output_bounded_0_to_1(self):
         for r in [-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0]:
-            assert 0.0 <= score_momentum(r) <= 1.0
+            assert 0.0 <= score_momentum(r, spy_return_20d=0.0, volume_spike=1.0) <= 1.0
 
 
 class TestFetchPriceData:
@@ -72,12 +76,12 @@ class TestFetchPriceData:
         fake = pd.DataFrame()
         with patch("yfinance.download", return_value=fake):
             result = fetch_price_data("INVALID")
-        assert result == {"return_20d": 0.0}
+        assert result["return_20d"] == pytest.approx(0.0)
 
     def test_exception_returns_zero(self):
         with patch("yfinance.download", side_effect=Exception("network error")):
             result = fetch_price_data("AAPL")
-        assert result == {"return_20d": 0.0}
+        assert result["return_20d"] == pytest.approx(0.0)
 
     def test_return_key_present(self):
         fake = self._fake_df(100.0, 105.0)
