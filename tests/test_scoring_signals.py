@@ -297,6 +297,7 @@ class TestQuiverEvidenceInResults:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC in test")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
+                 patch("scripts.run_pipeline.fetch_all_finnhub_insider", return_value={}), \
                  patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55):
                 mock_ticker.return_value.news = []
                 status = run(tickers_file, log_dir, max_workers=1)
@@ -342,6 +343,7 @@ class TestEvidencePassthroughFields:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
+                 patch("scripts.run_pipeline.fetch_all_finnhub_insider", return_value={}), \
                  patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55), \
                  patch.dict(os.environ, {"FINNHUB_API_KEY": "test-key"}):
                 mock_ticker.return_value.news = []

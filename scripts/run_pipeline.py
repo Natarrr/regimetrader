@@ -585,6 +585,98 @@ def fetch_finnhub_insider_purchases(
         return 0.0, 0
 
 
+def fetch_all_finnhub_insider(
+    tickers: List[str],
+    api_key: str,
+    lookback_days: int = 180,
+    calls_per_minute: int = 55,
+) -> Dict[str, Tuple[float, int]]:
+    """Pre-fetch Finnhub insider-transactions for all tickers before the thread pool.
+
+    Finnhub free tier: 60 calls/min.  This function serialises the calls with a
+    small sleep between each to stay safely under the rate limit (default 55/min
+    = ~1.09s per call).  A 429 response triggers an exponential backoff retry.
+
+    Returns a dict mapping ticker → (total_purchases_usd, days_since_most_recent).
+    Missing or failed tickers get (0.0, 0).
+    """
+    if not api_key or not tickers:
+        return {}
+
+    import requests as _req
+    from datetime import date as _date
+
+    min_interval = 60.0 / calls_per_minute   # seconds between calls
+    results: Dict[str, Tuple[float, int]] = {}
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+
+    log.info(
+        "Finnhub insider pre-fetch: %d tickers at %.1f s/call (rate: %d/min)",
+        len(tickers), min_interval, calls_per_minute,
+    )
+
+    for i, ticker in enumerate(tickers):
+        backoff = min_interval
+        for attempt in range(4):
+            try:
+                url = (
+                    f"https://finnhub.io/api/v1/stock/insider-transactions"
+                    f"?symbol={ticker}&token={api_key}"
+                )
+                resp = _req.get(url, timeout=10)
+                if resp.status_code == 429:
+                    wait = float(resp.headers.get("Retry-After", backoff * (2 ** attempt)))
+                    log.warning(
+                        "Finnhub 429 for %s (attempt %d/4) — sleeping %.1fs", ticker, attempt + 1, wait
+                    )
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                transactions = resp.json().get("data", []) or []
+
+                purchase_dates: List[str] = []
+                total_usd = 0.0
+                for tx in transactions:
+                    if tx.get("transactionCode") != "P":
+                        continue
+                    if tx.get("isDerivative", False):
+                        continue
+                    tx_date = str(tx.get("transactionDate") or "")[:10]
+                    if tx_date < cutoff:
+                        continue
+                    shares = float(tx.get("share") or 0)
+                    price  = float(tx.get("transactionPrice") or 0)
+                    if shares > 0 and price > 0:
+                        total_usd += shares * price
+                        purchase_dates.append(tx_date)
+
+                if purchase_dates:
+                    most_recent = max(purchase_dates)
+                    days_ago = (datetime.now(timezone.utc).date() - _date.fromisoformat(most_recent)).days
+                    results[ticker] = (round(total_usd, 2), max(0, days_ago))
+                else:
+                    results[ticker] = (0.0, 0)
+                break   # success — exit retry loop
+
+            except Exception as exc:
+                log.debug("Finnhub insider pre-fetch error for %s (attempt %d): %s", ticker, attempt + 1, exc)
+                if attempt < 3:
+                    time.sleep(backoff * (2 ** attempt))
+                else:
+                    results[ticker] = (0.0, 0)
+
+        # Rate-limit pacing between tickers (after success or final failure)
+        if i < len(tickers) - 1:
+            time.sleep(min_interval)
+
+    nonzero = sum(1 for v in results.values() if v[0] > 0)
+    log.info(
+        "Finnhub insider pre-fetch complete: %d/%d tickers with purchases",
+        nonzero, len(tickers),
+    )
+    return results
+
+
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
@@ -839,6 +931,18 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     spy_return_baseline = _fetch_spy_return()
     log.info("SPY 3-month return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
 
+    # ── Finnhub insider — pre-fetched serially to respect 60 calls/min limit ──
+    # Running inside the thread pool (160 concurrent calls) saturates the free
+    # tier immediately; all 429 errors are silently swallowed by the per-ticker
+    # try/except, causing insider=0.0 for every ticker.
+    finnhub_key_global = os.getenv("FINNHUB_API_KEY", "")
+    finnhub_insider_cache: Dict[str, Tuple[float, int]] = {}
+    if finnhub_key_global:
+        log.info("Pre-fetching Finnhub insider transactions for %d tickers…", len(tickers))
+        finnhub_insider_cache = fetch_all_finnhub_insider(tickers, finnhub_key_global)
+    else:
+        log.info("FINNHUB_API_KEY not set — insider scoring will use EDGAR XML only")
+
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
     errors  = 0
@@ -860,15 +964,12 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         congress_raw = congress_data.get(ticker)
 
         try:
-            finnhub_key = os.getenv("FINNHUB_API_KEY", "")
+            finnhub_key = finnhub_key_global  # use pre-fetched key (avoids per-thread env lookup)
 
-            # Insider purchases: Finnhub is more complete than EDGAR XML parsing
-            # (catches purchases across full history, not just 3 most-recent filings).
-            # Fall back to EDGAR XML result when Finnhub key is absent.
-            if finnhub_key:
-                insider_usd_finnhub, days_finnhub = fetch_finnhub_insider_purchases(
-                    ticker, finnhub_key, lookback_days=180,
-                )
+            # Insider purchases: use pre-fetched cache to avoid rate-limiting 160 concurrent calls.
+            # fetch_all_finnhub_insider() ran serially before the thread pool at 55 calls/min.
+            if finnhub_key and ticker in finnhub_insider_cache:
+                insider_usd_finnhub, days_finnhub = finnhub_insider_cache[ticker]
                 if insider_usd_finnhub > 0:
                     total_purchases_usd    = insider_usd_finnhub
                     days_since_most_recent = days_finnhub
