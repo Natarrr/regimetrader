@@ -74,7 +74,7 @@ def _render_ticker_table(entries: List[Dict[str, Any]], show_watchlist: bool = F
             "Insider":  f"{f.get('insider',0):.2f}",
             "Congress": f"{f.get('congress',0):.2f}",
             "News":     f"{f.get('news',0):.2f}",
-            "Macro":    f"{f.get('macro',0):.2f}",
+            "Momentum": f"{f.get('momentum',0):.2f}",
         })
 
     if not rows:
@@ -82,6 +82,83 @@ def _render_ticker_table(entries: List[Dict[str, Any]], show_watchlist: bool = F
         return
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_ticker_list_with_evidence(entries: List[Dict[str, Any]], show_watchlist: bool = False) -> None:
+    """Render entries as expandable rows with evidence sub-sections."""
+    if not entries:
+        st.caption("No tickers in this category.")
+        return
+
+    shown = 0
+    for i, e in enumerate(entries, 1):
+        badge = e.get("badge", "WATCHLIST")
+        if badge == "WATCHLIST" and not show_watchlist:
+            continue
+        shown += 1
+        score  = e.get("final_score", 0.0)
+        f      = e.get("factors", {})
+        ticker = e.get("ticker", "?")
+        ceo    = "✅ CEO Buy" if e.get("ceo_buy") else ""
+        label  = f"**{i}. {ticker}** — {badge}  Score: {score:.3f}  {ceo}"
+
+        with st.expander(label, expanded=False):
+            # Factor mini-table
+            factor_rows = [
+                {"Factor": "📋 Edgar",    "W": "28%", "Score": f"{f.get('edgar',    0):.3f}"},
+                {"Factor": "🏦 Insider",  "W": "23%", "Score": f"{f.get('insider',  0):.3f}"},
+                {"Factor": "🏛️ Congress", "W": "22%", "Score": f"{f.get('congress', 0):.3f}"},
+                {"Factor": "📰 News",     "W": "15%", "Score": f"{f.get('news',     0):.3f}"},
+                {"Factor": "📈 Momentum", "W": "12%", "Score": f"{f.get('momentum', 0):.3f}"},
+            ]
+            st.dataframe(pd.DataFrame(factor_rows), use_container_width=True, hide_index=True)
+
+            # Evidence sub-section
+            insider_usd          = float(e.get("insider_usd", 0.0))
+            news_source          = e.get("news_source", "none")
+            momentum_spy_rel     = float(e.get("momentum_spy_relative", 0.0))
+            volume_spike         = float(e.get("volume_spike", 1.0))
+            qe                   = e.get("quiver_evidence", {})
+            cong                 = qe.get("congress", {})
+            cong_net             = cong.get("net", 0)
+            cong_buys            = cong.get("purchases", 0)
+            cong_sales           = cong.get("sales", 0)
+            cong_days            = cong.get("recency_days")
+            cong_reps            = cong.get("representatives", [])
+
+            has_insider  = insider_usd > 0 or f.get("insider", 0) > 0
+            has_congress = (cong_buys > 0 or cong_sales > 0) or f.get("congress", 0) > 0
+            has_news     = news_source != "none" or f.get("news", 0) > 0
+            has_momentum = (momentum_spy_rel != 0.0 or volume_spike != 1.0) or f.get("momentum", 0) > 0
+            has_edgar    = f.get("edgar", 0) > 0
+
+            evidence_lines = []
+            if has_insider:
+                evidence_lines.append(f"🏦 **Insider** · ${insider_usd:,.0f}")
+            if has_congress:
+                days_str = f" · {cong_days}d ago" if cong_days is not None else ""
+                reps_str = ", ".join(cong_reps[:2]) if cong_reps else "—"
+                evidence_lines.append(
+                    f"🏛️ **Congress** · Net {cong_net:+d} ({cong_buys} buys, {cong_sales} sells){days_str} · [{reps_str}]"
+                )
+            if has_news:
+                src = {"finnhub": "Finnhub", "yfinance": "yfinance"}.get(news_source, news_source)
+                evidence_lines.append(f"📰 **News** · Source: {src} · Score: {f.get('news', 0):.2f}")
+            if has_momentum:
+                evidence_lines.append(
+                    f"📈 **Momentum** · {momentum_spy_rel*100:+.1f}% vs SPY · {volume_spike:.1f}× avg vol"
+                )
+            if has_edgar:
+                ceo_str = " · CEO Buy ✅" if e.get("ceo_buy") else ""
+                evidence_lines.append(f"📋 **EDGAR** · Score {f.get('edgar', 0):.2f}{ceo_str}")
+
+            if evidence_lines:
+                st.markdown("\n\n".join(evidence_lines))
+            else:
+                st.caption("No evidence data available for this ticker.")
+
+    if shown == 0:
+        st.caption("No HIGH BUY or TACTICAL BUY tickers. Toggle 'Show Watchlist' to see all.")
 
 
 def render() -> None:
@@ -127,7 +204,7 @@ def render() -> None:
             picks = sector_picks.get(sector, [])
             label = f"{emoji} {sector} ({len(picks)} picks)"
             with st.expander(label, expanded=True):
-                _render_ticker_table(picks, show_watchlist=show_watchlist)
+                _render_ticker_list_with_evidence(picks, show_watchlist=show_watchlist)
 
     st.divider()
 
