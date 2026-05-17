@@ -531,6 +531,60 @@ def score_news_finnhub(ticker: str, api_key: str) -> float:
             return 0.0
 
 
+def fetch_finnhub_insider_purchases(
+    ticker: str,
+    api_key: str,
+    lookback_days: int = 180,
+) -> Tuple[float, int]:
+    """Stiglitz (2001 Nobel) — fetch open-market insider purchases via Finnhub.
+
+    Calls /stock/insider-transactions and filters to:
+      - transactionCode == "P"  (open-market purchase, not award/grant/exercise)
+      - isDerivative == False   (actual shares, not options)
+      - transactionDate >= cutoff (within lookback_days)
+
+    Returns (total_purchases_usd, days_since_most_recent).
+    Returns (0.0, 0) on any failure or when no qualifying purchases exist.
+    """
+    if not api_key:
+        return 0.0, 0
+    from datetime import date as _date
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+    try:
+        import requests as _req
+        url = f"https://finnhub.io/api/v1/stock/insider-transactions?symbol={ticker}&token={api_key}"
+        resp = _req.get(url, timeout=10)
+        resp.raise_for_status()
+        transactions = resp.json().get("data", []) or []
+
+        purchase_dates: List[str] = []
+        total_usd = 0.0
+        for tx in transactions:
+            if tx.get("transactionCode") != "P":
+                continue
+            if tx.get("isDerivative", False):
+                continue
+            tx_date = str(tx.get("transactionDate") or "")[:10]
+            if tx_date < cutoff:
+                continue
+            shares = float(tx.get("share") or 0)
+            price  = float(tx.get("transactionPrice") or 0)
+            if shares > 0 and price > 0:
+                total_usd += shares * price
+                purchase_dates.append(tx_date)
+
+        if not purchase_dates:
+            return 0.0, 0
+
+        most_recent = max(purchase_dates)
+        days_ago = (datetime.now(timezone.utc).date() - _date.fromisoformat(most_recent)).days
+        return round(total_usd, 2), max(0, days_ago)
+
+    except Exception as exc:
+        log.debug("Finnhub insider fetch failed for %s: %s", ticker, exc)
+        return 0.0, 0
+
+
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
@@ -807,6 +861,19 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
         try:
             finnhub_key = os.getenv("FINNHUB_API_KEY", "")
+
+            # Insider purchases: Finnhub is more complete than EDGAR XML parsing
+            # (catches purchases across full history, not just 3 most-recent filings).
+            # Fall back to EDGAR XML result when Finnhub key is absent.
+            if finnhub_key:
+                insider_usd_finnhub, days_finnhub = fetch_finnhub_insider_purchases(
+                    ticker, finnhub_key, lookback_days=180,
+                )
+                if insider_usd_finnhub > 0:
+                    total_purchases_usd    = insider_usd_finnhub
+                    days_since_most_recent = days_finnhub
+                    ceo_buy = total_purchases_usd > 25_000
+
             e_score = score_edgar(form4_count)
             i_score = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
             c_score = score_congress(congress_raw)
