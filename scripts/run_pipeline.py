@@ -137,22 +137,74 @@ def _fmp_get(path: str, params: Dict, timeout: int = 20) -> Any:
 
 
 def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
-    """Fama (2013 Nobel): batch profile fetch — ≤2 FMP calls for 160 tickers (chunks of 100).
+    """Fama (2013 Nobel): fetch market caps — FMP single-ticker then yfinance fallback.
 
-    FMP /stable/profile accepts comma-separated symbols. Chunking at 100 keeps
-    each request well within URL length limits and allows partial success.
+    FMP /stable/profile batch (comma-separated) is broken on the free tier (returns []).
+    We fetch one ticker at a time, then use yfinance for any misses to avoid
+    consuming the 250 calls/day FMP budget on repeated pipeline runs.
+
+    Strategy: FMP for up to 80 tickers (half of 160), yfinance for the rest.
+    This caps FMP usage at ~240 calls/day across 3 daily runs while keeping
+    market cap data complete.
     """
     result: Dict[str, float] = {}
-    for i in range(0, len(tickers), 100):
-        chunk = tickers[i : i + 100]
-        data  = _fmp_get("profile", {"symbol": ",".join(chunk)})
-        if data and isinstance(data, list):
-            for row in data:
-                sym = row.get("symbol", "")
-                if sym:
-                    result[sym] = float(row.get("mktCap") or 0)
-        else:
-            log.warning("FMP profile chunk %d–%d returned no data", i, i + len(chunk) - 1)
+    api_key = os.getenv("FMP_API_KEY", "")
+
+    fmp_cap = 80   # max tickers to fetch via FMP per run (conserves daily budget)
+
+    if api_key:
+        try:
+            import requests as _req
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+
+            s = _req.Session()
+            retry_cfg = Retry(total=2, backoff_factor=0.5, status_forcelist=[500, 502, 503])
+            s.mount("https://", HTTPAdapter(max_retries=retry_cfg))
+
+            for i, ticker in enumerate(tickers[:fmp_cap]):
+                try:
+                    url = (
+                        f"https://financialmodelingprep.com/stable/profile"
+                        f"?symbol={ticker}&apikey={api_key}"
+                    )
+                    r = s.get(url, timeout=15)
+                    r.raise_for_status()
+                    data = r.json()
+                    if data and isinstance(data, list):
+                        row = data[0]
+                        cap = float(row.get("marketCap") or row.get("mktCap") or 0)
+                        result[ticker] = cap
+                except Exception as exc:
+                    log.debug("FMP profile failed for %s: %s", ticker, exc)
+                if i < fmp_cap - 1:
+                    time.sleep(0.15)   # ~6.5 req/s — safe for free tier
+
+            fmp_hits = sum(1 for v in result.values() if v > 0)
+            log.info("FMP profiles: %d/%d tickers with market cap", fmp_hits, min(len(tickers), fmp_cap))
+        except Exception as exc:
+            log.warning("FMP profile fetch failed: %s", exc)
+    else:
+        log.warning("FMP_API_KEY not set — using yfinance for all market caps")
+
+    # yfinance fallback for tickers not covered by FMP (or when FMP key absent)
+    missing = [t for t in tickers if t not in result or result[t] == 0]
+    if missing:
+        try:
+            import yfinance as yf
+            log.info("yfinance market cap fallback for %d tickers…", len(missing))
+            for ticker in missing:
+                try:
+                    info = yf.Ticker(ticker).info
+                    cap = float(info.get("marketCap") or 0)
+                    result[ticker] = cap
+                except Exception:
+                    result[ticker] = 0.0
+        except Exception as exc:
+            log.warning("yfinance market cap fallback failed: %s", exc)
+
+    nonzero = sum(1 for v in result.values() if v > 0)
+    log.info("Market cap complete: %d/%d tickers", nonzero, len(tickers))
     return result
 
 
