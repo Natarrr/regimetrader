@@ -534,9 +534,15 @@ def score_news_finnhub(ticker: str, api_key: str) -> float:
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
-    """Stiglitz (2001): normalise Form 4 filing count to [0.20, 0.90]."""
+    """Stiglitz (2001): normalise Form 4 filing count to [0, 0.90].
+
+    0 filings -> 0.0 (penalised, not neutral).  Consistent with score_insider_value
+    and score_congress: a dead/absent signal is 0.0 so the cross-sectional
+    normaliser triggers the all-zero branch (treats it as a dead feed) rather than
+    the all-same-non-zero branch (which silently returns 0.50 neutral for everyone).
+    """
     if form4_count <= 0:
-        return 0.30
+        return 0.0
     return round(min(0.90, 0.30 + form4_count * 0.12), 4)
 
 
@@ -849,7 +855,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "sector":          sector.get(ticker, "Unknown"),
                 "cap_tier":        cap_tier.get(ticker, "large"),
                 "market_cap":      mktcap,
-                "edgar_score":     0.30,
+                "edgar_score":     0.0,
                 "insider_score":   0.0,
                 "congress_score":  0.0,
                 "news_score":      0.0,
