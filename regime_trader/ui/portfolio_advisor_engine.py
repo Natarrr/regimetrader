@@ -163,11 +163,11 @@ def build_advice(
             continue
 
         final_score = float(
-            row.get("edgar_score", 0) * 0.30 +
-            row.get("insider_score", 0) * 0.25 +
-            row.get("congress_score", 0) * 0.20 +
+            row.get("edgar_score", 0) * 0.28 +
+            row.get("insider_score", 0) * 0.23 +
+            row.get("congress_score", 0) * 0.22 +
             row.get("news_score", 0) * 0.15 +
-            row.get("momentum_score", 0) * 0.10
+            row.get("momentum_score", 0) * 0.12
         )
         signal = compute_signal(final_score, regime)
         swap   = find_swap_candidate(ticker, row.get("sector", ""), held, top_lists) \
@@ -187,7 +187,7 @@ def build_advice(
                 "insider":  round(float(row.get("insider_score", 0)), 4),
                 "congress": round(float(row.get("congress_score",0)), 4),
                 "news":     round(float(row.get("news_score",    0)), 4),
-                "macro":    round(float(row.get("momentum_score",0)), 4),
+                "momentum": round(float(row.get("momentum_score",0)), 4),
             },
             signal_age_days = age_days,
             swap_candidate  = swap,

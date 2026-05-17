@@ -113,3 +113,67 @@ class TestFindSwapCandidate:
         result = find_swap_candidate("NVDA", "Information Technology", held, self._TOP_LISTS)
         assert result is not None
         assert result["ticker"] != "NVDA"
+
+
+# ── build_advice() weights and keys ───────────────────────────────────────────
+
+class TestBuildAdviceWeightsAndKeys:
+    """build_advice() must use 28/23/22/15/12 weights and 'momentum' key."""
+
+    def _make_status(self) -> dict:
+        return {
+            "computed_at": "2026-05-17T10:00:00Z",
+            "results": [{
+                "ticker":         "AAPL",
+                "sector":         "Information Technology",
+                "cap_tier":       "large",
+                "edgar_score":    1.0,
+                "insider_score":  0.0,
+                "congress_score": 0.0,
+                "news_score":     0.0,
+                "momentum_score": 0.0,
+            }],
+        }
+
+    def test_final_score_uses_correct_weights(self):
+        from regime_trader.ui.portfolio_advisor_engine import build_advice
+
+        status = self._make_status()
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "intel_source_status.json"
+            status_path.write_text(json.dumps(status))
+            top_lists_path = Path(td) / "top_lists.json"
+            top_lists_path.write_text(json.dumps({}))
+
+            with patch("regime_trader.ui.portfolio_advisor_engine._STATUS_PATH", status_path), \
+                 patch("regime_trader.ui.portfolio_advisor_engine._TOP_LISTS_PATH", top_lists_path):
+                result = build_advice(
+                    [{"ticker": "AAPL", "net_qty": 10, "avg_cost": 150.0}],
+                    regime="Bull",
+                )
+
+        assert len(result) == 1
+        adv = result[0]
+        # edgar_score=1.0, all others=0 → final_score should be 0.28 (not 0.30)
+        assert adv.final_score == pytest.approx(0.28, abs=1e-4)
+
+    def test_factors_dict_has_momentum_not_macro(self):
+        from regime_trader.ui.portfolio_advisor_engine import build_advice
+
+        status = self._make_status()
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "intel_source_status.json"
+            status_path.write_text(json.dumps(status))
+            top_lists_path = Path(td) / "top_lists.json"
+            top_lists_path.write_text(json.dumps({}))
+
+            with patch("regime_trader.ui.portfolio_advisor_engine._STATUS_PATH", status_path), \
+                 patch("regime_trader.ui.portfolio_advisor_engine._TOP_LISTS_PATH", top_lists_path):
+                result = build_advice(
+                    [{"ticker": "AAPL", "net_qty": 10, "avg_cost": 150.0}],
+                    regime="Bull",
+                )
+
+        adv = result[0]
+        assert "momentum" in adv.factors,     "'momentum' key missing from factors"
+        assert "macro"    not in adv.factors, "'macro' key must not be in factors"
