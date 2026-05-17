@@ -283,4 +283,53 @@ class TestQuiverEvidenceInResults:
             assert results, "No results returned"
             r = results[0]
             assert "quiver_evidence" in r, "quiver_evidence key missing from result"
+
+
+class TestEvidencePassthroughFields:
+    """_score_ticker() must include the 4 evidence pass-through fields."""
+
+    def test_score_ticker_result_contains_evidence_fields(self):
+        from scripts.run_pipeline import run
+        import tempfile, csv, json
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            tickers_file = tdp / "tickers.csv"
+            log_dir = tdp / "logs"
+            log_dir.mkdir()
+            with tickers_file.open("w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["ticker", "sector", "cap_tier"])
+                w.writeheader()
+                w.writerow({"ticker": "AAPL", "sector": "Tech", "cap_tier": "large"})
+
+            import pandas as pd, numpy as np
+            dates = pd.date_range("2026-04-01", periods=30, freq="B")
+            fake_df = pd.DataFrame({
+                "Close":  pd.Series(np.linspace(100, 110, 30), index=dates),
+                "Volume": pd.Series([1_000_000] * 25 + [3_000_000] * 5, index=dates),
+            })
+            fake_spy = pd.DataFrame({
+                "Close": pd.Series(np.linspace(500, 510, 30), index=dates)
+            })
+
+            with patch("yfinance.download", side_effect=lambda sym, **kw: fake_spy if sym == "SPY" else fake_df), \
+                 patch("yfinance.Ticker") as mock_ticker, \
+                 patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
+                 patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
+                 patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
+                 patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55):
+                mock_ticker.return_value.news = []
+                status = run(tickers_file, log_dir, max_workers=1)
+
+            r = status["results"][0]
+            assert "news_source" in r,           "news_source missing"
+            assert "insider_usd" in r,           "insider_usd missing"
+            assert "momentum_spy_relative" in r, "momentum_spy_relative missing"
+            assert "volume_spike" in r,          "volume_spike missing"
+            assert r["news_source"] in ("finnhub", "yfinance", "none")
+            assert isinstance(r["insider_usd"], float)
+            assert isinstance(r["momentum_spy_relative"], float)
+            assert isinstance(r["volume_spike"], float)
             assert isinstance(r["quiver_evidence"], dict)

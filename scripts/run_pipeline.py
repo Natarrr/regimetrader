@@ -798,6 +798,12 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "source": "quiver" if (congress_raw and congress_raw.get("recency_days") is not None) else "s3",
             }
 
+            news_source = "none"
+            if finnhub_key:
+                news_source = "finnhub" if n_score > 0.0 else "none"
+            else:
+                news_source = "yfinance" if n_score > 0.0 else "none"
+
             return {
                 "ticker":          ticker,
                 "sector":          sector.get(ticker, "Unknown"),
@@ -811,6 +817,10 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "ceo_buy":         ceo_buy,
                 "form4_count":     form4_count,
                 "quiver_evidence": quiver_evidence,
+                "news_source":             news_source,
+                "insider_usd":             float(total_purchases_usd),
+                "momentum_spy_relative":   float(price_data["return_20d"] - price_data["spy_return_20d"]),
+                "volume_spike":            float(price_data["volume_spike"]),
                 "_edgar_ok":       edgar_ok,
                 "_scoring_error":  False,
             }
@@ -829,6 +839,10 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "ceo_buy":         ceo_buy,
                 "form4_count":     form4_count,
                 "quiver_evidence": {},
+                "news_source":             "none",
+                "insider_usd":             float(total_purchases_usd),
+                "momentum_spy_relative":   0.0,
+                "volume_spike":            1.0,
                 "_edgar_ok":       edgar_ok,
                 "_scoring_error":  True,
             }
