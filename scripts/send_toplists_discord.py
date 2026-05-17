@@ -57,7 +57,7 @@ _FACTOR_EMOJI = {
     "insider":  "🏦",
     "congress": "🏛️",
     "news":     "📰",
-    "macro": "📈",
+    "momentum": "📈",
 }
 
 _BADGE_EMOJI = {
@@ -78,7 +78,7 @@ def _score_bar(score: float, width: int = 8) -> str:
 def _format_factor_line(factors: Dict[str, float]) -> str:
     """One compact line: 📋0.72 🏦0.90 🏛️0.50 📰0.65 📈0.58"""
     parts = []
-    for key in ("edgar", "insider", "congress", "news", "macro"):
+    for key in ("edgar", "insider", "congress", "news", "momentum"):
         v = factors.get(key, 0.50)
         parts.append(f"{_FACTOR_EMOJI[key]}`{v:.2f}`")
     return "  ".join(parts)
