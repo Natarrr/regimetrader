@@ -534,16 +534,21 @@ def score_news_finnhub(ticker: str, api_key: str) -> float:
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
-    """Stiglitz (2001): normalise Form 4 filing count to [0, 0.90].
+    """Stiglitz (2001): normalise Form 4 filing count to [0, 0.90] using log-scale.
 
     0 filings -> 0.0 (penalised, not neutral).  Consistent with score_insider_value
     and score_congress: a dead/absent signal is 0.0 so the cross-sectional
     normaliser triggers the all-zero branch (treats it as a dead feed) rather than
     the all-same-non-zero branch (which silently returns 0.50 neutral for everyone).
+
+    Log-scale prevents the old linear formula from saturating at 0.90 for any company
+    with >= 5 filings (which is virtually every large-cap), making the factor useless
+    cross-sectionally.  log1p(n)/log1p(200) maps [1, 200+] to roughly [0.10, 0.90]
+    with good spread across the typical 5-160 filing range.
     """
     if form4_count <= 0:
         return 0.0
-    return round(min(0.90, 0.30 + form4_count * 0.12), 4)
+    return round(min(0.90, math.log1p(form4_count) / math.log1p(200)), 4)
 
 
 def score_insider_value(
@@ -590,13 +595,23 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
 
     Returns [] on any failure (network, non-XML .htm filing, parse error).
     HTTP call goes through the shared _sec_get() rate limiter.
+
+    Note: the SEC submissions API returns `primaryDocument` as the XSLT-styled
+    path (e.g. "xslF345X06/form4.xml"), which serves rendered HTML, not raw XML.
+    We strip any leading subdirectory prefix so we always fetch the machine-readable
+    XML at the accession root (e.g. "form4.xml").
     """
     from xml.etree import ElementTree as ET
     acc_nodash = accession.replace("-", "")
     cik_int = str(int(cik))   # strip leading zeros for the Archives path segment
+
+    # Strip XSLT subdirectory prefix — the real XML lives at the accession root.
+    # "xslF345X06/form4.xml" -> "form4.xml", "form4.xml" -> "form4.xml"
+    doc_filename = primary_doc.split("/")[-1] if "/" in primary_doc else primary_doc
+
     url = (
         f"https://www.sec.gov/Archives/edgar/data/{cik_int}"
-        f"/{acc_nodash}/{primary_doc}"
+        f"/{acc_nodash}/{doc_filename}"
     )
     try:
         resp = _sec_get(url)
