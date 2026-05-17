@@ -332,7 +332,6 @@ def fetch_price_data(ticker: str) -> Dict[str, float]:
     _default = {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0}
     try:
         import yfinance as yf
-        import numpy as np
 
         df = yf.download(ticker, period="3mo", interval="1d",
                          progress=False, auto_adjust=True)
@@ -501,9 +500,9 @@ def score_news_finnhub(ticker: str, api_key: str) -> float:
     Falls back to _score_news_yfinance() on any API failure.
     Returns 0.0 (not 0.5) if both sources fail — dead feed is penalised.
     """
-    import requests as _req
     url = f"https://finnhub.io/api/v1/news-sentiment?symbol={ticker}&token={api_key}"
     try:
+        import requests as _req
         resp = _req.get(url, timeout=10)
         resp.raise_for_status()
         d        = resp.json()
