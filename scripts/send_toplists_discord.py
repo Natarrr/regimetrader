@@ -44,6 +44,12 @@ except ImportError:
     requests = None  # type: ignore
     _HAS_REQUESTS = False
 
+try:
+    from regime_trader.utils.formatting import score_bar as _score_bar_util
+    _HAS_SCORE_BAR = True
+except ImportError:
+    _HAS_SCORE_BAR = False
+
 log = logging.getLogger("discord.send_toplists")
 
 # ── Color palette ──────────────────────────────────────────────────────────────
@@ -71,6 +77,8 @@ _BADGE_EMOJI = {
 
 def _score_bar(score: float, width: int = 8) -> str:
     """Compact ASCII progress bar: ████░░░░"""
+    if _HAS_SCORE_BAR:
+        return _score_bar_util(score, width)
     filled = min(width, max(0, round(score * width)))
     return "█" * filled + "░" * (width - filled)
 

@@ -8,13 +8,84 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 
+from regime_trader.utils.formatting import score_bar as _score_bar_util
+
 log = logging.getLogger(__name__)
+
+_GH_OWNER    = "Natarrr"
+_GH_REPO     = "regimetrader"
+_GH_WORKFLOW = "edgar_3x.yml"
+
+
+def _trigger_pipeline(pat: str, force: bool = False) -> tuple[bool, str]:
+    """POST workflow_dispatch to GitHub Actions. Returns (success, message)."""
+    try:
+        import requests
+        url = (
+            f"https://api.github.com/repos/{_GH_OWNER}/{_GH_REPO}"
+            f"/actions/workflows/{_GH_WORKFLOW}/dispatches"
+        )
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {pat}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"ref": "main", "inputs": {"force_regen": "true" if force else "false"}},
+            timeout=15,
+        )
+        if resp.status_code == 204:
+            return True, "Pipeline triggered — GitHub Actions is starting the run."
+        if resp.status_code == 401:
+            return False, "GitHub token invalid or expired (401). Check GH_PAT in your .env."
+        if resp.status_code == 404:
+            return False, "Workflow not found (404). Check repo name and workflow file."
+        return False, f"GitHub API returned {resp.status_code}: {resp.text[:200]}"
+    except Exception as exc:
+        return False, f"Request failed: {exc}"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _fetch_last_run_status(pat: str) -> Dict[str, Any]:
+    """Fetch the most recent edgar_3x run status from GitHub API. TTL 60s."""
+    try:
+        import requests
+        url = (
+            f"https://api.github.com/repos/{_GH_OWNER}/{_GH_REPO}"
+            f"/actions/workflows/{_GH_WORKFLOW}/runs?per_page=1"
+        )
+        resp = requests.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {pat}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return {}
+        runs = resp.json().get("workflow_runs", [])
+        if not runs:
+            return {}
+        r = runs[0]
+        return {
+            "status":     r.get("status"),       # queued / in_progress / completed
+            "conclusion": r.get("conclusion"),    # success / failure / cancelled / None
+            "created_at": r.get("created_at"),
+            "html_url":   r.get("html_url"),
+        }
+    except Exception:
+        return {}
 
 _ROOT       = Path(__file__).parent.parent
 _TOP_LISTS  = _ROOT / "logs" / "top_lists.json"
@@ -46,8 +117,7 @@ def _load_top_lists() -> Optional[Dict[str, Any]]:
 
 
 def _score_bar(score: float, width: int = 10) -> str:
-    filled = round(max(0.0, min(1.0, score)) * width)
-    return "█" * filled + "░" * (width - filled)
+    return _score_bar_util(score, width)
 
 
 def _render_ticker_table(entries: List[Dict[str, Any]], show_watchlist: bool = False) -> None:
@@ -167,11 +237,16 @@ def render() -> None:
 
     # ── Load data ──────────────────────────────────────────────────────────────
     col_ref, col_ts = st.columns([1, 6])
+
     if col_ref.button("↻ Refresh", key="sp_refresh"):
         _load_top_lists.clear()
+        st.session_state["sp_just_refreshed"] = True
         st.rerun()
 
     data = _load_top_lists()
+
+    if st.session_state.pop("sp_just_refreshed", False):
+        st.toast("Cache cleared — showing latest data from disk.", icon="✅")
 
     if data is None:
         st.error(
@@ -183,7 +258,71 @@ def render() -> None:
 
     generated_at = data.get("generated_at", "—")
     ticker_count = data.get("ticker_count", 0)
-    col_ts.caption(f"Pipeline ran: **{generated_at}** · {ticker_count} tickers scored")
+
+    try:
+        from datetime import datetime, timezone as _tz
+        _ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        _age_h = (datetime.now(_tz.utc) - _ts).total_seconds() / 3600
+        _date_str = _ts.strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        _age_h = 0.0
+        _date_str = generated_at[:16] or "—"
+
+    col_ts.caption(f"Pipeline ran: **{_date_str}** · {ticker_count} tickers scored")
+
+    # ── Pipeline trigger ───────────────────────────────────────────────────────
+    _gh_pat = os.getenv("GH_PAT", "")
+    _stale  = _age_h > 25
+
+    if _stale or _gh_pat:
+        with st.expander(
+            "⚠️ Data is stale — run the pipeline" if _stale else "⚙️ Pipeline controls",
+            expanded=_stale,
+        ):
+            if not _gh_pat:
+                st.info(
+                    "Add `GH_PAT=<your_token>` to your `.env` to enable one-click pipeline runs.\n\n"
+                    "The token needs **`Actions: write`** scope on the `Natarrr/regimetrader` repo.",
+                    icon="ℹ️",
+                )
+            else:
+                # ── Last run status ────────────────────────────────────────────
+                run_info = _fetch_last_run_status(_gh_pat)
+                if run_info:
+                    _status     = run_info.get("status", "")
+                    _conclusion = run_info.get("conclusion")
+                    _run_url    = run_info.get("html_url", "")
+                    _run_ts     = run_info.get("created_at", "")[:16].replace("T", " ")
+                    _in_prog    = _status in ("queued", "in_progress")
+
+                    if _in_prog:
+                        st.info(f"⏳ Pipeline is **{_status}** (started {_run_ts} UTC)", icon="⏳")
+                    elif _conclusion == "success":
+                        st.success(f"✅ Last run **succeeded** ({_run_ts} UTC) — click Refresh above to reload data.", icon="✅")
+                    elif _conclusion in ("failure", "timed_out"):
+                        st.error(f"❌ Last run **{_conclusion}** ({_run_ts} UTC) · [View logs]({_run_url})", icon="❌")
+                    else:
+                        st.caption(f"Last run: **{_conclusion or _status}** · {_run_ts} UTC")
+
+                # ── Trigger button ─────────────────────────────────────────────
+                btn_col, info_col = st.columns([2, 5])
+                _force = btn_col.checkbox("Force regeneration", value=True, key="sp_force_regen",
+                                          help="Pass force_regen=true to rebuild even if top_lists.json is fresh")
+                if btn_col.button("▶ Run edgar_3x now", key="sp_run_pipeline", type="primary"):
+                    with st.spinner("Dispatching workflow…"):
+                        ok, msg = _trigger_pipeline(_gh_pat, force=_force)
+                    if ok:
+                        _fetch_last_run_status.clear()
+                        st.toast(msg, icon="✅")
+                        time.sleep(2)   # give GitHub a moment before next status poll
+                        st.rerun()
+                    else:
+                        st.error(msg, icon="❌")
+
+                info_col.caption(
+                    f"Triggers the `edgar_3x` workflow on **{_GH_OWNER}/{_GH_REPO}** · "
+                    "takes ~5 min · data auto-refreshes when you click ↻ Refresh above"
+                )
 
     show_watchlist = st.toggle("Show WATCHLIST tickers", value=False, key="sp_show_watchlist")
 

@@ -71,6 +71,33 @@ _HAS_ALPACA    = bool(_ALPACA_KEY and _ALPACA_SECRET)
 
 _EDGAR_USER_AGENT = os.getenv("EDGAR_USER_AGENT", "regime-trader n.tardy@hotmail.fr")
 
+# ── Design tokens — single source of truth for all colors ─────────────────────
+_COLORS = {
+    "green":        "#00d26a",
+    "red":          "#ff4d6d",
+    "amber":        "#f5a623",
+    "blue":         "#60A5FA",
+    "muted":        "#8b8b9e",
+    "surface":      "rgba(255,255,255,0.04)",
+    "border":       "rgba(255,255,255,0.08)",
+    "grid":         "rgba(255,255,255,0.05)",
+    "fill_green":   "rgba(0,210,106,0.12)",
+    "fill_red":     "rgba(255,77,109,0.12)",
+    "fill_amber":   "rgba(245,166,35,0.10)",
+    "fill_green_sm":"rgba(0,210,106,0.10)",
+}
+
+# ── Regime → display config (icon, hex color) — single definition ──────────────
+_REGIME_DISPLAY: Dict[str, Dict[str, str]] = {
+    "Bull":     {"icon": "🟢", "color": "#00FFA3"},
+    "Euphoria": {"icon": "💹", "color": "#00d26a"},
+    "Neutral":  {"icon": "⚪", "color": "#60A5FA"},
+    "Bear":     {"icon": "🟡", "color": "#FFB347"},
+    "Panic":    {"icon": "🟠", "color": "#FF6B6B"},
+    "Crash":    {"icon": "🔴", "color": "#FF2222"},
+    "Unknown":  {"icon": "❓", "color": "#9E9E9E"},
+}
+
 # ── Optional import: generate_macro_synthesis (graceful fallback) ─────────────
 try:
     from regime_trader.scanners.market_intel_macro import generate_macro_synthesis as _generate_macro_synthesis
@@ -575,8 +602,8 @@ def _render_portfolio_chart(history: Dict[str, Any]) -> None:
     current  = equity[-1]
     positive = current >= base
 
-    line_color = "#00d26a" if positive else "#ff4d6d"
-    fill_rgba  = "rgba(0,210,106,0.12)" if positive else "rgba(255,77,109,0.12)"
+    line_color = _COLORS["green"] if positive else _COLORS["red"]
+    fill_rgba  = _COLORS["fill_green"] if positive else _COLORS["fill_red"]
 
     fig = go.Figure()
 
@@ -604,22 +631,22 @@ def _render_portfolio_chart(history: Dict[str, Any]) -> None:
             showgrid=False,
             showline=False,
             zeroline=False,
-            tickfont=dict(color="#8b8b9e", size=11),
+            tickfont=dict(color=_COLORS["muted"], size=11),
             tickformat="%b %d",
         ),
         yaxis=dict(
             showgrid=True,
-            gridcolor="rgba(255,255,255,0.05)",
+            gridcolor=_COLORS["grid"],
             gridwidth=1,
             showline=False,
             zeroline=False,
-            tickfont=dict(color="#8b8b9e", size=11),
+            tickfont=dict(color=_COLORS["muted"], size=11),
             tickformat="$,.0f",
             side="right",
         ),
         hovermode="x unified",
         showlegend=False,
-        height=240,
+        height=320,
     )
 
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
@@ -639,23 +666,10 @@ _NAV_PAGES = [
 ]
 
 
-_NAV_SECTION_CSS = """
-<style>
-.rt-nav-section {
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    color: rgba(255,255,255,0.30);
-    padding: 10px 4px 3px;
-    text-transform: uppercase;
-}
-</style>
-"""
-
 def _render_sidebar() -> str:
     """Render sidebar navigation with section headers. Returns selected page label."""
     with st.sidebar:
-        st.markdown(_NAV_SECTION_CSS, unsafe_allow_html=True)
+        st.markdown(_CSS, unsafe_allow_html=True)
         st.markdown("## 🧭 Navigate")
 
         if "_nav_page" not in st.session_state:
@@ -672,19 +686,19 @@ def _render_sidebar() -> str:
                 st.session_state["_nav_page"] = label
                 st.rerun()
 
-        st.markdown('<div class="rt-nav-section">── Alpha Engine ──</div>', unsafe_allow_html=True)
+        st.markdown('<div class="rt-nav-section">Alpha Engine</div>', unsafe_allow_html=True)
         # Keep _nav_btn calls in sync with _NAV_PAGES — one call per non-Dashboard entry
         _nav_btn("📅 Stock Picker")
         _nav_btn("💼 Portfolio Advisor")
 
-        st.markdown('<div class="rt-nav-section">── Quant Models ──</div>', unsafe_allow_html=True)
+        st.markdown('<div class="rt-nav-section">Quant Models</div>', unsafe_allow_html=True)
         _nav_btn("💰 Monetary Pulse")
         _nav_btn("📈 Volatility Brain")
         _nav_btn("🔭 Valuation Radar")
         _nav_btn("🕸️ Contagion Web")
         _nav_btn("🎯 Regime Prediction")
 
-        st.markdown('<div class="rt-nav-section">── Dashboard ──</div>', unsafe_allow_html=True)
+        st.markdown('<div class="rt-nav-section">Dashboard</div>', unsafe_allow_html=True)
         _nav_btn("📊 Dashboard")
 
         st.divider()
@@ -767,6 +781,15 @@ div[data-testid="stHorizontalBlock"] .stRadio > div {
     flex-direction: row;
     gap: 6px;
 }
+/* Nav section headers */
+.rt-nav-section {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    color: rgba(255,255,255,0.35);
+    padding: 10px 4px 3px;
+    text-transform: uppercase;
+}
 </style>
 """
 
@@ -798,18 +821,39 @@ def _render_live_monitor() -> None:
     regime      = regime_data.get("regime", "Unknown")
     vix         = regime_data.get("vix")
 
-    _REGIME_COLOR = {
-        "Crash": "🔴", "Panic": "🟠", "Bear": "🟡",
-        "Neutral": "⚪", "Bull": "🟢", "Euphoria": "💹",
-    }
-    regime_icon = _REGIME_COLOR.get(regime, "❓")
+    regime_icon  = _REGIME_DISPLAY.get(regime, _REGIME_DISPLAY["Unknown"])["icon"]
 
     # ── Pre-fetch all prices (stocks + metals) in a single call ───────────────
-    _revolut_data    = _load_revolut_positions()
+    # Load position metadata first (no network) so we can show structure immediately,
+    # then fetch live prices in a spinner that only covers the metrics/tables below.
+    _revolut_data     = _load_revolut_positions()
     _commodities_data = _load_revolut_commodities()
-    _stock_tickers   = [p["ticker"] for p in (_revolut_data or {}).get("positions", [])]
-    _comm_tickers    = [p["yf_ticker"] for p in (_commodities_data or {}).get("positions", []) if p.get("yf_ticker")]
-    _all_tickers     = _stock_tickers + _comm_tickers
+    _stock_tickers    = [p["ticker"] for p in (_revolut_data or {}).get("positions", [])]
+    _comm_tickers     = [p["yf_ticker"] for p in (_commodities_data or {}).get("positions", []) if p.get("yf_ticker")]
+    _all_tickers      = _stock_tickers + _comm_tickers
+
+    _cash_usd     = float((_revolut_data or {}).get("cash_usd", 0.0))
+    _invested_val = sum(
+        p["net_qty"] * p["avg_cost"]
+        for p in (_revolut_data or {}).get("positions", [])
+    )
+
+    # ── Row 1: Regime row renders immediately — no network required ───────────
+    col1, col2, col3 = st.columns(3)
+    col1.metric(
+        "Regime",
+        f"{regime_icon} {regime}",
+        f"VIX {vix:.1f}" if vix else None,
+    )
+    # Portfolio totals shown as placeholder "…" until prices arrive below
+    _port_metric  = col2.empty()
+    _pl_metric    = col3.empty()
+    _port_metric.metric("Total Portfolio", "…", help="Loading live prices")
+    _pl_metric.metric("Unrealised P&L", "…", help="Loading live prices")
+
+    st.divider()
+
+    # ── Fetch prices — spinner covers only the portfolio tables ───────────────
     with st.spinner("Fetching live prices…"):
         _all_prices = _fetch_live_prices(_all_tickers) if _all_tickers else {}
 
@@ -823,34 +867,21 @@ def _render_live_monitor() -> None:
         for p in (_commodities_data or {}).get("positions", [])
         if p.get("yf_ticker") and _all_prices.get(p["yf_ticker"])
     )
-    _cash_usd = float((_revolut_data or {}).get("cash_usd", 0.0))
-    _invested_val = sum(
-        p["net_qty"] * p["avg_cost"]
-        for p in (_revolut_data or {}).get("positions", [])
-    )
     _total_val = _stock_val + _comm_val + _cash_usd
     _total_pl  = (_total_val - _invested_val - _cash_usd) if _total_val else 0.0
     _total_pct = (_total_pl / _invested_val * 100) if _invested_val else 0.0
 
-    # ── Row 1: Regime + combined portfolio value ───────────────────────────────
-    col1, col2, col3 = st.columns(3)
-    col1.metric(
-        "Regime",
-        f"{regime_icon} {regime}",
-        f"VIX {vix:.1f}" if vix else None,
-    )
-    col2.metric(
+    # Update the placeholder metrics now that prices are available
+    _port_metric.metric(
         "Total Portfolio",
         f"${_total_val:,.2f}" if _total_val else "—",
         f"Stocks ${_stock_val:,.2f}  ·  Metals ${_comm_val:,.2f}  ·  Cash ${_cash_usd:,.2f}" if _total_val else None,
     )
-    col3.metric(
+    _pl_metric.metric(
         "Unrealised P&L",
         f"${_total_pl:+,.2f}" if _invested_val else "—",
         f"{_total_pct:+.2f}% on invested capital" if _invested_val else None,
     )
-
-    st.divider()
 
     # ── Revolut Portfolio (primary) ───────────────────────────────────────────
     st.subheader("📈 Revolut Portfolio")
@@ -956,8 +987,8 @@ def _render_vix_sparkline() -> None:
 
         # VIX above 20 = elevated risk; colour shifts amber → red
         latest_vix = history[-1]
-        line_color = "#ff4d6d" if latest_vix >= 25 else "#f5a623" if latest_vix >= 18 else "#00d26a"
-        fill_rgba  = f"rgba(245,166,35,0.10)" if latest_vix >= 18 else "rgba(0,210,106,0.10)"
+        line_color = _COLORS["red"] if latest_vix >= 25 else _COLORS["amber"] if latest_vix >= 18 else _COLORS["green"]
+        fill_rgba  = _COLORS["fill_amber"] if latest_vix >= 18 else _COLORS["fill_green_sm"]
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -977,7 +1008,7 @@ def _render_vix_sparkline() -> None:
                 showgrid=True,
                 gridcolor="rgba(255,255,255,0.04)",
                 showticklabels=True,
-                tickfont=dict(color="#8b8b9e", size=10),
+                tickfont=dict(color=_COLORS["muted"], size=10),
                 zeroline=False,
                 side="right",
             ),
@@ -1038,45 +1069,44 @@ def _render_market_intel() -> None:
     col_ts.caption(f"Engine snapshot · {last_updated}")
 
     # ── Macro status banner ───────────────────────────────────────────────────
-    macro = state.get("macro_status", {})
-    regime          = macro.get("regime", "Unknown")
-    conviction      = macro.get("conviction", 0.0)
-    kill_switch     = macro.get("kill_switch_active", False)
-    vix_latest      = macro.get("vix_latest", 0.0)
+    macro      = state.get("macro_status", {})
+    regime     = macro.get("regime", "Unknown")
+    conviction = macro.get("conviction", 0.0)
+    kill_switch = macro.get("kill_switch_active", False)
+    vix_latest  = macro.get("vix_latest", 0.0)
 
-    _REGIME_COLOR = {
-        "Bull":    "#00FFA3",
-        "Neutral": "#60A5FA",
-        "Bear":    "#FFB347",
-        "Panic":   "#FF6B6B",
-        "Crash":   "#FF2222",
-    }
-    rc = _REGIME_COLOR.get(regime, "#9E9E9E")
+    rc = _REGIME_DISPLAY.get(regime, _REGIME_DISPLAY["Unknown"])["color"]
 
     if kill_switch:
-        st.markdown(
-            f"""<div style="background:#3A0000;border:2px solid #FF2222;
-            border-radius:8px;padding:14px 20px;margin:8px 0;">
-            <span style="font-size:1.4em;color:#FF2222;">⛔ MACRO KILL SWITCH ACTIVE</span>
-            <span style="color:#FF8080;margin-left:16px;">
-            Regime: <strong>{regime}</strong> · VIX {vix_latest:.1f} ·
-            All picks are <strong>RISK BLOCKED</strong></span></div>""",
-            unsafe_allow_html=True,
-        )
+        _ks_key = "mi_killswitch_acked"
+        if not st.session_state.get(_ks_key):
+            st.markdown(
+                f'<div style="background:#3A0000;border:2px solid {_COLORS["red"]};'
+                f'border-radius:8px;padding:14px 20px;margin:8px 0;">'
+                f'<span style="font-size:1.4em;color:{_COLORS["red"]};">⛔ MACRO KILL SWITCH ACTIVE</span>'
+                f'<span style="color:#FF8080;margin-left:16px;">'
+                f'Regime: <strong>{regime}</strong> · VIX {vix_latest:.1f} · '
+                f'All picks are <strong>RISK BLOCKED</strong></span></div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("Acknowledge ✓", key="mi_ks_ack", type="secondary"):
+                st.session_state[_ks_key] = True
+                st.rerun()
+        else:
+            st.warning(
+                f"⛔ Kill switch active · Regime **{regime}** · VIX {vix_latest:.1f} · picks RISK BLOCKED",
+                icon="⛔",
+            )
     else:
+        st.session_state.pop("mi_killswitch_acked", None)
         st.markdown(
-            f"""<div style="background:{rc}18;border:1px solid {rc};
-            border-radius:8px;padding:10px 20px;margin:8px 0;">
-            <span style="font-size:1.1em;color:{rc};">✅ Regime: <strong>{regime}</strong></span>
-            <span style="color:#B0B0B0;margin-left:16px;">
-            Conviction {conviction:.0%} · VIX {vix_latest:.1f}</span></div>""",
+            f'<div style="background:{rc}18;border:1px solid {rc};'
+            f'border-radius:8px;padding:10px 20px;margin:8px 0;">'
+            f'<span style="font-size:1.1em;color:{rc};">✅ Regime: <strong>{regime}</strong></span>'
+            f'<span style="color:#B0B0B0;margin-left:16px;">'
+            f'Conviction {conviction:.0%} · VIX {vix_latest:.1f}</span></div>',
             unsafe_allow_html=True,
         )
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Regime", regime)
-    m2.metric("Conviction", f"{conviction:.0%}")
-    m3.metric("VIX", f"{vix_latest:.1f}")
 
     st.divider()
 
@@ -1289,6 +1319,11 @@ def _render_macro_intel() -> None:
             continue
         cv = calc_macro_conviction(data, sentiment_map)
         convictions[ticker] = cv
+        _conviction_icon = {
+            "BULLISH": "🟢", "STRONG BULLISH": "🟢",
+            "BEARISH": "🔴", "STRONG BEARISH": "🔴",
+            "NEUTRAL": "⚪",
+        }.get(cv["conviction_label"].upper(), "⚪")
         rows.append({
             "Name": c["name"],
             "Ticker": ticker,
@@ -1296,7 +1331,7 @@ def _render_macro_intel() -> None:
             "1d": f"{data['ret_1d']:+.2%}",
             "5d": f"{data['ret_5d']:+.2%}",
             "RSI": f"{data.get('rsi14', 0):.0f}",
-            "Conviction": cv["conviction_label"],
+            "Conviction": f"{_conviction_icon} {cv['conviction_label']}",
             "Score": f"{cv['composite']:.3f}",
         })
 
@@ -1347,6 +1382,10 @@ def _render_portfolio_sync() -> None:
     st.markdown(
         "Upload your **Revolut trading account statement** (`.xlsx`). "
         "The parser nets all BUY/SELL transactions to derive your current holdings."
+    )
+    st.caption(
+        "📥 In Revolut: **Account → Statements → Trading account → Download** · "
+        "Select *All time* and export as Excel (.xlsx)"
     )
 
     uploaded_stocks = st.file_uploader(
@@ -1416,6 +1455,10 @@ def _render_portfolio_sync() -> None:
     st.markdown(
         "Upload your **Revolut metals account statement** (`.xlsx`). "
         "The parser reads your XAU/XAG balances from COMPLETED transactions."
+    )
+    st.caption(
+        "📥 In Revolut: **Commodities → ··· → Statements → Download** · "
+        "Select *All time* and export as Excel (.xlsx)"
     )
 
     uploaded_commodities = st.file_uploader(

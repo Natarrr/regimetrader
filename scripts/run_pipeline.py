@@ -8,8 +8,8 @@ credible, costly-to-fake signal. This pipeline sources it from two layers:
      (1 API call/day; TTL 12 h)
   3. yfinance               — news sentiment + 20-day price momentum (free)
 
-FMP budget: ≤ 2 calls per run (profile batch + insider list).
-With caching, repeated intraday runs spend 0 additional FMP calls.
+FMP budget: ≤ 80 calls per run (per-ticker profile, first 80 tickers only).
+Tickers 81+ fall back to yfinance for market cap to stay within 250/day limit.
 
 Usage:
   python scripts/run_pipeline.py --tickers-file config/universe.csv --log-dir logs
@@ -968,11 +968,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     except Exception as _exc:
         log.warning("EDGAR preflight FAILED — data.sec.gov unreachable: %s", _exc)
 
-    # ── FMP: profile (chunked) — insider now uses yfinance per-ticker ────────
-    log.info("Fetching FMP profiles (chunked at 100)…")
+    # ── FMP: per-ticker profile (up to 80/run to stay within 250/day budget) ────
+    log.info("Fetching FMP profiles (per-ticker, up to 80)…")
+    fmp_cap = 80
     mktcaps = fetch_fmp_profiles(tickers)
-    n_profile_chunks = math.ceil(len(tickers) / 100) if tickers else 0
-    fmp_count = n_profile_chunks if mktcaps else 0
+    fmp_count = sum(1 for t in tickers[:fmp_cap] if mktcaps.get(t, 0) > 0)
 
     # ── Congress feed ─────────────────────────────────────────────────────────
     log.info("Fetching congress trading data…")
