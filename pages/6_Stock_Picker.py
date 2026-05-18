@@ -15,8 +15,13 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
 
 from regime_trader.utils.formatting import score_bar as _score_bar_util
+
+# Re-read .env on every page load so tokens added after server start are picked up
+_ROOT_ENV = Path(__file__).parent.parent / ".env"
+load_dotenv(_ROOT_ENV, override=True)
 
 log = logging.getLogger(__name__)
 
