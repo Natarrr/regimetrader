@@ -67,9 +67,10 @@ _BADGES = [
     (0.00, "WATCHLIST"),
 ]
 
-# Cap-tier boundaries (relative rank in universe sorted by market cap)
-_LARGE_CUTOFF = 20   # ranks 1–20
-_MID_CUTOFF   = 35   # ranks 21–35; 36+ → small
+# Absolute market-cap thresholds (standard institutional definitions)
+_LARGE_FLOOR = 10_000_000_000   # >= $10B  → large cap
+_MID_FLOOR   =  2_000_000_000   # $2B–$10B → mid cap
+#                                 < $2B    → small cap
 
 _TARGET_SECTORS = [
     "Energy",
@@ -244,11 +245,22 @@ def _to_entry(
 
 
 def _assign_cap_tiers(entries: List[Dict[str, Any]]) -> None:
-    by_mktcap = sorted(entries, key=lambda e: e["market_cap"], reverse=True)
-    for rank, entry in enumerate(by_mktcap, 1):
-        if rank <= _LARGE_CUTOFF:
+    """Assign cap_tier using absolute market-cap thresholds (standard definitions).
+
+    Tickers whose fetched market_cap looks implausible (< $500M for a universe
+    stock, or 0) fall back to the cap_tier already in the entry (from the CSV)
+    rather than being mis-classified as small cap.
+    """
+    for entry in entries:
+        cap = float(entry.get("market_cap") or 0)
+        # Guard against obviously wrong market cap data.  yfinance sometimes returns
+        # rounded/stale values (e.g. AMZN at $1B instead of $2T).  Skip any ticker
+        # whose fetched cap is below $1.5B — implausibly low for this universe.
+        if cap <= 1_500_000_000:
+            continue   # keep existing cap_tier (from CSV or prior assignment)
+        if cap >= _LARGE_FLOOR:
             entry["cap_tier"] = "large"
-        elif rank <= _MID_CUTOFF:
+        elif cap >= _MID_FLOOR:
             entry["cap_tier"] = "mid"
         else:
             entry["cap_tier"] = "small"

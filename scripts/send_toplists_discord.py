@@ -202,7 +202,7 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
         f"**Universe:** {ticker_count} tickers  |  "
         f"**Run:** `{run_id}`\n"
         f"**Weights:** {weight_str}\n"
-        f"*⚠️ Mid/Small tiers are relative within this large-cap universe.*"
+        f"*Tiers by market cap: Large ≥$10B · Mid $2–10B · Small <$2B*"
         f"{stale_warning}"
     )
 
@@ -214,12 +214,12 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
             "inline": False,
         },
         {
-            "name":   "📈 Top 5 Mid Caps (relative)",
+            "name":   "📈 Top 5 Mid Caps ($2B–$10B)",
             "value":  _section_value(top_lists.get("mid_caps") or []),
             "inline": False,
         },
         {
-            "name":   "🔬 Top 5 Small Caps (relative)",
+            "name":   "🔬 Top 5 Small Caps (<$2B)",
             "value":  _section_value(top_lists.get("small_caps") or []),
             "inline": False,
         },
