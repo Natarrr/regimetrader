@@ -15,7 +15,7 @@ name: hybrid_pipeline
 #   - workflow_dispatch with optional overrides
 #
 # Secrets required:
-#   ANTHROPIC_API_KEY, FMP_API_KEY, SEC_USER_AGENT
+#   ANTHROPIC_API_KEY, FMP_API_KEY
 #   DISCORD_WEBHOOK_URL (optional — for run summary notification)
 #
 # Cost controls:
@@ -148,10 +148,12 @@ jobs:
               data = json.loads(src.read_text())
               if data.get("kill_switch"):
                   regime = "Panic/Crash"
-              elif float(data.get("vix", 0) or 0) >= 25:
-                  regime = "Bear"
               else:
-                  regime = "Normal"
+                  try:
+                      vix_val = float(data.get("vix") or 0)
+                  except (TypeError, ValueError):
+                      vix_val = 0.0
+                  regime = "Bear" if vix_val >= 25 else "Normal"
 
           out = os.environ.get("GITHUB_OUTPUT", "")
           if out:
