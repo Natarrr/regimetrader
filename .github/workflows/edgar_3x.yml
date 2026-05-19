@@ -198,3 +198,46 @@ jobs:
             logs/*.log
             .monitoring/edgar_cb.json
             .monitoring/alert_state.json
+
+  archive-snapshot:
+    name: Archive Daily Snapshot
+    needs: fetch-and-rank
+    runs-on: ubuntu-latest
+    if: success()
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download top-lists artifact
+        uses: dawidd6/action-download-artifact@v8
+        with:
+          workflow: edgar_3x.yml
+          name: top-lists
+          path: logs/
+          workflow_conclusion: success
+          if_no_artifact_found: warn
+
+      - name: Archive snapshot (first run of day only)
+        run: |
+          TODAY=$(date -u '+%Y-%m-%d')
+          DEST="logs/archive/${TODAY}_top_lists.json"
+          if [ ! -f logs/top_lists.json ]; then
+            echo "top_lists.json not found — skipping archive"
+            exit 0
+          fi
+          if git ls-files --error-unmatch "$DEST" 2>/dev/null; then
+            echo "Archive already exists for $TODAY — skipping"
+            exit 0
+          fi
+          mkdir -p logs/archive
+          cp logs/top_lists.json "$DEST"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$DEST"
+          git commit -m "chore(archive): snapshot $TODAY"
+          git push
