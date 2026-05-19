@@ -85,7 +85,7 @@ def _sync_from_github(pat: str) -> tuple[bool, str]:
         if resp.status_code != 200:
             return False, f"GitHub API returned {resp.status_code}: {resp.text[:200]}"
         artifacts = resp.json().get("artifacts", [])
-        active = [a for a in artifacts if not a.get("expired")]
+        active = [a for a in artifacts if not a.get("expired", True)]
         if not active:
             return False, "No active top-lists artifact found (may be expired)."
         artifact_id = active[0]["id"]
@@ -123,13 +123,25 @@ def _sync_from_github(pat: str) -> tuple[bool, str]:
             except Exception:
                 pass
 
-        if local_ts and remote_ts and local_ts >= remote_ts:
-            return True, "already_up_to_date"
+        if local_ts and remote_ts:
+            try:
+                from datetime import datetime as _dt
+                def _parse_ts(s: str) -> _dt:
+                    return _dt.fromisoformat(s.replace("Z", "+00:00"))
+                if _parse_ts(local_ts) >= _parse_ts(remote_ts):
+                    return True, "already_up_to_date"
+            except Exception:
+                if local_ts >= remote_ts:
+                    return True, "already_up_to_date"
 
         # 5. Write atomically
         tmp = _TOP_LISTS.with_suffix(".tmp")
-        tmp.write_text(json.dumps(remote_data, indent=2), encoding="utf-8")
-        tmp.replace(_TOP_LISTS)
+        try:
+            tmp.write_text(json.dumps(remote_data, indent=2), encoding="utf-8")
+            tmp.replace(_TOP_LISTS)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
         return True, f"Synced — data from {remote_ts[:16] or 'unknown'}"
 
     except Exception as exc:
