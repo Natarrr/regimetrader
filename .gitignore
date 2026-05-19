@@ -70,9 +70,11 @@ test-results/
 # ── Logs & runtime artifacts ──────────────────────────────────────────────────
 logs/*
 !logs/archive/
+!logs/archive/*/
 !logs/archive/**
 *.log
 *.log.*
+!logs/archive/**
 
 # ── Trading runtime files ─────────────────────────────────────────────────────
 # (manual deletion required to resume after HALT_ALL)
