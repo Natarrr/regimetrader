@@ -68,7 +68,9 @@ test-results/
 *.ipynb
 
 # ── Logs & runtime artifacts ──────────────────────────────────────────────────
-logs/
+logs/*
+!logs/archive/
+!logs/archive/**
 *.log
 *.log.*
 
