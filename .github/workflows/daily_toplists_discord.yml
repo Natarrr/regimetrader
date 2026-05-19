@@ -1,14 +1,14 @@
 name: daily_toplists_discord
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Daily 14:00 London market checkup delivered to Discord.
+# Daily market checkup delivered to Discord.
 #
-# Schedule: 13:00 UTC = 14:00 BST (British Summer Time, UTC+1).
-# DST note: from the last Sunday in October through the last Sunday in March,
-# London is on GMT (UTC+0). During winter, 13:00 UTC = 13:00 London.
-# For strict year-round 14:00 London, use an external scheduler (e.g. Zapier,
-# Inngest, or a cron VM) that converts local time to UTC before triggering
-# workflow_dispatch. See README → Operation Daily Checkup → DST.
+# Schedule: 18:30 UTC — fires ~30 min after edgar_3x's 16:00 UTC run completes
+# (edgar_3x takes ~40 min, so 18:30 UTC guarantees fresh data from the 16:00 run).
+# This is 19:30 BST / 20:30 CEST — end-of-US-session summary timing.
+#
+# edgar_3x schedule: 00:00, 08:00, 16:00 UTC (3x daily).
+# Discord fires after the 16:00 UTC run = latest US-session data always used.
 #
 # Artifact download: uses dawidd6/action-download-artifact@v8 to fetch the
 # "top-lists" artifact from the most recent successful edgar_3x run.
@@ -18,7 +18,7 @@ name: daily_toplists_discord
 
 on:
   schedule:
-    - cron: "0 13 * * *"   # fallback — GCF scheduler dispatches at the correct London time
+    - cron: "30 18 * * *"   # 18:30 UTC — ~30 min after edgar_3x 16:00 run completes
   workflow_dispatch:
     inputs:
       dry_run:
