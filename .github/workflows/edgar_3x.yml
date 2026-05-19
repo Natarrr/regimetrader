@@ -204,6 +204,9 @@ jobs:
     needs: fetch-and-rank
     runs-on: ubuntu-latest
     if: success()
+    concurrency:
+      group: archive-snapshot-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -219,6 +222,7 @@ jobs:
           workflow: edgar_3x.yml
           name: top-lists
           path: logs/
+          run_id: ${{ github.run_id }}
           workflow_conclusion: success
           if_no_artifact_found: warn
 
