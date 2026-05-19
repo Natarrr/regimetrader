@@ -202,26 +202,6 @@ def _load_market_state() -> Optional[Dict[str, Any]]:
         return None
 
 
-@st.cache_data(ttl=6 * 3600, show_spinner=False)
-def _load_discovery(limit: int = 5) -> Dict[str, Any]:
-    """Return discovery picks; uses module-level TTL cache internally.
-
-    Returns _safe_payload() on any exception so the UI never crashes on
-    a scanner failure.
-
-    Args:
-        limit: Number of top picks to request.
-
-    Returns:
-        Discovery payload dict with at minimum a 'results' list.
-    """
-    try:
-        from regime_trader.scanners.discovery_scanner import get_top_alpha_picks_sync
-        return get_top_alpha_picks_sync(limit=limit)
-    except Exception as exc:
-        log.warning("discovery load failed: %s", exc)
-        return _safe_payload()
-
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_commodity_prices() -> Dict[str, Optional[Dict]]:
@@ -707,8 +687,7 @@ def _render_sidebar() -> str:
         with st.expander("Cache controls", expanded=False):
             if st.button("Clear engine state cache", key="clear_disc"):
                 _load_market_state.clear()
-                _load_discovery.clear()
-                st.success("Engine state + discovery cache cleared.")
+                st.success("Engine state cache cleared.")
             if st.button("Clear commodity cache", key="clear_comm"):
                 _load_commodity_prices.clear()
                 _load_macro_indicators.clear()
