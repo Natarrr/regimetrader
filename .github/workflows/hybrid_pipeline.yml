@@ -70,9 +70,10 @@ jobs:
 
   # ── 1. Quant scoring ────────────────────────────────────────────────────────
   quant:
-    name: Quant Scoring
+    name: Load edgar_3x top lists
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # edgar_3x 08:00 UTC run takes ~40 min → completes ~08:40. hybrid_pipeline fires at
+    # 12:30 UTC — safe margin. dawidd6 fetches the most recent successful edgar_3x artifact.
     outputs:
       shortlist_artifact: ${{ steps.export.outputs.artifact_name }}
       regime: ${{ steps.regime.outputs.regime }}
@@ -83,76 +84,81 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.11"
           cache: pip
 
-      - name: Install quant deps
+      - name: Install minimal deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-ci.txt
-          pip install hmmlearn>=0.3.0 scikit-learn>=1.4.0
 
-      - name: Run EDGAR pipeline (shortlist generation)
-        env:
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
-          QUIVER_API_KEY: ${{ secrets.QUIVER_API_KEY || '' }}
-          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY || '' }}
-          MARKET_INTEL_DATA_DIR: ${{ github.workspace }}/data/raw/edgar
-          SHORTLIST_QUINTILE_FLOOR: ${{ env.SHORTLIST_QUINTILE_FLOOR }}
+      - name: Download edgar_3x top-lists artifact
+        uses: dawidd6/action-download-artifact@v8
+        with:
+          workflow: edgar_3x.yml
+          name: top-lists
+          path: logs/
+          workflow_conclusion: success
+          if_no_artifact_found: warn
+
+      - name: Reshape top_lists → shortlist.json
         run: |
-          python - <<'EOF'
-          import json, sys, os, logging
-          logging.basicConfig(level=logging.INFO)
-          sys.path.insert(0, ".")
+          python - <<'PYEOF'
+          import json, os, pathlib
 
-          from regime_trader.scanners.discovery_scanner import get_top_alpha_picks_sync
-          from analysis.earnings_analyzer import build_shortlist
+          src = pathlib.Path("logs/top_lists.json")
+          if not src.exists():
+              print("top_lists.json not found — writing empty shortlist")
+              payload = {"shortlist": [], "candidates": []}
+          else:
+              data = json.loads(src.read_text())
+              top_buys = data.get("top_buys", [])
+              shortlist = [e["ticker"] for e in top_buys]
+              candidates = [
+                  {
+                      "symbol":            e["ticker"],
+                      "smart_money_score": e.get("final_score", 0.0),
+                      "insider_score":     e.get("factors", {}).get("insider", 0.0),
+                      "inst_score":        e.get("factors", {}).get("congress", 0.0),
+                      "momentum_score":    e.get("factors", {}).get("momentum", 0.0),
+                      "edgar_score":       e.get("factors", {}).get("edgar", 0.0),
+                  }
+                  for e in top_buys
+              ]
+              payload = {"shortlist": shortlist, "candidates": candidates}
 
-          payload = get_top_alpha_picks_sync(limit=20)
-          results = payload.get("results", [])
-          shortlist = build_shortlist(results, watchlist=[])
-
-          output = {"shortlist": shortlist, "candidates": results}
-          os.makedirs("data/pipeline", exist_ok=True)
-          with open("data/pipeline/shortlist.json", "w") as f:
-              json.dump(output, f, indent=2)
-
-          print(f"Shortlist ({len(shortlist)} symbols): {shortlist}")
-          EOF
+          out = pathlib.Path("data/pipeline/shortlist.json")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(json.dumps(payload, indent=2))
+          print(f"Wrote shortlist: {len(payload['shortlist'])} tickers")
+          PYEOF
 
       - name: Detect regime
         id: regime
-        env:
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
         run: |
-          python - <<'EOF'
-          import sys, json, os
-          sys.path.insert(0, ".")
-          import yfinance as yf
-          import numpy as np
-          import pandas as pd
-          from regime_trader.models.regime_detector import vix_rule
+          python - <<'PYEOF'
+          import json, pathlib, os
 
-          # Quick VIX rule for regime tagging (HMM/ML require fit — use rule in CI)
-          vix_df = yf.download("^VIX", period="5d", interval="1d",
-                               progress=False, auto_adjust=True)
-          if vix_df.empty:
-              regime = "Unknown"
+          src = pathlib.Path("logs/top_lists.json")
+          if not src.exists():
+              regime = "Normal"
           else:
-              latest_vix = float(vix_df["Close"].squeeze().dropna().iloc[-1])
-              regime = vix_rule(latest_vix)
-              print(f"VIX={latest_vix:.1f} → regime={regime}")
+              data = json.loads(src.read_text())
+              if data.get("kill_switch"):
+                  regime = "Panic/Crash"
+              elif float(data.get("vix", 0) or 0) >= 25:
+                  regime = "Bear"
+              else:
+                  regime = "Normal"
 
-          with open("data/pipeline/regime.txt", "w") as f:
-              f.write(regime)
-          EOF
-          REGIME=$(cat data/pipeline/regime.txt)
-          echo "regime=$REGIME" >> $GITHUB_OUTPUT
-          echo "Current regime: $REGIME"
+          out = os.environ.get("GITHUB_OUTPUT", "")
+          if out:
+              with open(out, "a") as f:
+                  f.write(f"regime={regime}\n")
+          print(f"Regime: {regime}")
+          PYEOF
 
       - name: Export artifact name
         id: export
