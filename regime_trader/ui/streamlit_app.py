@@ -202,7 +202,6 @@ def _load_market_state() -> Optional[Dict[str, Any]]:
         return None
 
 
-
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_commodity_prices() -> Dict[str, Optional[Dict]]:
     """Fetch all commodity prices in a bounded thread-pool (30 s wall timeout).
