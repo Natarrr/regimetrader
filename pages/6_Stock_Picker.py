@@ -6,10 +6,12 @@ Run via sidebar: "📅 Stock Picker"
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -57,6 +59,81 @@ def _trigger_pipeline(pat: str, force: bool = False) -> tuple[bool, str]:
         return False, f"GitHub API returned {resp.status_code}: {resp.text[:200]}"
     except Exception as exc:
         return False, f"Request failed: {exc}"
+
+
+def _sync_from_github(pat: str) -> tuple[bool, str]:
+    """Download latest top-lists artifact from GitHub and write logs/top_lists.json.
+    Returns (success, message). 'already_up_to_date' message means no write occurred."""
+    try:
+        import requests
+        # 1. Find the latest top-lists artifact
+        url = (
+            f"https://api.github.com/repos/{_GH_OWNER}/{_GH_REPO}"
+            "/actions/artifacts?name=top-lists&per_page=5"
+        )
+        resp = requests.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {pat}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=15,
+        )
+        if resp.status_code == 401:
+            return False, "GitHub token invalid or expired (401)."
+        if resp.status_code != 200:
+            return False, f"GitHub API returned {resp.status_code}: {resp.text[:200]}"
+        artifacts = resp.json().get("artifacts", [])
+        active = [a for a in artifacts if not a.get("expired")]
+        if not active:
+            return False, "No active top-lists artifact found (may be expired)."
+        artifact_id = active[0]["id"]
+
+        # 2. Download the artifact zip
+        zip_url = (
+            f"https://api.github.com/repos/{_GH_OWNER}/{_GH_REPO}"
+            f"/actions/artifacts/{artifact_id}/zip"
+        )
+        zip_resp = requests.get(
+            zip_url,
+            headers={
+                "Authorization": f"Bearer {pat}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=30,
+            allow_redirects=True,
+        )
+        if zip_resp.status_code != 200:
+            return False, f"Artifact download returned {zip_resp.status_code}."
+
+        # 3. Extract top_lists.json from the zip
+        with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+            if "top_lists.json" not in zf.namelist():
+                return False, "top_lists.json not found in artifact zip."
+            remote_data = json.loads(zf.read("top_lists.json").decode("utf-8"))
+
+        # 4. Compare timestamps
+        remote_ts = remote_data.get("generated_at", "")
+        local_ts = ""
+        if _TOP_LISTS.exists():
+            try:
+                local_ts = json.loads(_TOP_LISTS.read_text(encoding="utf-8")).get("generated_at", "")
+            except Exception:
+                pass
+
+        if local_ts and remote_ts and local_ts >= remote_ts:
+            return True, "already_up_to_date"
+
+        # 5. Write atomically
+        tmp = _TOP_LISTS.with_suffix(".tmp")
+        tmp.write_text(json.dumps(remote_data, indent=2), encoding="utf-8")
+        tmp.replace(_TOP_LISTS)
+        return True, f"Synced — data from {remote_ts[:16] or 'unknown'}"
+
+    except Exception as exc:
+        return False, f"Sync failed: {exc}"
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -241,12 +318,26 @@ def render() -> None:
     st.caption("Monthly pick leaderboard powered by the 5-factor scoring engine. Informational only.")
 
     # ── Load data ──────────────────────────────────────────────────────────────
-    col_ref, col_ts = st.columns([1, 6])
+    _gh_pat_early = os.getenv("GH_PAT", "")
+
+    col_ref, col_sync, col_ts = st.columns([1, 1, 5])
 
     if col_ref.button("↻ Refresh", key="sp_refresh"):
         _load_top_lists.clear()
         st.session_state["sp_just_refreshed"] = True
         st.rerun()
+
+    if _gh_pat_early and col_sync.button("⬇ Sync", key="sp_sync", help="Download latest artifact from GitHub Actions"):
+        with st.spinner("Syncing from GitHub…"):
+            ok, msg = _sync_from_github(_gh_pat_early)
+        if ok and msg == "already_up_to_date":
+            st.toast("Already up to date", icon="✅")
+        elif ok:
+            _load_top_lists.clear()
+            st.toast(msg, icon="✅")
+            st.rerun()
+        else:
+            st.error(f"Sync failed: {msg}", icon="❌")
 
     data = _load_top_lists()
 
