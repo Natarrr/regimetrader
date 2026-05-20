@@ -9,9 +9,9 @@ T,Communication Services,large
 VZ,Communication Services,large
 TMUS,Communication Services,large
 EA,Communication Services,large
-WBD,Communication Services,large
+WBD,Communication Services,mid
 FOXA,Communication Services,large
-IPG,Communication Services,large
+IPG,Communication Services,mid
 OMC,Communication Services,large
 TTD,Communication Services,large
 AMZN,Consumer Discretionary,large
@@ -27,7 +27,7 @@ BKNG,Consumer Discretionary,large
 ORLY,Consumer Discretionary,large
 MAR,Consumer Discretionary,large
 RCL,Consumer Discretionary,large
-ULTA,Consumer Discretionary,large
+ULTA,Consumer Discretionary,mid
 ROST,Consumer Discretionary,large
 WMT,Consumer Staples,large
 PG,Consumer Staples,large
@@ -38,11 +38,11 @@ PM,Consumer Staples,large
 MO,Consumer Staples,large
 CL,Consumer Staples,large
 GIS,Consumer Staples,large
-ADM,Consumer Staples,large
+ADM,Consumer Staples,mid
 HSY,Consumer Staples,large
 STZ,Consumer Staples,large
-CHD,Consumer Staples,large
-HRL,Consumer Staples,large
+CHD,Consumer Staples,mid
+HRL,Consumer Staples,mid
 SYY,Consumer Staples,large
 XOM,Energy,large
 CVX,Energy,large
@@ -53,12 +53,12 @@ MPC,Energy,large
 PSX,Energy,large
 VLO,Energy,large
 OXY,Energy,large
-HAL,Energy,large
+HAL,Energy,mid
 DVN,Energy,large
 BKR,Energy,large
 FANG,Energy,large
 HES,Energy,large
-MRO,Energy,large
+MRO,Energy,mid
 JPM,Financials,large
 BAC,Financials,large
 WFC,Financials,large
@@ -124,16 +124,16 @@ APD,Materials,large
 ECL,Materials,large
 NEM,Materials,large
 FCX,Materials,large
-NUE,Materials,large
-ALB,Materials,large
-CF,Materials,large
-MOS,Materials,large
+NUE,Materials,mid
+ALB,Materials,mid
+CF,Materials,mid
+MOS,Materials,mid
 PPG,Materials,large
-RPM,Materials,large
+RPM,Materials,mid
 IP,Materials,large
-PKG,Materials,large
+PKG,Materials,mid
 DOW,Materials,large
-IFF,Materials,large
+IFF,Materials,mid
 AMT,Real Estate,large
 PLD,Real Estate,large
 CCI,Real Estate,large
@@ -144,7 +144,7 @@ DLR,Real Estate,large
 SPG,Real Estate,large
 VICI,Real Estate,large
 AVB,Real Estate,large
-EQR,Real Estate,large
+EQR,Real Estate,mid
 WY,Real Estate,large
 NEE,Utilities,large
 DUK,Utilities,large
@@ -152,10 +152,10 @@ SO,Utilities,large
 D,Utilities,large
 AEP,Utilities,large
 EXC,Utilities,large
-XEL,Utilities,large
+XEL,Utilities,mid
 PCG,Utilities,large
-WEC,Utilities,large
+WEC,Utilities,mid
 ETR,Utilities,large
-PPL,Utilities,large
-CMS,Utilities,large
-ES,Utilities,large
+PPL,Utilities,mid
+CMS,Utilities,mid
+ES,Utilities,mid

@@ -58,19 +58,33 @@ def get_top_cyclical(tickers: list[str]) -> list[dict]:
         if not isinstance(raw.index, pd.DatetimeIndex):
             raw.index = pd.to_datetime(raw.index.get_level_values(-1))
 
+        # Detect column structure once: yfinance ≥0.2.31 uses (ticker, col),
+        # older versions use (col, ticker).  Single-ticker downloads have flat cols.
+        col_structure: str
+        if isinstance(raw.columns, pd.MultiIndex):
+            top_level = raw.columns.get_level_values(0).tolist()
+            if tickers and tickers[0] in top_level:
+                col_structure = "ticker_first"   # (ticker, col) — yfinance ≥0.2.31
+            else:
+                col_structure = "col_first"      # (col, ticker) — older yfinance
+        else:
+            col_structure = "flat"               # single-ticker, flat columns
+
         results: list[dict] = []
         for ticker in tickers:
             try:
                 # Extract per-ticker slice; column key depends on download shape
                 try:
-                    df = raw[[("Open", ticker), ("Close", ticker)]].copy()
-                    df.columns = ["Open", "Close"]
-                except KeyError:
-                    if len(tickers) == 1:
-                        df = raw[["Open", "Close"]].copy()
+                    if col_structure == "ticker_first":
+                        df = raw[ticker][["Open", "Close"]].copy()
+                    elif col_structure == "col_first":
+                        df = raw[[("Open", ticker), ("Close", ticker)]].copy()
+                        df.columns = ["Open", "Close"]
                     else:
-                        log.warning("cyclical: column slice missing for %s — skipping", ticker)
-                        continue
+                        df = raw[["Open", "Close"]].copy()
+                except KeyError:
+                    log.warning("cyclical: column slice missing for %s — skipping", ticker)
+                    continue
 
                 filtered = df[df.index.month == current_month].dropna(
                     subset=["Open", "Close"]

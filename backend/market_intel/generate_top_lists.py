@@ -255,8 +255,8 @@ def _assign_cap_tiers(entries: List[Dict[str, Any]]) -> None:
         cap = float(entry.get("market_cap") or 0)
         # Guard against obviously wrong market cap data.  yfinance sometimes returns
         # rounded/stale values (e.g. AMZN at $1B instead of $2T).  Skip any ticker
-        # whose fetched cap is below $1.5B — implausibly low for this universe.
-        if cap <= 1_500_000_000:
+        # whose fetched cap is below $500M — implausibly low for any S&P 500 stock.
+        if cap <= 500_000_000:
             continue   # keep existing cap_tier (from CSV or prior assignment)
         if cap >= _LARGE_FLOOR:
             entry["cap_tier"] = "large"
