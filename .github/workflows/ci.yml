@@ -111,12 +111,11 @@ jobs:
           CI: "true"
         run: |
           pytest tests/test_token_bucket.py \
-                 tests/test_edgar_index.py \
-                 tests/test_edgar_fetcher.py \
-                 tests/test_fmp_client.py \
-                 tests/test_universe.py \
                  tests/test_normalize.py \
                  tests/test_backtest.py \
+                 tests/test_quiver_client.py \
+                 tests/test_congress_fetcher.py \
+                 tests/test_cross_sectional.py \
                  -q --tb=short -m "not slow"
 
   # ── 3. Full test suite ────────────────────────────────────────────────────────
