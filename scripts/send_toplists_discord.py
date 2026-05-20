@@ -155,7 +155,22 @@ def _data_age_hours(generated_at: str) -> Optional[float]:
         return None
 
 
-def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
+def _load_satellite(log_dir: Path) -> dict | None:
+    """Load satellite_insights.json if present. Returns None on any failure."""
+    path = log_dir / "satellite_insights.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception as exc:
+        log.warning("satellite_insights.json unreadable: %s", exc)
+        return None
+
+
+def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build the Discord webhook JSON payload with embeds."""
     generated_at = top_lists.get("generated_at", "")
     run_id       = top_lists.get("source_run_id", "")
@@ -231,6 +246,44 @@ def build_payload(top_lists: Dict[str, Any]) -> Dict[str, Any]:
             "value":  _section_value(top_lists.get("small_caps") or []),
             "inline": False,
         },
+    ]
+
+    # ── Satellite fields (optional — wrapped so never crashes embed) ──────
+    try:
+        if satellite and isinstance(satellite, dict):
+            month_label = satellite.get("month", "")
+            cyclicals = satellite.get("cyclicals") or []
+            cannibals = satellite.get("cannibals") or []
+
+            if cyclicals:
+                lines = []
+                for i, c in enumerate(cyclicals, 1):
+                    wr   = f"{c['win_rate']:.0%}"
+                    med  = f"{c['median_return']:+.1%}"
+                    yr   = c.get("years", "?")
+                    lines.append(f"{i}. {c['ticker']}  Win-rate: {wr}  Median: {med}  ({yr} yr)")
+                fields.append({
+                    "name":   f"🌀 Seasonal Cyclicals — {month_label}",
+                    "value":  "\n".join(lines),
+                    "inline": False,
+                })
+
+            if cannibals:
+                lines = []
+                for i, c in enumerate(cannibals, 1):
+                    yld  = f"{c['buyback_yield']:.1%}"
+                    pe   = f"{c['pe']:.1f}"
+                    pvl  = f"{c['price_vs_52w_low']:.2f}"
+                    lines.append(f"{i}. {c['ticker']}  Yield: {yld}  P/E: {pe}  Price/52wLow: {pvl}×")
+                fields.append({
+                    "name":   "🐷 Share Cannibals — Buyback Yield",
+                    "value":  "\n".join(lines),
+                    "inline": False,
+                })
+    except Exception as exc:
+        log.warning("satellite embed fields skipped due to error: %s", exc)
+
+    fields += [
         {
             "name":   "📊 Factor Legend",
             "value":  (
@@ -395,7 +448,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     # ── Build and send ─────────────────────────────────────────────────────────
-    payload = build_payload(top_lists)
+    satellite = _load_satellite(args.log_dir)
+    payload   = build_payload(top_lists, satellite=satellite)
 
     if args.dry_run:
         out = json.dumps(payload, indent=2, ensure_ascii=False)
