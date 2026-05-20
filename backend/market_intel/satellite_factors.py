@@ -16,7 +16,6 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -67,8 +66,11 @@ def get_top_cyclical(tickers: list[str]) -> list[dict]:
                     df = raw[[("Open", ticker), ("Close", ticker)]].copy()
                     df.columns = ["Open", "Close"]
                 except KeyError:
-                    # Single-ticker download returns flat columns
-                    df = raw[["Open", "Close"]].copy()
+                    if len(tickers) == 1:
+                        df = raw[["Open", "Close"]].copy()
+                    else:
+                        log.warning("cyclical: column slice missing for %s — skipping", ticker)
+                        continue
 
                 filtered = df[df.index.month == current_month].dropna(
                     subset=["Open", "Close"]
@@ -180,7 +182,10 @@ def get_top_cannibals(
                 if not quarters:
                     continue
             except Exception as exc:
-                log.warning("cannibal: FMP cash-flow failed for %s — %s", ticker, exc)
+                log.warning(
+                    "cannibal: FMP cash-flow failed for %s — %s",
+                    ticker, type(exc).__name__,
+                )
                 continue
 
             total_repurchased = sum(
@@ -224,6 +229,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    args.log_dir.mkdir(parents=True, exist_ok=True)
     top_lists_path = args.log_dir / "top_lists.json"
     if not top_lists_path.exists():
         log.error("top_lists.json not found at %s", top_lists_path)
