@@ -2,11 +2,10 @@
 EDGAR + FMP + yfinance daily data pipeline.
 
 Stiglitz (2001 Nobel) — asymmetric information: insider filing activity is a
-credible, costly-to-fake signal. This pipeline sources it from two layers:
-  1. SEC EDGAR daily index  — Form 4 filings (free, cached 24 h)
-  2. FMP insider-trading    — structured buy/sell with role classification
-     (1 API call/day; TTL 12 h)
-  3. yfinance               — news sentiment + 20-day price momentum (free)
+credible, costly-to-fake signal. This pipeline sources it from three layers:
+  1. Quiver Quantitative     — pre-parsed Form 4 (primary, QUIVER_API_KEY, 6h TTL)
+  2. Finnhub                 — open-market purchases (fallback, FINNHUB_API_KEY)
+  3. SEC EDGAR direct        — Form 4 count + CEO buy flag (always, free)
 
 FMP budget: ≤ 80 calls per run (per-ticker profile, first 80 tickers only).
 Tickers 81+ fall back to yfinance for market cap to stay within 250/day limit.
@@ -729,6 +728,95 @@ def fetch_all_finnhub_insider(
     return results
 
 
+def fetch_quiver_insider_all(
+    tickers: List[str],
+    lookback_days: int = 180,
+) -> Dict[str, Tuple[float, int]]:
+    """Fetch insider purchase data for all tickers via Quiver Quantitative.
+
+    Stiglitz (2001 Nobel) — Quiver pre-parses SEC Form 4 filings into structured
+    JSON, eliminating brittle XML parsing. One cached API call per ticker;
+    QuiverClient has a 6h file-based TTL so the three daily pipeline runs
+    each pay at most one real HTTP call per ticker.
+
+    Filters to open-market purchases only:
+      - TransactionCode == "P"  (purchase, not award/grant/exercise)
+      - AcquiredDisposedCode == "A" (acquired, not disposed)
+      - isOfficer or isDirector or title matches _KEY_ROLES
+      - Date >= cutoff (within lookback_days)
+
+    Returns {ticker: (total_purchases_usd, days_since_most_recent)}.
+    Tickers with no qualifying purchases get (0.0, 0).
+    Returns {} if QUIVER_API_KEY is not set.
+    """
+    client = _QuiverClient()
+    if not client._api_key:
+        log.info("QUIVER_API_KEY not set — skipping Quiver insider pre-fetch")
+        return {}
+
+    from datetime import date as _date
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+
+    results: Dict[str, Tuple[float, int]] = {}
+    for ticker in tickers:
+        try:
+            trades = client.get_insider_trades(ticker) or []
+            purchase_dates: List[str] = []
+            total_usd = 0.0
+
+            for tx in trades:
+                # Open-market purchase only (not awards, grants, or disposals)
+                tx_code = str(tx.get("TransactionCode") or "").strip().upper()
+                ad_code  = str(tx.get("AcquiredDisposedCode") or "").strip().upper()
+                if tx_code != "P" or ad_code != "A":
+                    continue
+
+                # Key insiders only — officers, directors, or title matches _KEY_ROLES
+                is_officer  = bool(tx.get("isOfficer") or tx.get("IsOfficer"))
+                is_director = bool(tx.get("isDirector") or tx.get("IsDirector"))
+                title = str(tx.get("Title") or tx.get("OfficerTitle") or "").upper()
+                if not (is_officer or is_director or any(role in title for role in _KEY_ROLES)):
+                    continue
+
+                tx_date = str(tx.get("Date") or tx.get("TransactionDate") or "")[:10]
+                if not tx_date or tx_date < cutoff:
+                    continue
+
+                # Prefer TotalValue; fall back to Shares × PricePerShare
+                total_val = tx.get("TotalValue")
+                if total_val is not None:
+                    usd = abs(float(total_val or 0))
+                else:
+                    shares = float(tx.get("Shares") or 0)
+                    price  = float(tx.get("PricePerShare") or 0)
+                    usd    = shares * price
+
+                if usd > 0:
+                    total_usd += usd
+                    purchase_dates.append(tx_date)
+
+            if purchase_dates:
+                most_recent = max(purchase_dates)
+                days_ago = (
+                    datetime.now(timezone.utc).date()
+                    - _date.fromisoformat(most_recent)
+                ).days
+                results[ticker] = (round(total_usd, 2), max(0, days_ago))
+            else:
+                results[ticker] = (0.0, 0)
+
+        except Exception as exc:
+            log.debug("Quiver insider fetch failed for %s: %s", ticker, type(exc).__name__)
+            results[ticker] = (0.0, 0)
+
+    nonzero = sum(1 for v in results.values() if v[0] > 0)
+    log.info(
+        "Quiver insider pre-fetch complete: %d/%d tickers with purchases",
+        nonzero, len(tickers),
+    )
+    return results
+
+
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
@@ -983,17 +1071,29 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     spy_return_baseline = _fetch_spy_return()
     log.info("SPY 3-month return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
 
-    # ── Finnhub insider — pre-fetched serially to respect 60 calls/min limit ──
+    # ── Quiver insider — primary source (pre-parsed Form 4, cached 6h) ───────────
+    # Quiver returns structured JSON per ticker — no XML parsing, no per-ticker
+    # rate limit.  QuiverClient has a 6h file-based TTL so repeated runs within
+    # the same window skip HTTP and read from disk.
+    log.info("Pre-fetching Quiver insider transactions for %d tickers…", len(tickers))
+    quiver_insider_cache: Dict[str, Tuple[float, int]] = fetch_quiver_insider_all(tickers)
+
+    # ── Finnhub insider — fallback when Quiver key absent ────────────────────────
     # Running inside the thread pool (160 concurrent calls) saturates the free
     # tier immediately; all 429 errors are silently swallowed by the per-ticker
-    # try/except, causing insider=0.0 for every ticker.
+    # try/except, causing insider=0.0 for every ticker.  Only pre-fetched when
+    # Quiver produced no results (key absent or all zeros).
     finnhub_key_global = os.getenv("FINNHUB_API_KEY", "")
     finnhub_insider_cache: Dict[str, Tuple[float, int]] = {}
-    if finnhub_key_global:
-        log.info("Pre-fetching Finnhub insider transactions for %d tickers…", len(tickers))
+    quiver_has_data = any(v[0] > 0 for v in quiver_insider_cache.values())
+    if not quiver_has_data and finnhub_key_global:
+        log.info(
+            "Quiver insider returned no data — falling back to Finnhub for %d tickers…",
+            len(tickers),
+        )
         finnhub_insider_cache = fetch_all_finnhub_insider(tickers, finnhub_key_global)
-    else:
-        log.info("FINNHUB_API_KEY not set — insider scoring will use EDGAR XML only")
+    elif not quiver_has_data:
+        log.info("QUIVER_API_KEY and FINNHUB_API_KEY both absent — insider scoring uses EDGAR XML only")
 
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
@@ -1018,9 +1118,15 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         try:
             finnhub_key = finnhub_key_global  # use pre-fetched key (avoids per-thread env lookup)
 
-            # Insider purchases: use pre-fetched cache to avoid rate-limiting 160 concurrent calls.
-            # fetch_all_finnhub_insider() ran serially before the thread pool at 55 calls/min.
-            if finnhub_key and ticker in finnhub_insider_cache:
+            # Insider purchases: Quiver (primary) → Finnhub (fallback) → EDGAR XML.
+            # Quiver and Finnhub caches were both built serially before the thread pool.
+            if ticker in quiver_insider_cache:
+                quiver_usd, quiver_days = quiver_insider_cache[ticker]
+                if quiver_usd > 0:
+                    total_purchases_usd    = quiver_usd
+                    days_since_most_recent = quiver_days
+                    ceo_buy = total_purchases_usd > 25_000
+            elif finnhub_key and ticker in finnhub_insider_cache:
                 insider_usd_finnhub, days_finnhub = finnhub_insider_cache[ticker]
                 if insider_usd_finnhub > 0:
                     total_purchases_usd    = insider_usd_finnhub
@@ -1042,6 +1148,18 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 price_data["volume_spike"],
             )
 
+            # Determine which insider source actually provided data
+            _quiver_usd = quiver_insider_cache.get(ticker, (0.0, 0))[0]
+            _finnhub_usd = finnhub_insider_cache.get(ticker, (0.0, 0))[0]
+            if _quiver_usd > 0:
+                insider_source = "quiver"
+            elif _finnhub_usd > 0:
+                insider_source = "finnhub"
+            elif total_purchases_usd > 0:
+                insider_source = "edgar"
+            else:
+                insider_source = "none"
+
             quiver_evidence = {
                 "congress": {
                     "purchases":       int(congress_raw.get("purchases", 0)) if congress_raw else 0,
@@ -1056,6 +1174,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                     "representatives": congress_raw.get("representatives", []) if congress_raw else [],
                 },
                 "source": "quiver" if (congress_raw and congress_raw.get("recency_days") is not None) else "s3",
+                "insider_source": insider_source,
             }
 
             if finnhub_key:

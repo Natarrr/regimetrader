@@ -297,6 +297,7 @@ class TestQuiverEvidenceInResults:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC in test")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
+                 patch("scripts.run_pipeline.fetch_quiver_insider_all", return_value={}), \
                  patch("scripts.run_pipeline.fetch_all_finnhub_insider", return_value={}), \
                  patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55):
                 mock_ticker.return_value.news = []
@@ -343,6 +344,7 @@ class TestEvidencePassthroughFields:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
+                 patch("scripts.run_pipeline.fetch_quiver_insider_all", return_value={}), \
                  patch("scripts.run_pipeline.fetch_all_finnhub_insider", return_value={}), \
                  patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55), \
                  patch.dict(os.environ, {"FINNHUB_API_KEY": "test-key"}):
@@ -359,3 +361,97 @@ class TestEvidencePassthroughFields:
             assert isinstance(r["momentum_spy_relative"], float)
             assert isinstance(r["volume_spike"], float)
             assert isinstance(r["quiver_evidence"], dict)
+
+
+class TestFetchQuiverInsiderAll:
+    """Unit tests for fetch_quiver_insider_all()."""
+
+    def _quiver_tx(
+        self,
+        tx_code="P",
+        ad_code="A",
+        is_officer=True,
+        is_director=False,
+        date="2026-04-01",
+        total_value=500_000.0,
+    ) -> dict:
+        return {
+            "TransactionCode":    tx_code,
+            "AcquiredDisposedCode": ad_code,
+            "isOfficer":          is_officer,
+            "isDirector":         is_director,
+            "Title":              "CEO",
+            "Date":               date,
+            "TotalValue":         total_value,
+            "Shares":             0,
+            "PricePerShare":      0,
+        }
+
+    def test_no_api_key_returns_empty(self, monkeypatch):
+        monkeypatch.delenv("QUIVER_API_KEY", raising=False)
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        result = fetch_quiver_insider_all(["AAPL"])
+        assert result == {}
+
+    def test_purchase_counted(self, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        tx = self._quiver_tx(total_value=250_000.0, date="2026-04-15")
+        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"][0] == pytest.approx(250_000.0)
+        assert result["AAPL"][1] >= 0
+
+    def test_disposal_excluded(self, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        tx = self._quiver_tx(ad_code="D")  # disposal
+        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"][0] == pytest.approx(0.0)
+
+    def test_non_purchase_code_excluded(self, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        tx = self._quiver_tx(tx_code="A")  # award, not purchase
+        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"][0] == pytest.approx(0.0)
+
+    def test_non_key_insider_excluded(self, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        tx = self._quiver_tx(is_officer=False, is_director=False)
+        tx["Title"] = "EMPLOYEE"  # not in _KEY_ROLES
+        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"][0] == pytest.approx(0.0)
+
+    def test_stale_date_excluded(self, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        tx = self._quiver_tx(date="2020-01-01")  # well outside 180-day window
+        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"][0] == pytest.approx(0.0)
+
+    def test_fallback_to_shares_times_price(self, monkeypatch):
+        """When TotalValue is absent, Shares × PricePerShare is used."""
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        tx = self._quiver_tx(date="2026-04-01", total_value=None)
+        tx["Shares"] = 1000
+        tx["PricePerShare"] = 150.0
+        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"][0] == pytest.approx(150_000.0)
+
+    def test_api_exception_returns_zero_not_crash(self, monkeypatch):
+        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+        from scripts.run_pipeline import fetch_quiver_insider_all
+        with patch(
+            "regime_trader.services.quiver_client.QuiverClient.get_insider_trades",
+            side_effect=RuntimeError("network"),
+        ):
+            result = fetch_quiver_insider_all(["AAPL"])
+        assert result["AAPL"] == (0.0, 0)
