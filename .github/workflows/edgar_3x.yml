@@ -137,7 +137,17 @@ jobs:
             --verbose \
             $FORCE
 
-      # ── 7. Check Minsky insider stress ──────────────────────────────────────
+      # ── 7. Generate satellite insights ──────────────────────────────────────
+      - name: Generate satellite insights
+        continue-on-error: true
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+        run: |
+          python -m backend.market_intel.satellite_factors \
+            --log-dir logs \
+            --verbose
+
+      # ── 8. Check Minsky insider stress ──────────────────────────────────────
       - name: Check Minsky insider stress
         if: always()
         env:
@@ -145,7 +155,7 @@ jobs:
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 
-      # ── 8. Generate run execution summary ────────────────────────────────────
+      # ── 9. Generate run execution summary ────────────────────────────────────
       - name: Generate Run Execution Summary
         if: always()
         run: |
@@ -170,7 +180,7 @@ jobs:
             echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # ── 9. Upload artifacts ──────────────────────────────────────────────────
+      # ── 10. Upload artifacts ──────────────────────────────────────────────────
       - name: Upload top-lists artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -181,6 +191,7 @@ jobs:
           path: |
             logs/top_lists.json
             logs/top5.csv
+            logs/satellite_insights.json
 
       - name: Upload pipeline debug artifacts
         if: always()
