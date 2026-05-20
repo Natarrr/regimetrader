@@ -728,22 +728,77 @@ def fetch_all_finnhub_insider(
     return results
 
 
+def _parse_quiver_trades(
+    trades: List[Dict],
+    cutoff: str,
+) -> Tuple[float, int]:
+    """Parse a Quiver insider-trades response for one ticker.
+
+    Returns (total_purchases_usd, days_since_most_recent).
+    Pure function — no I/O, safe to call from threads.
+    """
+    from datetime import date as _date
+
+    purchase_dates: List[str] = []
+    total_usd = 0.0
+
+    for tx in trades:
+        tx_code = str(tx.get("TransactionCode") or "").strip().upper()
+        ad_code  = str(tx.get("AcquiredDisposedCode") or "").strip().upper()
+        if tx_code != "P" or ad_code != "A":
+            continue
+
+        is_officer  = bool(tx.get("isOfficer") or tx.get("IsOfficer"))
+        is_director = bool(tx.get("isDirector") or tx.get("IsDirector"))
+        title = str(tx.get("Title") or tx.get("OfficerTitle") or "").upper()
+        if not (is_officer or is_director or any(role in title for role in _KEY_ROLES)):
+            continue
+
+        tx_date = str(tx.get("Date") or tx.get("TransactionDate") or "")[:10]
+        if not tx_date or tx_date < cutoff:
+            continue
+
+        total_val = tx.get("TotalValue")
+        if total_val is not None:
+            usd = abs(float(total_val or 0))
+        else:
+            shares = float(tx.get("Shares") or 0)
+            price  = float(tx.get("PricePerShare") or 0)
+            usd    = shares * price
+
+        if usd > 0:
+            total_usd += usd
+            purchase_dates.append(tx_date)
+
+    if not purchase_dates:
+        return 0.0, 0
+
+    most_recent = max(purchase_dates)
+    days_ago = (
+        datetime.now(timezone.utc).date() - _date.fromisoformat(most_recent)
+    ).days
+    return round(total_usd, 2), max(0, days_ago)
+
+
 def fetch_quiver_insider_all(
     tickers: List[str],
     lookback_days: int = 180,
+    max_workers: int = 5,
 ) -> Dict[str, Tuple[float, int]]:
     """Fetch insider purchase data for all tickers via Quiver Quantitative.
 
     Stiglitz (2001 Nobel) — Quiver pre-parses SEC Form 4 filings into structured
-    JSON, eliminating brittle XML parsing. One cached API call per ticker;
-    QuiverClient has a 6h file-based TTL so the three daily pipeline runs
-    each pay at most one real HTTP call per ticker.
+    JSON, eliminating brittle XML parsing. Uses ThreadPoolExecutor(max_workers=5)
+    to parallelize HTTP calls while respecting Quiver's rate limits.
 
-    Filters to open-market purchases only:
-      - TransactionCode == "P"  (purchase, not award/grant/exercise)
-      - AcquiredDisposedCode == "A" (acquired, not disposed)
-      - isOfficer or isDirector or title matches _KEY_ROLES
-      - Date >= cutoff (within lookback_days)
+    QuiverClient has a 6h file-based TTL: the first daily run makes real HTTP
+    calls; the two subsequent runs within the same 6h window read from disk and
+    are effectively free (no network, no concurrency overhead).
+
+    max_workers=5 chosen deliberately:
+      - 160 tickers ÷ 5 workers ≈ 32 batches
+      - At ~200–400ms per Quiver call: total ~6–13s (vs. ~48s serial)
+      - 5 concurrent connections stays well within typical REST API limits
 
     Returns {ticker: (total_purchases_usd, days_since_most_recent)}.
     Tickers with no qualifying purchases get (0.0, 0).
@@ -754,60 +809,24 @@ def fetch_quiver_insider_all(
         log.info("QUIVER_API_KEY not set — skipping Quiver insider pre-fetch")
         return {}
 
-    from datetime import date as _date
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
 
-    results: Dict[str, Tuple[float, int]] = {}
-    for ticker in tickers:
+    def _fetch_one(ticker: str) -> Tuple[str, Tuple[float, int]]:
+        t0 = time.monotonic()
         try:
             trades = client.get_insider_trades(ticker) or []
-            purchase_dates: List[str] = []
-            total_usd = 0.0
-
-            for tx in trades:
-                # Open-market purchase only (not awards, grants, or disposals)
-                tx_code = str(tx.get("TransactionCode") or "").strip().upper()
-                ad_code  = str(tx.get("AcquiredDisposedCode") or "").strip().upper()
-                if tx_code != "P" or ad_code != "A":
-                    continue
-
-                # Key insiders only — officers, directors, or title matches _KEY_ROLES
-                is_officer  = bool(tx.get("isOfficer") or tx.get("IsOfficer"))
-                is_director = bool(tx.get("isDirector") or tx.get("IsDirector"))
-                title = str(tx.get("Title") or tx.get("OfficerTitle") or "").upper()
-                if not (is_officer or is_director or any(role in title for role in _KEY_ROLES)):
-                    continue
-
-                tx_date = str(tx.get("Date") or tx.get("TransactionDate") or "")[:10]
-                if not tx_date or tx_date < cutoff:
-                    continue
-
-                # Prefer TotalValue; fall back to Shares × PricePerShare
-                total_val = tx.get("TotalValue")
-                if total_val is not None:
-                    usd = abs(float(total_val or 0))
-                else:
-                    shares = float(tx.get("Shares") or 0)
-                    price  = float(tx.get("PricePerShare") or 0)
-                    usd    = shares * price
-
-                if usd > 0:
-                    total_usd += usd
-                    purchase_dates.append(tx_date)
-
-            if purchase_dates:
-                most_recent = max(purchase_dates)
-                days_ago = (
-                    datetime.now(timezone.utc).date()
-                    - _date.fromisoformat(most_recent)
-                ).days
-                results[ticker] = (round(total_usd, 2), max(0, days_ago))
-            else:
-                results[ticker] = (0.0, 0)
-
+            result = _parse_quiver_trades(trades, cutoff)
         except Exception as exc:
             log.debug("Quiver insider fetch failed for %s: %s", ticker, type(exc).__name__)
-            results[ticker] = (0.0, 0)
+            result = (0.0, 0)
+        elapsed = time.monotonic() - t0
+        log.debug("Quiver insider %s: $%.0f elapsed=%.2fs", ticker, result[0], elapsed)
+        return ticker, result
+
+    results: Dict[str, Tuple[float, int]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for ticker, value in pool.map(_fetch_one, tickers):
+            results[ticker] = value
 
     nonzero = sum(1 for v in results.values() if v[0] > 0)
     log.info(

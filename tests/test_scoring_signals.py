@@ -455,3 +455,94 @@ class TestFetchQuiverInsiderAll:
         ):
             result = fetch_quiver_insider_all(["AAPL"])
         assert result["AAPL"] == (0.0, 0)
+
+
+class TestParseQuiverTrades:
+    """Unit tests for _parse_quiver_trades() — pure function, no I/O."""
+
+    def _tx(
+        self,
+        tx_code="P", ad_code="A",
+        is_officer=True, is_director=False,
+        title="CEO",
+        date="2026-04-01",
+        total_value=500_000.0,
+        shares=0, price=0.0,
+    ) -> dict:
+        return {
+            "TransactionCode":      tx_code,
+            "AcquiredDisposedCode": ad_code,
+            "isOfficer":            is_officer,
+            "isDirector":           is_director,
+            "Title":                title,
+            "Date":                 date,
+            "TotalValue":           total_value,
+            "Shares":               shares,
+            "PricePerShare":        price,
+        }
+
+    def _cutoff(self, days_ago: int = 180) -> str:
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc) - timedelta(days=days_ago)).date().isoformat()
+
+    def test_empty_list_returns_zeros(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        assert _parse_quiver_trades([], self._cutoff()) == (0.0, 0)
+
+    def test_valid_purchase_totalled(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(total_value=250_000.0, date="2026-04-15")
+        total, days = _parse_quiver_trades([tx], "2026-01-01")
+        assert total == pytest.approx(250_000.0)
+        assert days >= 0
+
+    def test_disposal_excluded(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(ad_code="D")
+        total, _ = _parse_quiver_trades([tx], "2026-01-01")
+        assert total == pytest.approx(0.0)
+
+    def test_non_purchase_transaction_code_excluded(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(tx_code="A")   # stock award, not purchase
+        total, _ = _parse_quiver_trades([tx], "2026-01-01")
+        assert total == pytest.approx(0.0)
+
+    def test_non_key_role_excluded(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(is_officer=False, is_director=False, title="EMPLOYEE")
+        total, _ = _parse_quiver_trades([tx], "2026-01-01")
+        assert total == pytest.approx(0.0)
+
+    def test_date_before_cutoff_excluded(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(date="2020-01-01")
+        total, _ = _parse_quiver_trades([tx], self._cutoff(days_ago=180))
+        assert total == pytest.approx(0.0)
+
+    def test_shares_times_price_fallback(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(total_value=None, shares=1000, price=200.0, date="2026-04-01")
+        total, _ = _parse_quiver_trades([tx], "2026-01-01")
+        assert total == pytest.approx(200_000.0)
+
+    def test_multiple_transactions_summed(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        txs = [
+            self._tx(total_value=100_000.0, date="2026-04-01"),
+            self._tx(total_value=200_000.0, date="2026-04-10"),
+        ]
+        total, _ = _parse_quiver_trades(txs, "2026-01-01")
+        assert total == pytest.approx(300_000.0)
+
+    def test_days_since_most_recent_is_nonnegative(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(date="2026-04-01")
+        _, days = _parse_quiver_trades([tx], "2026-01-01")
+        assert days >= 0
+
+    def test_director_qualifies_as_key_role(self):
+        from scripts.run_pipeline import _parse_quiver_trades
+        tx = self._tx(is_officer=False, is_director=True, title="DIRECTOR")
+        total, _ = _parse_quiver_trades([tx], "2026-01-01")
+        assert total == pytest.approx(500_000.0)

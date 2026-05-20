@@ -44,6 +44,15 @@ from regime_trader.utils.io import save_json_atomic
 
 log = logging.getLogger("generate_top_lists")
 
+
+class PipelineIntegrityError(RuntimeError):
+    """Raised when too few tickers pass the schema gate to produce a valid ranking.
+
+    Prevents top_lists.json from being written with a near-empty or degenerate
+    universe, which would cause the Discord bot to send misleading signals.
+    """
+
+
 WEIGHTS: Dict[str, float] = {
     "edgar":    0.28,
     "insider":  0.23,
@@ -60,6 +69,16 @@ FACTOR_FIELDS: Dict[str, str] = {
     "news":     "news_score",
     "momentum": "momentum_score",
 }
+
+# Schema gate: a ticker is "incomplete" when more than this many factors are
+# zero (i.e. missing / dead API).  Incomplete tickers are scored but flagged;
+# they are NOT excluded from ranking — exclusion would distort cross-sectional
+# normalization.  Instead, validation_metadata carries the signal to consumers.
+_SCHEMA_MISSING_THRESHOLD = 2   # >2 zero factors → is_complete = False
+
+# Circuit breaker: if fewer than this fraction of the universe pass the schema
+# gate, PipelineIntegrityError is raised and top_lists.json is NOT written.
+_CIRCUIT_BREAKER_MIN_FRACTION = 0.20   # 20 % of universe minimum
 
 _BADGES = [
     (0.80, "HIGH BUY"),
@@ -86,6 +105,69 @@ def _badge(score: float) -> str:
         if score >= threshold:
             return label
     return "WATCHLIST"
+
+
+def _schema_gate(
+    results: List[Dict[str, Any]],
+    universe_size: int,
+) -> List[Dict[str, Any]]:
+    """Validate each ticker's factor completeness; raise if universe collapses.
+
+    For each ticker, counts how many of the five raw factor scores are exactly
+    0.0 (the sentinel for a missing/dead feed).  Attaches a ``_validation``
+    dict to each row:
+
+        {"is_complete": bool, "missing_sources": ["insider", "news"]}
+
+    A ticker is incomplete when missing_sources length > _SCHEMA_MISSING_THRESHOLD.
+    Incomplete tickers are NOT removed — removal would corrupt cross-sectional
+    normalization by shrinking the peer group.  They are flagged so downstream
+    consumers (Discord bot, audit log) can warn.
+
+    Circuit breaker: if the complete-ticker count falls below
+    _CIRCUIT_BREAKER_MIN_FRACTION of ``universe_size``, raises
+    PipelineIntegrityError before any file is written.
+
+    Returns the same list (mutated in-place with ``_validation`` added).
+    """
+    complete_count = 0
+
+    for row in results:
+        missing: List[str] = []
+        for factor, field in FACTOR_FIELDS.items():
+            val = row.get(field)
+            # None or exactly 0.0 both indicate an absent/dead feed
+            if val is None or float(val) == 0.0:
+                missing.append(factor)
+
+        is_complete = len(missing) <= _SCHEMA_MISSING_THRESHOLD
+        row["_validation"] = {
+            "is_complete":    is_complete,
+            "missing_sources": missing,
+        }
+        if is_complete:
+            complete_count += 1
+        else:
+            log.debug(
+                "SCHEMA_GATE ticker=%s missing=%s — score may be unreliable",
+                row.get("ticker", "?"),
+                missing,
+            )
+
+    # Circuit breaker — abort before writing any output
+    min_required = max(1, round(_CIRCUIT_BREAKER_MIN_FRACTION * universe_size))
+    if complete_count < min_required:
+        raise PipelineIntegrityError(
+            f"Schema gate: only {complete_count}/{universe_size} tickers are complete "
+            f"(threshold {_CIRCUIT_BREAKER_MIN_FRACTION:.0%} = {min_required}). "
+            "Data feeds may be down. top_lists.json will NOT be written."
+        )
+
+    log.info(
+        "Schema gate passed: %d/%d tickers complete (threshold %d)",
+        complete_count, len(results), min_required,
+    )
+    return results
 
 
 def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, float]]:
@@ -223,19 +305,21 @@ def _to_entry(
         sum(w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in WEIGHTS),
         4,
     )
-    # Fix #3: apply absolute macro-regime overlay AFTER cross-sectional ranking
     score = round(_apply_vix_overlay(raw_score, vix), 4)
+    # Carry schema-gate result into the entry so it appears in top_lists.json
+    validation = row.get("_validation", {"is_complete": True, "missing_sources": []})
     return {
         "ticker":          row.get("ticker", "?"),
         "sector":          row.get("sector", "Unknown"),
         "cap_tier":        row.get("cap_tier", "large"),
         "market_cap":      float(row.get("market_cap", 0.0)),
-        "raw_score":       raw_score,   # pre-overlay, for diagnostics
+        "raw_score":       raw_score,
         "final_score":     score,
         "badge":           _badge(score),
         "ceo_buy":         bool(row.get("ceo_buy", False)),
         "form4_count":     int(row.get("form4_count", 0)),
         "factors":         norm_factors,
+        "validation_metadata": validation,
         "quiver_evidence":         quiver_evidence or {},
         "news_source":             row.get("news_source", "none"),
         "insider_usd":             float(row.get("insider_usd", 0.0)),
@@ -327,6 +411,12 @@ def generate(
             current_vix,
             _apply_vix_overlay(1.0, current_vix),
         )
+
+    # Schema gate: attach validation_metadata + circuit-breaker check.
+    # Raises PipelineIntegrityError (before writing anything) if < 20% of the
+    # universe has complete data.  Never removes rows — normalization needs the
+    # full peer group.
+    _schema_gate(results, universe_size=len(results))
 
     norm_factor_list = _cross_sectional_normalize(results)
     assert len(norm_factor_list) == len(results), (
@@ -485,6 +575,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         generate(status, args.run_id, args.log_dir)
         return 0
+    except PipelineIntegrityError as exc:
+        # Circuit breaker fired — loud, non-recoverable, must fail the CI step
+        log.error("PIPELINE INTEGRITY VIOLATION: %s", exc)
+        return 2   # distinct exit code so CI can distinguish from generic failure
     except Exception as exc:
         log.exception("Failed to generate top_lists: %s", exc)
         return 1

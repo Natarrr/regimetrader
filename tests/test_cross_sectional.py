@@ -14,7 +14,9 @@ from backend.market_intel.generate_top_lists import (
     _apply_vix_overlay,
     _cross_sectional_normalize,
     _effective_weights,
+    _schema_gate,
     FACTOR_FIELDS,
+    PipelineIntegrityError,
     WEIGHTS,
 )
 from scripts.run_pipeline import score_congress
@@ -274,3 +276,106 @@ class TestToEntryEvidencePassthrough:
         assert entry["insider_usd"] == pytest.approx(0.0)
         assert entry["momentum_spy_relative"] == pytest.approx(0.0)
         assert entry["volume_spike"] == pytest.approx(1.0)
+
+
+def _make_schema_row(ticker: str = "AAPL", **scores) -> dict:
+    """Build a result row with configurable factor scores (default all 0.5)."""
+    base = {
+        "ticker": ticker,
+        "edgar_score":    scores.get("edgar_score",    0.5),
+        "insider_score":  scores.get("insider_score",  0.5),
+        "congress_score": scores.get("congress_score", 0.5),
+        "news_score":     scores.get("news_score",     0.5),
+        "momentum_score": scores.get("momentum_score", 0.5),
+    }
+    return base
+
+
+class TestSchemaGate:
+    """_schema_gate(): per-ticker validation metadata + circuit-breaker."""
+
+    def test_complete_ticker_gets_is_complete_true(self):
+        rows = [_make_schema_row()]  # all factors non-zero
+        _schema_gate(rows, universe_size=1)
+        assert rows[0]["_validation"]["is_complete"] is True
+        assert rows[0]["_validation"]["missing_sources"] == []
+
+    def test_ticker_with_one_zero_is_still_complete(self):
+        # threshold is >2 missing, so 1 missing → still complete
+        rows = [_make_schema_row(insider_score=0.0)]
+        _schema_gate(rows, universe_size=1)
+        v = rows[0]["_validation"]
+        assert v["is_complete"] is True
+        assert "insider" in v["missing_sources"]
+
+    def test_ticker_with_two_zeros_is_still_complete(self):
+        rows = [_make_schema_row(insider_score=0.0, congress_score=0.0)]
+        _schema_gate(rows, universe_size=2)
+        v = rows[0]["_validation"]
+        assert v["is_complete"] is True
+        assert len(v["missing_sources"]) == 2
+
+    def test_ticker_with_three_zeros_is_incomplete(self):
+        rows = [_make_schema_row(insider_score=0.0, congress_score=0.0, news_score=0.0)]
+        # Need universe of 5 so 0 complete < 20% threshold (min_required = 1)
+        # Add 4 complete rows to pass circuit breaker
+        complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
+        all_rows = rows + complete_rows
+        _schema_gate(all_rows, universe_size=len(all_rows))
+        v = all_rows[0]["_validation"]
+        assert v["is_complete"] is False
+        assert len(v["missing_sources"]) == 3
+
+    def test_missing_sources_names_correct_factors(self):
+        rows = [_make_schema_row(edgar_score=0.0, momentum_score=0.0, news_score=0.0)]
+        complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
+        all_rows = rows + complete_rows
+        _schema_gate(all_rows, universe_size=len(all_rows))
+        missing = set(all_rows[0]["_validation"]["missing_sources"])
+        assert missing == {"edgar", "momentum", "news"}
+
+    def test_none_score_counts_as_missing(self):
+        row = _make_schema_row()
+        row["insider_score"] = None
+        complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
+        all_rows = [row] + complete_rows
+        _schema_gate(all_rows, universe_size=len(all_rows))
+        assert "insider" in all_rows[0]["_validation"]["missing_sources"]
+
+    def test_circuit_breaker_fires_when_below_20_percent(self):
+        # 5 tickers, all with 3 missing factors → 0 complete < 20% of 5 (min=1)
+        rows = [
+            _make_schema_row(f"T{i}", insider_score=0.0, congress_score=0.0, news_score=0.0)
+            for i in range(5)
+        ]
+        with pytest.raises(PipelineIntegrityError, match="Schema gate"):
+            _schema_gate(rows, universe_size=5)
+
+    def test_circuit_breaker_does_not_fire_when_enough_complete(self):
+        # 10 tickers: 3 complete, 7 missing 3 factors each
+        # 3/10 = 30% ≥ 20% → should NOT raise
+        complete = [_make_schema_row(f"C{i}") for i in range(3)]
+        incomplete = [
+            _make_schema_row(f"I{i}", insider_score=0.0, congress_score=0.0, news_score=0.0)
+            for i in range(7)
+        ]
+        rows = complete + incomplete
+        _schema_gate(rows, universe_size=10)   # must not raise
+
+    def test_circuit_breaker_raises_pipeline_integrity_error_type(self):
+        rows = [_make_schema_row(insider_score=0.0, congress_score=0.0, news_score=0.0)]
+        with pytest.raises(PipelineIntegrityError):
+            _schema_gate(rows, universe_size=1)
+
+    def test_validation_metadata_present_on_every_row(self):
+        rows = [_make_schema_row(f"T{i}") for i in range(5)]
+        _schema_gate(rows, universe_size=5)
+        for row in rows:
+            assert "_validation" in row
+            assert "is_complete" in row["_validation"]
+            assert "missing_sources" in row["_validation"]
+
+    def test_returns_same_list_in_place(self):
+        rows = [_make_schema_row()]
+        returned = _schema_gate(rows, universe_size=1)
+        assert returned is rows   # mutated in-place, same object
