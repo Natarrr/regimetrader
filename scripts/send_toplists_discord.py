@@ -264,20 +264,20 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
                     lines.append(f"{i}. {c['ticker']}  Win-rate: {wr}  Median: {med}  ({yr} yr)")
                 fields.append({
                     "name":   f"🌀 Seasonal Cyclicals — {month_label}",
-                    "value":  "\n".join(lines),
+                    "value":  _truncate("\n".join(lines)),
                     "inline": False,
                 })
 
             if cannibals:
                 lines = []
                 for i, c in enumerate(cannibals, 1):
-                    yld  = f"{c['buyback_yield']:.1%}"
-                    pe   = f"{c['pe']:.1f}"
-                    pvl  = f"{c['price_vs_52w_low']:.2f}"
+                    yld  = f"{c.get('buyback_yield', 0):.1%}"
+                    pe   = f"{c.get('pe', 0):.1f}"
+                    pvl  = f"{c.get('price_vs_52w_low', 0):.2f}"
                     lines.append(f"{i}. {c['ticker']}  Yield: {yld}  P/E: {pe}  Price/52wLow: {pvl}×")
                 fields.append({
                     "name":   "🐷 Share Cannibals — Buyback Yield",
-                    "value":  "\n".join(lines),
+                    "value":  _truncate("\n".join(lines)),
                     "inline": False,
                 })
     except Exception as exc:
