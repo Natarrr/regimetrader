@@ -176,11 +176,6 @@ def _fmt_insider_pct(val: Any) -> str:
     return f"{pct:.4f}%"
 
 
-def _safe_payload() -> Dict[str, Any]:
-    """Return a consistent empty payload shape used on load errors."""
-    return {"results": [], "cached": False, "computed_at": "error"}
-
-
 # ── Cached data loaders ───────────────────────────────────────────────────────
 
 _STATE_FILE = _ROOT / "data" / "market_state.json"
