@@ -447,6 +447,8 @@ class TestFetchQuiverInsiderAll:
         assert result["AAPL"][0] == pytest.approx(150_000.0)
 
     def test_api_exception_returns_zero_not_crash(self, monkeypatch):
+        # Network error on every call → probe catches it, pool also catches it,
+        # ticker gets (0.0, 0) — no crash, result dict still contains the ticker.
         monkeypatch.setenv("QUIVER_API_KEY", "test-key")
         from scripts.run_pipeline import fetch_quiver_insider_all
         with patch(

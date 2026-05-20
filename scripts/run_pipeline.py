@@ -809,7 +809,23 @@ def fetch_quiver_insider_all(
         log.info("QUIVER_API_KEY not set — skipping Quiver insider pre-fetch")
         return {}
 
+    if not tickers:
+        return {}
+
+    # Probe with the first ticker before spinning up the thread pool.
+    # A 403 means the endpoint is not included in the current plan — log once
+    # and return {} immediately without making 159 more pointless HTTP calls.
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+    try:
+        _ = client.get_insider_trades(tickers[0])   # sets _insider_plan_restricted on 403
+    except Exception as exc:
+        log.debug("Quiver insider probe failed for %s: %s", tickers[0], type(exc).__name__)
+    if client._insider_plan_restricted:
+        log.info(
+            "Quiver insider not available on current plan — "
+            "insider scores will use Finnhub/EDGAR fallback."
+        )
+        return {}
 
     def _fetch_one(ticker: str) -> Tuple[str, Tuple[float, int]]:
         t0 = time.monotonic()

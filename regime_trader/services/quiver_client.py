@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -59,6 +60,10 @@ _TTL: Dict[str, int] = {
     "lobbying":       24 * 3600,
     "govcontracts":   24 * 3600,
 }
+
+# HTTP status codes that mean "plan doesn't include this endpoint" — don't retry,
+# don't spam per-ticker warnings; log once and short-circuit all remaining calls.
+_PLAN_RESTRICTED_STATUSES = frozenset({403})
 
 _INVALID_TICKERS = frozenset({"N/A", "--", "", "NONE", "NO TICKER"})
 
@@ -97,6 +102,11 @@ class QuiverClient:
         self._session: Optional[requests.Session] = (
             _make_session(self._api_key) if self._api_key else None
         )
+        # Set to True after the first 403 on an insider endpoint so all
+        # subsequent per-ticker calls short-circuit without network I/O.
+        # _insider_lock guards the flag across ThreadPoolExecutor workers.
+        self._insider_plan_restricted: bool = False
+        self._insider_lock: threading.Lock = threading.Lock()
 
     # ── Cache helpers ──────────────────────────────────────────────────────────
 
@@ -164,14 +174,38 @@ class QuiverClient:
         Response fields: Name, Title, Date, Ticker,
         AcquisitionOrDisposition (A/D), Shares, PricePerShare,
         TotalValue, FilingURL.
+
+        Returns [] immediately (without a network call) if a previous call
+        already received a 403, meaning the endpoint is not included in the
+        current subscription plan.
         """
+        # Fast path: another thread already confirmed this endpoint is plan-restricted.
+        if self._insider_plan_restricted:
+            return []
         cached = self._cache_read("insidertrading", ticker)
         if cached is not None:
             return cached
-        if not self._api_key:
+        if not self._api_key or self._session is None:
             return []
-        data = self._get(f"/beta/live/insidertrading/{ticker}")
-        result: List[dict] = data if isinstance(data, list) else []
+        url = f"{_BASE_URL}/beta/live/insiders"
+        try:
+            resp = self._session.get(url, params={"ticker": ticker}, timeout=_TIMEOUT)
+            if resp.status_code in _PLAN_RESTRICTED_STATUSES:
+                with self._insider_lock:
+                    if not self._insider_plan_restricted:
+                        self._insider_plan_restricted = True
+                        log.warning(
+                            "Quiver insider endpoint returned %d — not included in "
+                            "current subscription plan. "
+                            "Falling back to Finnhub/EDGAR for all tickers.",
+                            resp.status_code,
+                        )
+                return []
+            resp.raise_for_status()
+            result: List[dict] = resp.json() if isinstance(resp.json(), list) else []
+        except Exception as exc:
+            log.warning("quiver GET /beta/live/insiders?ticker=%s failed: %s", ticker, exc)
+            return []
         self._cache_write("insidertrading", ticker, result)
         return result
 
