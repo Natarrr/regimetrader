@@ -148,7 +148,9 @@ def get_top_cannibals(
             try:
                 info = _fetch_yf_info(ticker)
             except Exception as exc:
-                log.warning("cannibal: yf.info failed for %s — %s", ticker, exc)
+                log.warning(
+                    "cannibal: yf.info failed for %s — %s", ticker, type(exc).__name__,
+                )
                 continue
 
             # Filter 1: P/E
@@ -210,7 +212,7 @@ def get_top_cannibals(
         return results[:TOP_N]
 
     except Exception as exc:
-        log.warning("get_top_cannibals failed entirely: %s", exc)
+        log.warning("get_top_cannibals failed entirely: %s", type(exc).__name__)
         return []
 
 
