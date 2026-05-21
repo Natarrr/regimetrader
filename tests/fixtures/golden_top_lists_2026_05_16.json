@@ -1,0 +1,843 @@
+{
+  "generated_at": "2026-05-21T13:38:22.611421+00:00",
+  "source_run_id": "golden-capture",
+  "ticker_count": 83,
+  "weights": {
+    "edgar": 0.28,
+    "insider": 0.23,
+    "congress": 0.22,
+    "news": 0.15,
+    "momentum": 0.12
+  },
+  "vix": 18.43,
+  "kill_switch": false,
+  "vix_multiplier": 1.0,
+  "top_buys": [
+    {
+      "ticker": "PLTR",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 300000000000.0,
+      "raw_score": 0.7195,
+      "final_score": 0.7195,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.7093,
+        "insider": 1.0,
+        "congress": 0.5,
+        "news": 0.8061,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "SQ",
+      "sector": "Financials",
+      "cap_tier": "large",
+      "market_cap": 50000000000.0,
+      "raw_score": 0.6406,
+      "final_score": 0.6406,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.4988,
+        "insider": 0.9131,
+        "congress": 0.5,
+        "news": 0.8061,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "AMD",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 220000000000.0,
+      "raw_score": 0.6177,
+      "final_score": 0.6177,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.547,
+        "insider": 0.8212,
+        "congress": 0.5,
+        "news": 0.7041,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "CRWV",
+      "sector": "Information Technology",
+      "cap_tier": "mid",
+      "market_cap": 5000000000.0,
+      "raw_score": 0.6,
+      "final_score": 0.6,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 1.0,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 1.0,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "ARM",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 140000000000.0,
+      "raw_score": 0.5986,
+      "final_score": 0.5986,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.9949,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 1.0,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    }
+  ],
+  "mid_caps": [
+    {
+      "ticker": "CRWV",
+      "sector": "Information Technology",
+      "cap_tier": "mid",
+      "market_cap": 5000000000.0,
+      "raw_score": 0.6,
+      "final_score": 0.6,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 1.0,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 1.0,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "NBIS",
+      "sector": "Information Technology",
+      "cap_tier": "mid",
+      "market_cap": 5000000000.0,
+      "raw_score": 0.5619,
+      "final_score": 0.5619,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.913,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.9082,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "IREN",
+      "sector": "Information Technology",
+      "cap_tier": "mid",
+      "market_cap": 4000000000.0,
+      "raw_score": 0.5202,
+      "final_score": 0.5202,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.9827,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.5,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "BB",
+      "sector": "Information Technology",
+      "cap_tier": "mid",
+      "market_cap": 4000000000.0,
+      "raw_score": 0.4927,
+      "final_score": 0.4927,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.8301,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.602,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "RXT",
+      "sector": "Information Technology",
+      "cap_tier": "mid",
+      "market_cap": 5000000000.0,
+      "raw_score": 0.4909,
+      "final_score": 0.4909,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.8237,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.602,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    }
+  ],
+  "small_caps": [
+    {
+      "ticker": "YOU",
+      "sector": "Unknown",
+      "cap_tier": "small",
+      "market_cap": 1000000000.0,
+      "raw_score": 0.4763,
+      "final_score": 0.4763,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.9355,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.2959,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "UAE",
+      "sector": "Unknown",
+      "cap_tier": "small",
+      "market_cap": 1000000000.0,
+      "raw_score": 0.4652,
+      "final_score": 0.4652,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.8047,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.4658,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "AMZN",
+      "sector": "Unknown",
+      "cap_tier": "small",
+      "market_cap": 1000000000.0,
+      "raw_score": 0.4392,
+      "final_score": 0.4392,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.0,
+        "insider": 0.9107,
+        "congress": 0.5,
+        "news": 0.398,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "INOD",
+      "sector": "Information Technology",
+      "cap_tier": "small",
+      "market_cap": 1000000000.0,
+      "raw_score": 0.4245,
+      "final_score": 0.4245,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.7504,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.2959,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    },
+    {
+      "ticker": "POET",
+      "sector": "Information Technology",
+      "cap_tier": "small",
+      "market_cap": 1000000000.0,
+      "raw_score": 0.3787,
+      "final_score": 0.3787,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 0,
+      "factors": {
+        "edgar": 0.6961,
+        "insider": 0.0,
+        "congress": 0.5,
+        "news": 0.0918,
+        "momentum": 0.5
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {},
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": 0.0,
+      "volume_spike": 1.0
+    }
+  ],
+  "sector_picks": {
+    "Energy": [
+      {
+        "ticker": "XOM",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 450000000000.0,
+        "raw_score": 0.5123,
+        "final_score": 0.5123,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.4881,
+          "insider": 0.701,
+          "congress": 0.5,
+          "news": 0.2959,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "CVX",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 280000000000.0,
+        "raw_score": 0.4698,
+        "final_score": 0.4698,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.4502,
+          "insider": 0.4959,
+          "congress": 0.5,
+          "news": 0.398,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "AM",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 15000000000.0,
+        "raw_score": 0.4535,
+        "final_score": 0.4535,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.7994,
+          "insider": 0.0,
+          "congress": 0.5,
+          "news": 0.398,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      }
+    ],
+    "Materials": [
+      {
+        "ticker": "VALE",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 40000000000.0,
+        "raw_score": 0.4874,
+        "final_score": 0.4874,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.9752,
+          "insider": 0.0,
+          "congress": 0.5,
+          "news": 0.2959,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "FCX",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 70000000000.0,
+        "raw_score": 0.3991,
+        "final_score": 0.3991,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.3862,
+          "insider": 0.0,
+          "congress": 0.5,
+          "news": 0.8061,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "NEM",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 50000000000.0,
+        "raw_score": 0.3872,
+        "final_score": 0.3872,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.4531,
+          "insider": 0.0,
+          "congress": 0.5,
+          "news": 0.602,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      }
+    ],
+    "Communication Services": [
+      {
+        "ticker": "NFLX",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 450000000000.0,
+        "raw_score": 0.4904,
+        "final_score": 0.4904,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.4956,
+          "insider": 0.7898,
+          "congress": 0.5,
+          "news": 0.0,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "RDDT",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 25000000000.0,
+        "raw_score": 0.4543,
+        "final_score": 0.4543,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.8022,
+          "insider": 0.0,
+          "congress": 0.5,
+          "news": 0.398,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "GOOGL",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 4800000000000.0,
+        "raw_score": 0.4484,
+        "final_score": 0.4484,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.3912,
+          "insider": 0.6743,
+          "congress": 0.5,
+          "news": 0.0918,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      }
+    ],
+    "Healthcare": [
+      {
+        "ticker": "ABBV",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 320000000000.0,
+        "raw_score": 0.5977,
+        "final_score": 0.5977,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.5285,
+          "insider": 0.5641,
+          "congress": 0.5,
+          "news": 1.0,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "UNH",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 520000000000.0,
+        "raw_score": 0.5854,
+        "final_score": 0.5854,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.8569,
+          "insider": 0.3703,
+          "congress": 0.5,
+          "news": 0.602,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "JNJ",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 550000000000.0,
+        "raw_score": 0.5535,
+        "final_score": 0.5535,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.3927,
+          "insider": 0.6636,
+          "congress": 0.5,
+          "news": 0.8061,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      }
+    ],
+    "Information Technology": [
+      {
+        "ticker": "PLTR",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 300000000000.0,
+        "raw_score": 0.7195,
+        "final_score": 0.7195,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.7093,
+          "insider": 1.0,
+          "congress": 0.5,
+          "news": 0.8061,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "AMD",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 220000000000.0,
+        "raw_score": 0.6177,
+        "final_score": 0.6177,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 0.547,
+          "insider": 0.8212,
+          "congress": 0.5,
+          "news": 0.7041,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      },
+      {
+        "ticker": "CRWV",
+        "sector": "Information Technology",
+        "cap_tier": "mid",
+        "market_cap": 5000000000.0,
+        "raw_score": 0.6,
+        "final_score": 0.6,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": false,
+        "form4_count": 0,
+        "factors": {
+          "edgar": 1.0,
+          "insider": 0.0,
+          "congress": 0.5,
+          "news": 1.0,
+          "momentum": 0.5
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {},
+        "news_source": "none",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+        "volume_spike": 1.0
+      }
+    ]
+  }
+}
