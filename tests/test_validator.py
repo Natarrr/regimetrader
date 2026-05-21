@@ -281,9 +281,9 @@ class TestAnomalyDetection:
         return detect_anomalies(rows, run_id=run_id, log_dir=tmp_path), tmp_path
 
     def test_volume_spike_flagged(self):
-        # mean = 5.0, spike = 150 → 30× mean > 10× threshold
-        rows = [_row(f"T{i}", volume_spike=5.0) for i in range(4)]
-        rows.append(_row("SPIKE", volume_spike=150.0))
+        # 19 rows at 1.0, spike at 200 → mean=10.95, threshold=109.5 < 200
+        rows = [_row(f"A{i}", volume_spike=1.0) for i in range(19)]
+        rows.append(_row("SPIKE", volume_spike=200.0))
         records, _ = self._detect(rows)
         assert any(r["ticker"] == "SPIKE" and r["flag"] == "VOLUME_SPIKE" for r in records)
 

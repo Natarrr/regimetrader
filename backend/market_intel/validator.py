@@ -376,7 +376,7 @@ def detect_anomalies(
 
     # ── VOLUME_SPIKE ──────────────────────────────────────────────────────────
     vol_values = [float(r.get("volume_spike") or 0) for r in rows]
-    universe_mean_vol = float(np.median(vol_values)) if vol_values else 0.0
+    universe_mean_vol = float(np.mean(vol_values)) if vol_values else 0.0
     spike_threshold = universe_mean_vol * 10.0
     for row in rows:
         v = float(row.get("volume_spike") or 0)
