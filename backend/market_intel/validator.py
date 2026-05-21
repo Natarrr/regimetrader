@@ -269,3 +269,51 @@ def validate_dates(
 
     all_ok = all(i.code not in ("INVALID_DATE", "FUTURE_DATE", "STALE_SOURCE") for i in issues)
     return (all_ok, issues)
+
+
+# ── validate_raw ──────────────────────────────────────────────────────────────
+
+def validate_raw(
+    rows: List[Dict[str, Any]],
+    source_meta: Dict[str, Dict[str, Any]],
+    failure_threshold: float = 0.20,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[ValidationIssue]]:
+    """Run all Stage 1 validators. Raise PipelineIntegrityError if too many fail.
+
+    Returns (clean_rows, quarantined_rows, all_issues).
+    Raises PipelineIntegrityError with structured summary if failed/total > threshold.
+    """
+    all_issues: List[ValidationIssue] = []
+
+    _, issues_t = validate_tickers(rows)
+    _, issues_a = validate_amounts(rows)
+    _, issues_d = validate_dates(rows, source_meta)
+    all_issues.extend(issues_t)
+    all_issues.extend(issues_a)
+    all_issues.extend(issues_d)
+
+    failed_rows  = [r for r in rows if r.get("_validation_failed")]
+    clean_rows   = [r for r in rows if not r.get("_validation_failed")]
+    total        = len(rows)
+    failed_count = len(failed_rows)
+
+    if total > 0 and (failed_count / total) > failure_threshold:
+        counts: Dict[str, int] = defaultdict(int)
+        for issue in all_issues:
+            if issue.code != "STALE_DATA":
+                counts[issue.code] += 1
+
+        summary_lines = [
+            f"  {code:<20} {count} tickers"
+            for code, count in sorted(counts.items(), key=lambda x: -x[1])
+        ]
+        pct = failed_count / total * 100
+        msg = (
+            f"{failed_count}/{total} tickers failed validation "
+            f"({pct:.1f}% > {failure_threshold * 100:.1f}% threshold)\n"
+            + "\n".join(summary_lines)
+            + "\nAborting pipeline to prevent degenerate top_lists.json."
+        )
+        raise PipelineIntegrityError(msg)
+
+    return (clean_rows, failed_rows, all_issues)

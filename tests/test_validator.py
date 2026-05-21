@@ -235,3 +235,36 @@ class TestValidation:
         assert ok is True
         for row in rows:
             assert row.get("_validation_failed") is not True
+
+    def test_failure_threshold_raises_integrity_error(self):
+        from backend.market_intel.validator import validate_raw
+        # All 5 tickers have zero market_cap → all fail
+        rows = [_row(f"T{i}", market_cap=0.0) for i in range(5)]
+        with pytest.raises(Exception) as exc_info:
+            validate_raw(rows, _source_meta(), failure_threshold=0.20)
+        assert "failed validation" in str(exc_info.value).lower()
+
+    def test_integrity_error_message_contains_summary(self):
+        from backend.market_intel.validator import validate_raw
+        rows = [_row(f"T{i}", market_cap=0.0) for i in range(5)]
+        with pytest.raises(Exception) as exc_info:
+            validate_raw(rows, _source_meta(), failure_threshold=0.20)
+        msg = str(exc_info.value)
+        assert "MISSING_AMOUNT" in msg
+        assert "tickers" in msg.lower()
+
+    def test_below_threshold_continues_on_clean_subset(self):
+        from backend.market_intel.validator import validate_raw
+        rows = [_row("GOOD") for _ in range(4)] + [_row("BAD", market_cap=0.0)]
+        clean, quarantined, issues = validate_raw(rows, _source_meta(), failure_threshold=0.30)
+        assert len(clean) == 4
+        assert len(quarantined) == 1
+        assert quarantined[0]["ticker"] == "BAD"
+
+    def test_all_clean_returns_all_rows(self):
+        from backend.market_intel.validator import validate_raw
+        tickers = ["AAPL", "MSFT", "TSLA", "GOOG", "AMZN"]
+        rows = [_row(ticker) for ticker in tickers]
+        clean, quarantined, issues = validate_raw(rows, _source_meta())
+        assert len(clean) == 5
+        assert quarantined == []
