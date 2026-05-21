@@ -456,6 +456,11 @@ def generate(
         key=score_desc, reverse=True,
     )[:5]
 
+    # Exclude tickers that failed Stage 1 validation — prevents false-positive buy signals
+    top_buys = [r for r in top_buys if not r.get("_validation_failed")]
+    mid_caps = [r for r in mid_caps if not r.get("_validation_failed")]
+    small_caps = [r for r in small_caps if not r.get("_validation_failed")]
+
     kill_switch = current_vix is not None and current_vix >= 30
     top_lists: Dict[str, Any] = {
         "generated_at":    datetime.now(timezone.utc).isoformat(),
