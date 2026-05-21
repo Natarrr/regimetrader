@@ -1,15 +1,15 @@
 """scripts/send_toplists_discord.py
-Send the daily market checkup to Discord via Embed webhook.
+Send the daily market report to Discord via Embed webhook.
 
-Reads logs/top_lists.json (or --input path) and formats a rich Discord
-embed designed for at-a-glance hedge-fund readability:
+Reads logs/top_lists.json (or --input path) and formats a structured
+Discord embed designed as an institutional terminal report:
 
-  ⚡ Snapshot header  — top-3 TL;DR in fixed-width code block
-  🏆 Top Conviction   — #1 pick, full grouped-factor detail
-  📋 Buy List         — ranks 2-5 compact code-block table
-  🏦/🌀/🐷 Factors   — Fundamental · Sentiment · Technical (inline trio)
-  📈/🔬 Cap tiers     — Mid + Small side-by-side
-  🌀/🐷 Satellite    — Cyclicals + Cannibals (when present)
+  [REGIME TRADER] Daily Market Report  — date-stamped title
+  Top Conviction   — top-3 tickers with score + ⚡ signal emoji
+  Fundamentals     — EDGAR / Insider code-block table (inline)
+  Sentiment        — Congress / News code-block table (inline)
+  Mid Caps         — compact opportunities list (when present)
+  Seasonal Cyclicals — satellite seasonal data (when present)
 
 Discord embed limits:
   title:       256 chars
@@ -20,9 +20,9 @@ Discord embed limits:
   total:       6000 chars
 
 Color coding (driven by top conviction pick, not average):
-  GREEN  (#00b37d) — top pick score ≥ 0.70
-  ORANGE (#ff9800) — top pick score 0.50–0.70
-  RED    (#e53935) — top pick score < 0.50  or  kill-switch / stale
+  GREEN  (0x2ecc71) — top pick score ≥ 0.70
+  BLUE   (0x3498db) — top pick score < 0.70  or  no data
+  RED    (0xe53935) — kill-switch active or stale data (>25h)
 
 Retry policy: 3 attempts with 30s / 60s backoff (same as monitoring/).
 
@@ -58,9 +58,11 @@ except ImportError:
 log = logging.getLogger("discord.send_toplists")
 
 # ── Color palette ──────────────────────────────────────────────────────────────
-_COLOR_GREEN  = 0x00B37D   # strong buy universe
-_COLOR_ORANGE = 0xFF9800   # caution
-_COLOR_RED    = 0xE53935   # stress / CRITICAL
+_COLOR_GREEN  = 0x2ECC71   # success — top pick ≥ 0.70
+_COLOR_BLUE   = 0x3498DB   # info — top pick < 0.70
+_COLOR_RED    = 0xE53935   # stress / CRITICAL — kill-switch or stale
+# Legacy aliases used in alert builder
+_COLOR_ORANGE = 0xFF9800
 
 # ── Badge / signal config ──────────────────────────────────────────────────────
 _BADGE_EMOJI = {
@@ -122,22 +124,82 @@ def _truncate(text: str, max_chars: int = 1024) -> str:
 
 
 def _pick_color(top_lists: Dict[str, Any]) -> int:
-    """Color driven by the single highest-conviction pick (top_buys[0])."""
+    """Color driven by the single highest-conviction pick (top_buys[0]).
+
+    0x2ecc71 (Success Green) if top score > 0.70, else 0x3498db (Info Blue).
+    Overridden to RED by callers on kill-switch / stale data.
+    """
     entries = top_lists.get("top_buys") or []
     if not entries:
-        return _COLOR_ORANGE
+        return _COLOR_BLUE
     top_score = float(entries[0].get("final_score", 0))
-    if top_score >= 0.70:
-        return _COLOR_GREEN
-    if top_score >= 0.50:
-        return _COLOR_ORANGE
-    return _COLOR_RED
+    return _COLOR_GREEN if top_score >= 0.70 else _COLOR_BLUE
 
 
 # ── Field builders ─────────────────────────────────────────────────────────────
 
+def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
+    """Top Conviction: top-3 tickers with score and ⚡ signal emoji — non-inline."""
+    lines = []
+    for e in entries[:3]:
+        ticker = e.get("ticker", "?")
+        score  = float(e.get("final_score", 0))
+        badge  = e.get("badge", "WATCHLIST")
+        ceo    = " ⚡" if e.get("ceo_buy") else ""
+        emoji  = _BADGE_EMOJI.get(badge, "⚪")
+        lines.append(f"⚡ **{ticker}**{ceo}  {emoji}  `{score:.4f}`  —  {badge}")
+    return {
+        "name":   "Top Conviction",
+        "value":  _truncate("\n".join(lines) or "—"),
+        "inline": False,
+    }
+
+
+def _fundamentals_field(entries: List[Dict]) -> Dict[str, Any]:
+    """Fundamentals: Factor | Score code-block table — inline."""
+    top = entries[0] if entries else {}
+    factors = top.get("factors", {})
+    rows = ["```", f"{'Factor':<12} Score", "─" * 20]
+    for k in _FUNDAMENTAL:
+        v = factors.get(k)
+        if v is not None:
+            label = _FACTOR_LABEL.get(k, k.upper())
+            rows.append(f"{label:<12} {v:.4f}")
+    rows.append("```")
+    return {
+        "name":   "Fundamentals",
+        "value":  _truncate("\n".join(rows), 1020),
+        "inline": True,
+    }
+
+
+def _sentiment_field(entries: List[Dict]) -> Dict[str, Any]:
+    """Sentiment: Factor | Score code-block table — inline."""
+    top = entries[0] if entries else {}
+    factors = top.get("factors", {})
+    rows = ["```", f"{'Factor':<12} Score", "─" * 20]
+    for k in _SENTIMENT:
+        v = factors.get(k)
+        if v is not None:
+            label = _FACTOR_LABEL.get(k, k.upper())
+            rows.append(f"{label:<12} {v:.4f}")
+    # Also include technical / macro in this table if present (keeps inline pair tight)
+    for k in _TECHNICAL:
+        v = factors.get(k)
+        if v is not None:
+            label = _FACTOR_LABEL.get(k, k.upper())
+            rows.append(f"{label:<12} {v:.4f}")
+    rows.append("```")
+    return {
+        "name":   "Sentiment",
+        "value":  _truncate("\n".join(rows), 1020),
+        "inline": True,
+    }
+
+
+# Keep snapshot/buy-list/factor-inline helpers for backward-compat with tests
 def _snapshot_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Top-3 TL;DR in a fixed-width code block — always the first field."""
+    """Top-3 TL;DR in a fixed-width code block."""
     lines = ["```", f"{'#':<3} {'TICKER':<7} {'SCORE':<8} {'BAR':<10} SIGNAL"]
     lines.append("─" * 42)
     for i, e in enumerate(entries[:3], 1):
@@ -156,7 +218,7 @@ def _snapshot_field(entries: List[Dict]) -> Dict[str, Any]:
 
 
 def _conviction_field(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """Full-detail block for the #1 conviction pick."""
+    """Full-detail block for the #1 conviction pick (used by tests)."""
     ticker  = entry.get("ticker", "?")
     score   = float(entry.get("final_score", 0))
     badge   = entry.get("badge", "WATCHLIST")
@@ -185,7 +247,7 @@ def _conviction_field(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _buy_list_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Ranks 2-5 as a compact fixed-width code block table."""
+    """Ranks 2-5 as a compact fixed-width code block table (used by tests)."""
     rows = ["```", f"{'#':<3} {'TICKER':<7} {'SCORE':<8} {'BAR':<10} SIGNAL"]
     rows.append("─" * 42)
     for i, e in enumerate(entries[1:5], 2):
@@ -204,7 +266,7 @@ def _buy_list_field(entries: List[Dict]) -> Dict[str, Any]:
 
 
 def _factor_inline_fields(entries: List[Dict]) -> List[Dict[str, Any]]:
-    """Three inline fields showing grouped factor scores for top-5 tickers."""
+    """Three inline fields showing grouped factor scores (used by tests)."""
     tickers = [e.get("ticker", "?") for e in entries[:5]]
     header  = "  ".join(f"{t:<6}" for t in tickers)
 
@@ -303,7 +365,7 @@ def _load_satellite(log_dir: Path) -> dict | None:
 def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build the Discord webhook JSON payload with embeds."""
     generated_at = top_lists.get("generated_at", "")
-    run_id       = top_lists.get("source_run_id", "")
+    run_id       = top_lists.get("source_run_id", top_lists.get("run_id", ""))
     ticker_count = top_lists.get("ticker_count", 0)
     weights      = top_lists.get("weights", {})
     top_buys     = top_lists.get("top_buys") or []
@@ -311,13 +373,13 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
     age_h = _data_age_hours(generated_at)
     try:
         ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        date_str = ts.strftime("%Y-%m-%d  %H:%M UTC")
+        date_str = ts.strftime("%B %d, %Y")
     except Exception:
-        date_str = generated_at[:16] or "—"
+        date_str = generated_at[:10] or "—"
 
     color = _pick_color(top_lists)
 
-    # ── Weight string ──────────────────────────────────────────────────────
+    # ── Weight redistribution check ────────────────────────────────────────
     _NOMINAL_WEIGHTS = {
         "edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12,
     }
@@ -325,24 +387,18 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
         abs(weights.get(k, 0) - _NOMINAL_WEIGHTS.get(k, 0)) > 0.001
         for k in _NOMINAL_WEIGHTS
     )
-    if weights:
-        weight_str = "  ·  ".join(f"{k} {v:.0%}" for k, v in weights.items())
-        if weights_redistributed:
-            weight_str += "  ⚠️ _(feed down — redistributed)_"
-    else:
-        weight_str = "default"
 
     # ── VIX line ───────────────────────────────────────────────────────────
     vix_val = top_lists.get("vix")
     vix_str = f"  ·  VIX `{vix_val:.1f}`" if vix_val is not None else ""
 
-    # ── Alerts (stale data / kill-switch) — formatted as hard rule lines ──
+    # ── Alerts (stale data / kill-switch) ─────────────────────────────────
     alerts: List[str] = []
     if age_h is not None and age_h > _STALE_HOURS:
         color = _COLOR_RED
         alerts.append(
-            f"⚠️  **DATA IS {age_h:.0f}h OLD** — pipeline may have failed.  "
-            "Check `edgar_3x` on GitHub Actions."
+            f"⚠️  DATA IS {age_h:.0f}h OLD — pipeline may have failed. "
+            "Check edgar_3x on GitHub Actions."
         )
     kill_switch = top_lists.get("kill_switch", False)
     if kill_switch:
@@ -350,38 +406,39 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
         vix_mult = top_lists.get("vix_multiplier", 1.0)
         vix_note = f"VIX {vix_val:.1f}  ·  " if vix_val is not None else ""
         alerts.append(
-            f"⛔  **MACRO KILL-SWITCH ACTIVE**  —  {vix_note}"
-            f"all scores dampened ×{vix_mult:.2f}.  "
-            "**Do NOT act on HIGH BUY signals.**"
+            f"⛔  MACRO KILL-SWITCH ACTIVE  —  {vix_note}"
+            f"scores dampened ×{vix_mult:.2f}.  Do NOT act on HIGH BUY signals."
         )
 
     alert_block = ("\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)) if alerts else ""
 
+    # ── Description: run metadata ──────────────────────────────────────────
+    feed_note = "  ⚠️ feed down — redistributed" if weights_redistributed else ""
     description = (
-        f"**{ticker_count} tickers scored**{vix_str}  ·  run `{run_id}`\n"
-        f"**Weights:** {weight_str}\n"
-        f"_Large ≥$10B  ·  Mid $2–10B  ·  Small <$2B_"
+        f"**{ticker_count} tickers scored**{vix_str}\n"
+        f"Pipeline: EDGAR-first{feed_note}"
         f"{alert_block}"
     )
 
-    # ── Core fields ────────────────────────────────────────────────────────
+    # ── Fields: Signal → Conviction → Evidence ─────────────────────────────
     fields: List[Dict[str, Any]] = []
 
     if top_buys:
-        fields.append(_snapshot_field(top_buys))
-        fields.append(_conviction_field(top_buys[0]))
-        if len(top_buys) > 1:
-            fields.append(_buy_list_field(top_buys))
-        fields.extend(_factor_inline_fields(top_buys))
+        # 1. Top Conviction — non-inline, sits above everything
+        fields.append(_top_conviction_field(top_buys))
+        # 2. Evidence Matrix — Fundamentals + Sentiment inline side-by-side
+        fields.append(_fundamentals_field(top_buys))
+        fields.append(_sentiment_field(top_buys))
 
-    # ── Cap tier tables (side-by-side) ─────────────────────────────────────
+    # 3. Opportunities — Mid Caps (non-inline for readability on mobile)
     mid_caps   = top_lists.get("mid_caps") or []
     small_caps = top_lists.get("small_caps") or []
-    if mid_caps or small_caps:
-        fields.append(_cap_tier_field("📈  MID CAPS  ($2B–$10B)", mid_caps))
-        fields.append(_cap_tier_field("🔬  SMALL CAPS  (<$2B)",   small_caps))
+    if mid_caps:
+        fields.append(_cap_tier_field("Mid Caps  ($2B–$10B)", mid_caps))
+    if small_caps:
+        fields.append(_cap_tier_field("Small Caps  (<$2B)", small_caps))
 
-    # ── Satellite fields (optional — wrapped so never crashes embed) ───────
+    # 4. Satellite fields (optional)
     try:
         if satellite and isinstance(satellite, dict):
             month_label = satellite.get("month", "")
@@ -398,7 +455,7 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
                     rows.append(f"{i:<3} {c['ticker']:<7} {wr:<7} {med:>7}  {yr}")
                 rows.append("```")
                 fields.append({
-                    "name":   f"🌀  SEASONAL CYCLICALS — {month_label}",
+                    "name":   f"Seasonal Cyclicals — {month_label}",
                     "value":  _truncate("\n".join(rows)),
                     "inline": True,
                 })
@@ -413,7 +470,7 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
                     rows.append(f"{i:<3} {c['ticker']:<7} {yld:<7} {pe:>5}  {pvl}")
                 rows.append("```")
                 fields.append({
-                    "name":   "🐷  SHARE CANNIBALS — Buyback Yield",
+                    "name":   "Share Cannibals — Buyback Yield",
                     "value":  _truncate("\n".join(rows)),
                     "inline": True,
                 })
@@ -421,15 +478,12 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
         log.warning("satellite embed fields skipped due to error: %s", exc)
 
     embed = {
-        "title":       f"📊  Daily Market Checkup  —  {date_str}",
+        "title":       f"[REGIME TRADER] Daily Market Report — {date_str}",
         "description": description,
         "color":       color,
         "fields":      fields,
         "footer":      {
-            "text": (
-                "regime_trader  ·  EDGAR-first pipeline  ·  "
-                "Scores ∈ [0,1]  ·  0.50 = neutral  ·  >0.70 = strong conviction"
-            ),
+            "text": f"Run: {run_id}  |  Pipeline: EDGAR-first  |  Scores: [0,1]",
         },
         "timestamp":   datetime.now(timezone.utc).isoformat(),
     }

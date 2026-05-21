@@ -81,14 +81,12 @@ class TestBuildPayloadSatellite:
         assert not any("CANNIBALS" in n.upper() for n in field_names)
 
     def test_without_satellite_has_core_fields(self):
-        """satellite=None → snapshot, conviction, buy-list, factor group fields present."""
+        """satellite=None → conviction, fundamentals, and sentiment fields present."""
         payload = build_payload(_top_lists(), satellite=None)
         field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert any("SNAPSHOT" in n.upper() for n in field_names)
         assert any("CONVICTION" in n.upper() for n in field_names)
         assert any("FUNDAMENTAL" in n.upper() for n in field_names)
         assert any("SENTIMENT" in n.upper() for n in field_names)
-        assert any("TECHNICAL" in n.upper() for n in field_names)
 
     def test_with_satellite_adds_cyclical_and_cannibal_fields(self):
         """satellite with non-empty lists → cyclical and cannibal fields appear."""
