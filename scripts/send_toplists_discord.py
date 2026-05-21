@@ -139,55 +139,66 @@ def _pick_color(top_lists: Dict[str, Any]) -> int:
 # ── Field builders ─────────────────────────────────────────────────────────────
 
 def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Top Conviction: top-3 tickers with score and ⚡ signal emoji — non-inline."""
+    """Top Conviction: ranked list with score bar — rich markdown, mobile-first.
+
+    Visual hierarchy:
+      Rank medal  TICKER  score (bold)  bar  badge
+    Each pick is a self-contained line, scannable at a glance.
+    """
+    _MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
     lines = []
-    for e in entries[:3]:
+    for i, e in enumerate(entries[:3], 1):
         ticker = e.get("ticker", "?")
         score  = float(e.get("final_score", 0))
         badge  = e.get("badge", "WATCHLIST")
+        bar    = _score_bar(score, width=8)
         ceo    = " ⚡" if e.get("ceo_buy") else ""
-        emoji  = _BADGE_EMOJI.get(badge, "⚪")
-        lines.append(f"⚡ **{ticker}**{ceo}  {emoji}  `{score:.4f}`  —  {badge}")
+        medal  = _MEDAL.get(i, "▪️")
+        lines.append(f"{medal} **{ticker}**{ceo} — `{score:.2f}` `{bar}`")
+        lines.append(f"　　　*{badge}*")
     return {
-        "name":   "Top Conviction",
+        "name":   "📊  Top Conviction",
         "value":  _truncate("\n".join(lines) or "—"),
         "inline": False,
     }
 
 
 def _fundamentals_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Fundamentals: compact Factor | Score block — full-width, mobile-safe."""
+    """Fundamentals: score-bar rows for each factor — scannable on mobile.
+
+    Uses progress bars instead of raw numbers so strength is visible instantly.
+    Raw score shown inline for precision.
+    """
     top = entries[0] if entries else {}
     factors = top.get("factors", {})
-    # Max row width: 9 (label) + 1 + 4 (score) = 14 chars — never wraps on mobile
-    rows = ["```", f"{'Factor':<9} Score", "─" * 16]
+    lines = []
     for k in _FUNDAMENTAL:
         v = factors.get(k)
         if v is not None:
             label = _FACTOR_LABEL.get(k, k.upper())
-            rows.append(f"{label:<9} {v:.4f}")
-    rows.append("```")
+            bar   = _score_bar(v, width=8)
+            lines.append(f"`{label:<8}` {bar} `{v:.2f}`")
     return {
-        "name":   "Fundamentals",
-        "value":  _truncate("\n".join(rows), 1020),
+        "name":   "🏦  Fundamentals",
+        "value":  _truncate("\n".join(lines) or "—", 1020),
         "inline": False,
     }
 
 
 def _sentiment_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Sentiment + Technical: compact Factor | Score block — full-width, mobile-safe."""
+    """Sentiment + Technical: score-bar rows — same visual language as fundamentals."""
     top = entries[0] if entries else {}
     factors = top.get("factors", {})
-    rows = ["```", f"{'Factor':<9} Score", "─" * 16]
+    lines = []
     for k in (*_SENTIMENT, *_TECHNICAL):
         v = factors.get(k)
         if v is not None:
             label = _FACTOR_LABEL.get(k, k.upper())
-            rows.append(f"{label:<9} {v:.4f}")
-    rows.append("```")
+            bar   = _score_bar(v, width=8)
+            lines.append(f"`{label:<8}` {bar} `{v:.2f}`")
     return {
-        "name":   "Sentiment",
-        "value":  _truncate("\n".join(rows), 1020),
+        "name":   "🌐  Sentiment & Macro",
+        "value":  _truncate("\n".join(lines) or "—", 1020),
         "inline": False,
     }
 
@@ -298,19 +309,19 @@ def _factor_inline_fields(entries: List[Dict]) -> List[Dict[str, Any]]:
 
 
 def _cap_tier_field(name: str, entries: List[Dict]) -> Dict[str, Any]:
-    """Compact code-block table for a cap tier — full-width, mobile-safe (<24 chars/row)."""
+    """Cap tier: bar-row list — same visual language as conviction/factor fields."""
     if not entries:
-        return {"name": name, "value": "_No data._", "inline": False}
-    # Row: "1  TICKER  0.7200 ⚡"  = 2+6+7+1 = max ~18 chars
-    rows = ["```", f"{'#':<2} {'TICKER':<6} SCORE", "─" * 18]
+        return {"name": name, "value": "*No picks in this tier today.*", "inline": False}
+    lines = []
     for i, e in enumerate(entries[:5], 1):
-        score = float(e.get("final_score", 0))
-        ceo   = " ⚡" if e.get("ceo_buy") else ""
-        rows.append(f"{i:<2} {e.get('ticker','?'):<6} {score:.4f}{ceo}")
-    rows.append("```")
+        ticker = e.get("ticker", "?")
+        score  = float(e.get("final_score", 0))
+        bar    = _score_bar(score, width=6)
+        ceo    = " ⚡" if e.get("ceo_buy") else ""
+        lines.append(f"`{i}` **{ticker}**{ceo} {bar} `{score:.2f}`")
     return {
         "name":   name,
-        "value":  _truncate("\n".join(rows), 1020),
+        "value":  _truncate("\n".join(lines), 1020),
         "inline": False,
     }
 
@@ -407,11 +418,22 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
 
     alert_block = ("\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)) if alerts else ""
 
-    # ── Description: run metadata ──────────────────────────────────────────
-    feed_note = "  ⚠️ feed down — redistributed" if weights_redistributed else ""
+    # ── Description: at-a-glance summary — most critical info first ───────
+    feed_note = "  ⚠️ *feed down — redistributed*" if weights_redistributed else ""
+    # Top pick summary line for immediate context before scrolling
+    if top_buys:
+        top = top_buys[0]
+        top_ticker = top.get("ticker", "?")
+        top_score  = float(top.get("final_score", 0))
+        top_badge  = top.get("badge", "WATCHLIST")
+        top_bar    = _score_bar(top_score, width=10)
+        signal_line = f"**Top signal:** **{top_ticker}** `{top_score:.2f}` `{top_bar}` — *{top_badge}*\n"
+    else:
+        signal_line = "*No signals today.*\n"
+
     description = (
-        f"**{ticker_count} tickers scored**{vix_str}\n"
-        f"Pipeline: EDGAR-first{feed_note}"
+        f"{signal_line}"
+        f"`{ticker_count} tickers`{vix_str}  ·  EDGAR-first{feed_note}"
         f"{alert_block}"
     )
 
@@ -425,13 +447,13 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
         fields.append(_fundamentals_field(top_buys))
         fields.append(_sentiment_field(top_buys))
 
-    # 3. Opportunities — Mid Caps (non-inline for readability on mobile)
+    # 3. Opportunities — Cap tiers
     mid_caps   = top_lists.get("mid_caps") or []
     small_caps = top_lists.get("small_caps") or []
     if mid_caps:
-        fields.append(_cap_tier_field("Mid Caps  ($2B–$10B)", mid_caps))
+        fields.append(_cap_tier_field("📈  Mid Caps  ($2B–$10B)", mid_caps))
     if small_caps:
-        fields.append(_cap_tier_field("Small Caps  (<$2B)", small_caps))
+        fields.append(_cap_tier_field("🔬  Small Caps  (<$2B)", small_caps))
 
     # 4. Satellite fields (optional)
     try:
@@ -441,32 +463,29 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
             cannibals   = satellite.get("cannibals") or []
 
             if cyclicals:
-                # Row max: "1  TICKER  75%  +3.1%  9" = ~24 chars
-                rows = ["```", f"{'#':<2} {'TKR':<5} {'WIN':<5} {'MED':<7} YRS", "─" * 24]
-                for i, c in enumerate(cyclicals, 1):
+                lines = []
+                for c in cyclicals:
                     wr  = f"{c['win_rate']:.0%}"
                     med = f"{c['median_return']:+.1%}"
                     yr  = c.get("years", "?")
-                    rows.append(f"{i:<2} {c['ticker']:<5} {wr:<5} {med:<7} {yr}")
-                rows.append("```")
+                    bar = _score_bar(c["win_rate"], width=6)
+                    lines.append(f"**{c['ticker']}** {bar} `{wr}` win · `{med}` median · `{yr}y`")
                 fields.append({
-                    "name":   f"Seasonal Cyclicals — {month_label}",
-                    "value":  _truncate("\n".join(rows)),
+                    "name":   f"🌀  Seasonal Cyclicals — {month_label}",
+                    "value":  _truncate("\n".join(lines)),
                     "inline": False,
                 })
 
             if cannibals:
-                # Row max: "1  TICKER  4.8%  18.2  1.18×" = ~26 chars
-                rows = ["```", f"{'#':<2} {'TKR':<5} {'YLD':<5} {'P/E':<5} P/52w", "─" * 26]
-                for i, c in enumerate(cannibals, 1):
+                lines = []
+                for c in cannibals:
                     yld = f"{c.get('buyback_yield', 0):.1%}"
                     pe  = f"{c.get('pe', 0):.1f}"
                     pvl = f"{c.get('price_vs_52w_low', 0):.2f}×"
-                    rows.append(f"{i:<2} {c['ticker']:<5} {yld:<5} {pe:<5} {pvl}")
-                rows.append("```")
+                    lines.append(f"**{c['ticker']}** · `{yld}` buyback · P/E `{pe}` · `{pvl}` vs 52w low")
                 fields.append({
-                    "name":   "Share Cannibals — Buyback Yield",
-                    "value":  _truncate("\n".join(rows)),
+                    "name":   "🐷  Share Cannibals",
+                    "value":  _truncate("\n".join(lines)),
                     "inline": False,
                 })
     except Exception as exc:
