@@ -241,27 +241,39 @@ def _ticker_detail_field(
     anomaly_flags: Optional[List[str]] = None,
     rank_delta: Optional[int] = None,
     buyback_conv: Optional[float] = None,
+    mid_cap: bool = False,
 ) -> Dict[str, Any]:
-    """One embed field per ticker — mobile-first 2-line high-density card.
+    """Unified 4-line ticker card — identical anatomy for Large Cap and Mid Cap.
 
-    Line 1 (Alpha signals):
-      🥇 **TICKER** `score`  🏛 `+boost`  🔄 `+buyback`  🟢+N  *BADGE*  ⚡ CEO  ⚠️
-
-    Line 2 (Factor matrix):
-      📋`0.91`  👤`0.85`  🏛`0.72`  🔄`0.40`  📰`0.65`  🌐`0.55`
+    Line 1: {RANK} {TICKER} — {BADGE} — {SCORE} {BAR10}  [boosts]
+    Line 2: {SECTOR_EMOJI}{SECTOR} · {MARKET_CAP}
+    Line 3: ────────────────────
+    Line 4: 👤{v}  🏛{v}  🔄{v}  📰{v}  🌐{v}
 
     Args:
+        mid_cap:     True → use `N` backtick rank; False → use 🥇🥈🥉 for 1–3.
         rank_delta:  shadow_rank − boosted_rank (positive = promoted by boost).
-        buyback_conv: conviction label from buyback yield (0.40 or 0.80), or None.
+        buyback_conv: conviction boost from buyback yield (0.40 or 0.80), or None.
     """
     ticker  = entry.get("ticker", "?")
     score   = float(entry.get("final_score", 0))
     badge   = entry.get("badge", "WATCHLIST")
     factors = entry.get("factors") or {}
-    medal   = _MEDAL.get(rank, f"`{rank}`")
+    sector  = (entry.get("sector") or "").strip()
+    cap     = entry.get("market_cap", 0)
     boost   = float(entry.get("congress_boost", 0.0))
 
-    # Conviction trend arrow (only when rank moved due to congress boost)
+    # ── Line 1: rank token ────────────────────────────────────────────────
+    if mid_cap:
+        rank_token = f"`{rank}`"
+    else:
+        rank_token = _MEDAL.get(rank, f"`{rank}`")
+
+    # ── Line 1: boost / signal tokens (space-separated, after bar) ───────
+    bar_str      = _score_bar(score, width=10)
+    boost_part   = f"  🏛 `+{boost:.2f}`"        if boost > 0.0              else ""
+    buyback_part = f"  🔄 `+{buyback_conv:.2f}`"  if buyback_conv is not None else ""
+
     if rank_delta is None or rank_delta == 0:
         trend_part = ""
     elif rank_delta > 0:
@@ -269,38 +281,36 @@ def _ticker_detail_field(
     else:
         trend_part = f"  🔴{rank_delta}"
 
-    # Line 1: alpha attribution — everything that drives conviction, above the fold
-    ceo_tag      = "  ⚡ CEO"               if entry.get("ceo_buy")     else ""
-    flag_tag     = "  ⚠️"                   if anomaly_flags             else ""
-    boost_part   = f"  🏛 `+{boost:.2f}`"  if boost > 0.0              else ""
-    buyback_part = f"  🔄 `+{buyback_conv:.2f}`" if buyback_conv is not None else ""
-    badge_part   = f"  *{badge}*"           if badge != "WATCHLIST"     else ""
+    ceo_tag  = "  ⚡CEO" if entry.get("ceo_buy")  else ""
+    flag_tag = "  ⚠️"    if anomaly_flags          else ""
+
     line1 = (
-        f"{medal} **{ticker}** `{score:.2f}`"
-        f"{boost_part}{buyback_part}{trend_part}{badge_part}{ceo_tag}{flag_tag}"
+        f"{rank_token} **{ticker}** — {badge} — `{score:.2f}` {bar_str}"
+        f"{boost_part}{buyback_part}{trend_part}{ceo_tag}{flag_tag}"
     )
 
-    # Line 2: factor matrix — emoji-coded density view
-    # Ordered: EDGAR, Insider, Congress, News, Macro, then Buyback if present
+    # ── Line 2: sector · market cap ───────────────────────────────────────
+    sector_label = _SECTOR_SHORT.get(sector, _SECTOR_MISC) if sector else _SECTOR_MISC
+    cap_str      = f"  ·  {_fmt_cap(cap)}" if cap else ""
+    line2 = f"{sector_label}{cap_str}"
+
+    # ── Line 3: visual separator ──────────────────────────────────────────
+    line3 = "────────────────────"
+
+    # ── Line 4: factor matrix — emoji + raw value ─────────────────────────
     factor_parts = []
-    for key, _label in (
-        ("edgar", ""), ("insider", ""), ("congress", ""),
-        ("news",  ""), ("macro",   ""),
-    ):
+    for key in ("edgar", "insider", "congress", "news", "macro"):
         v = factors.get(key)
         if v is not None:
             factor_parts.append(f"{_FACTOR_EMOJI[key]}`{v:.2f}`")
     if buyback_conv is not None:
         factor_parts.append(f"🔄`{buyback_conv:.2f}`")
-    line2 = "  ".join(factor_parts) if factor_parts else ""
+    line4 = "  ".join(factor_parts) if factor_parts else "—"
 
-    lines = [line1]
-    if line2:
-        lines.append(line2)
-
+    value = _truncate("\n".join([line1, line2, line3, line4]), 1024)
     return {
         "name":   f"#{rank}  {ticker}",
-        "value":  _truncate("\n".join(lines), 1024),
+        "value":  value,
         "inline": False,
     }
 
@@ -764,8 +774,34 @@ def run_tests() -> int:
     except Exception:
         failures.append(f"FAIL [vix_regime]: {traceback.format_exc()}")
 
+    # ── Test 8: ticker card anatomy — 4 lines, separator, unified format ──────
+    try:
+        tl  = _base_tl(top_buys=[_entry("AAPL", score=0.87)])
+        payload = build_payload(tl)
+        fields  = payload["embeds"][0]["fields"]
+        card = next((f for f in fields if f["name"].startswith("#")), None)
+        val  = card["value"] if card else ""
+        _check("card_has_separator",  "────────────────────" in val, f"val={val!r}")
+        _check("card_has_score_bar",  "▓" in val or "░" in val,     f"val={val!r}")
+        _check("card_has_factor_emoji","👤" in val,                  f"val={val!r}")
+        lines = val.split("\n")
+        _check("card_four_lines", len(lines) == 4, f"lines={lines}")
+    except Exception:
+        failures.append(f"FAIL [card_anatomy]: {traceback.format_exc()}")
+
+    # ── Test 9: mid_cap=True uses backtick rank, not medal ────────────────────
+    try:
+        entry  = _entry("CRDO", score=0.74)
+        field  = _ticker_detail_field(1, entry, mid_cap=True)
+        _check("midcap_rank_backtick", "`1`" in field["value"],
+               f"val={field['value']!r}")
+        _check("midcap_no_medal", "🥇" not in field["value"],
+               f"val={field['value']!r}")
+    except Exception:
+        failures.append(f"FAIL [midcap_rank]: {traceback.format_exc()}")
+
     # ── Report ────────────────────────────────────────────────────────────
-    total_tests = 12   # approximate assertion count above
+    total_tests = 16   # approximate assertion count above
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
