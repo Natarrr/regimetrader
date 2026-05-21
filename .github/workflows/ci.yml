@@ -189,3 +189,39 @@ jobs:
           echo "|-------|------|" >> $GITHUB_STEP_SUMMARY
           echo "| Core + Regime + Analysis | \`tests/\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Backend quant models | \`backend/tests/\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ── 4. Stress test — Stage 1 gate rejects 100% toxic dataset ─────────────────
+  stress-test:
+    name: Stage-1 Gate Stress Test
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Run stress test — toxic dataset must exit 1
+        env:
+          CI: "true"
+        run: |
+          pytest tests/test_stress_pipeline.py -v --tb=short --timeout=30
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Stress Test" >> $GITHUB_STEP_SUMMARY
+          echo "Verified: PipelineIntegrityError raised and exit code=1 on 100% toxic dataset." >> $GITHUB_STEP_SUMMARY
