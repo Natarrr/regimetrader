@@ -138,37 +138,90 @@ def _pick_color(top_lists: Dict[str, Any]) -> int:
 
 # ── Field builders ─────────────────────────────────────────────────────────────
 
-def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Top Conviction: ranked list with score bar — rich markdown, mobile-first.
+_MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
+_ALL_FACTORS = (
+    ("edgar",    "📋 EDGAR"),
+    ("insider",  "👤 Insider"),
+    ("congress", "🏛 Congress"),
+    ("news",     "📰 News"),
+    ("macro",    "🌐 Macro"),
+)
+_CAP_TIER_LABEL = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}
 
-    Visual hierarchy:
-      Rank medal  TICKER  score (bold)  bar  badge
-    Each pick is a self-contained line, scannable at a glance.
+
+def _ticker_detail_field(rank: int, entry: Dict[str, Any]) -> Dict[str, Any]:
+    """One embed field per ticker — full breakdown for mobile scroll.
+
+    Layout (per field):
+      🥇 AAPL ⚡  —  HIGH BUY  —  `0.83`  ▓▓▓▓▓▓▓░
+      Technology  ·  $3.2T  ·  Large cap
+      ─────────────────
+      📋 EDGAR     ▓▓▓▓▓▓▓░  0.91
+      👤 Insider   ▓▓▓▓▓▓░░  0.85
+      🏛 Congress  ▓▓▓▓▓░░░  0.72
+      📰 News      ▓▓▓▓░░░░  0.65
+      🌐 Macro     ▓▓▓░░░░░  0.55
     """
-    _MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
+    ticker  = entry.get("ticker", "?")
+    score   = float(entry.get("final_score", 0))
+    badge   = entry.get("badge", "WATCHLIST")
+    factors = entry.get("factors") or {}
+    sector  = entry.get("sector", "")
+    cap     = entry.get("market_cap", 0)
+    tier    = _CAP_TIER_LABEL.get(entry.get("cap_tier", ""), "")
+    ceo     = " ⚡" if entry.get("ceo_buy") else ""
+    medal   = _MEDAL.get(rank, "▪️")
+    bar     = _score_bar(score, width=8)
+
+    # Meta line: sector · market cap · cap tier
+    meta_parts = [p for p in (sector, _fmt_cap(cap) if cap else "", tier) if p]
+    meta = "  ·  ".join(meta_parts)
+
+    lines = [
+        f"{medal} **{ticker}**{ceo}  —  *{badge}*  —  `{score:.2f}`  `{bar}`",
+        f"*{meta}*" if meta else "",
+        "─" * 20,
+    ]
+
+    for key, label in _ALL_FACTORS:
+        v = factors.get(key)
+        if v is not None:
+            fbar = _score_bar(v, width=8)
+            lines.append(f"{label:<14} `{fbar}` `{v:.2f}`")
+
+    # Remove empty lines (meta can be blank)
+    value = "\n".join(line for line in lines if line != "")
+    return {
+        "name":   f"#{rank}  {ticker}",
+        "value":  _truncate(value, 1024),
+        "inline": False,
+    }
+
+
+def _ticker_fields(entries: List[Dict]) -> List[Dict[str, Any]]:
+    """Return one detail field per top buy (up to 5)."""
+    return [_ticker_detail_field(i, e) for i, e in enumerate(entries[:5], 1)]
+
+
+def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
+    """Compact header field listing all picks at a glance — sits above detail fields."""
     lines = []
-    for i, e in enumerate(entries[:3], 1):
+    for i, e in enumerate(entries[:5], 1):
         ticker = e.get("ticker", "?")
         score  = float(e.get("final_score", 0))
         badge  = e.get("badge", "WATCHLIST")
-        bar    = _score_bar(score, width=8)
         ceo    = " ⚡" if e.get("ceo_buy") else ""
-        medal  = _MEDAL.get(i, "▪️")
-        lines.append(f"{medal} **{ticker}**{ceo} — `{score:.2f}` `{bar}`")
-        lines.append(f"　　　*{badge}*")
+        medal  = _MEDAL.get(i, f"`{i}`")
+        lines.append(f"{medal} **{ticker}**{ceo}  `{score:.2f}`  *{badge}*")
     return {
-        "name":   "📊  Top Conviction",
+        "name":   "📊  Today's Picks",
         "value":  _truncate("\n".join(lines) or "—"),
         "inline": False,
     }
 
 
 def _fundamentals_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Fundamentals: score-bar rows for each factor — scannable on mobile.
-
-    Uses progress bars instead of raw numbers so strength is visible instantly.
-    Raw score shown inline for precision.
-    """
+    """Kept for test compatibility — not used in build_payload."""
     top = entries[0] if entries else {}
     factors = top.get("factors", {})
     lines = []
@@ -186,7 +239,7 @@ def _fundamentals_field(entries: List[Dict]) -> Dict[str, Any]:
 
 
 def _sentiment_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Sentiment + Technical: score-bar rows — same visual language as fundamentals."""
+    """Kept for test compatibility — not used in build_payload."""
     top = entries[0] if entries else {}
     factors = top.get("factors", {})
     lines = []
@@ -441,11 +494,10 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
     fields: List[Dict[str, Any]] = []
 
     if top_buys:
-        # 1. Top Conviction — non-inline, sits above everything
+        # 1. At-a-glance summary of all picks
         fields.append(_top_conviction_field(top_buys))
-        # 2. Evidence Matrix — Fundamentals + Sentiment inline side-by-side
-        fields.append(_fundamentals_field(top_buys))
-        fields.append(_sentiment_field(top_buys))
+        # 2. One detail field per ticker — full factor breakdown
+        fields.extend(_ticker_fields(top_buys))
 
     # 3. Opportunities — Cap tiers
     mid_caps   = top_lists.get("mid_caps") or []
