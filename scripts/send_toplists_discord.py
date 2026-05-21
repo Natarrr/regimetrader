@@ -233,6 +233,29 @@ def _sector_heatmap(top_buys: List[Dict]) -> str:
     return "  |  ".join(parts)
 
 
+def _sector_heatmap_structured(
+    entries: List[Dict],
+) -> Dict[str, List[tuple]]:
+    """Return {sector_label: [(ticker, score), ...]} sorted by descending score.
+
+    At most 2 tickers per sector. Combines Large Cap + Mid Cap entries.
+    Unknown/missing sectors fall back to _SECTOR_MISC.
+    """
+    buckets: Dict[str, List[tuple]] = {}
+    for e in entries:
+        raw    = (e.get("sector") or "").strip()
+        label  = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
+        ticker = e.get("ticker", "?")
+        score  = float(e.get("final_score", 0))
+        buckets.setdefault(label, []).append((ticker, score))
+
+    # Sort each bucket by descending score, keep top 2
+    return {
+        lbl: sorted(pairs, key=lambda x: -x[1])[:2]
+        for lbl, pairs in buckets.items()
+    }
+
+
 # ── Field builders ─────────────────────────────────────────────────────────────
 
 def _ticker_detail_field(
@@ -800,8 +823,31 @@ def run_tests() -> int:
     except Exception:
         failures.append(f"FAIL [midcap_rank]: {traceback.format_exc()}")
 
+    # ── Test 10: structured heatmap — top-2 tickers per sector ───────────────
+    try:
+        entries = [
+            _entry("AAPL", sector="Information Technology", score=0.87),
+            _entry("MSFT", sector="Information Technology", score=0.81),
+            _entry("NVDA", sector="Information Technology", score=0.79),
+            _entry("JPM",  sector="Financials",             score=0.68),
+        ]
+        result = _sector_heatmap_structured(entries)
+        tech   = result.get("🖥️ Tech", [])
+        fin    = result.get("🏛️ Fin",  [])
+        _check("heatmap_struct_tech_count",  len(tech) == 2,
+               f"tech={tech}")
+        _check("heatmap_struct_tech_ticker", tech[0][0] == "AAPL",
+               f"tech={tech}")
+        _check("heatmap_struct_fin_count",   len(fin) == 1,
+               f"fin={fin}")
+        _check("heatmap_struct_sorted_desc",
+               tech[0][1] >= tech[1][1],
+               f"tech scores out of order: {tech}")
+    except Exception:
+        failures.append(f"FAIL [heatmap_structured]: {traceback.format_exc()}")
+
     # ── Report ────────────────────────────────────────────────────────────
-    total_tests = 16   # approximate assertion count above
+    total_tests = 20   # approximate assertion count above
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
