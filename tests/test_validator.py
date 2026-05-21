@@ -150,13 +150,13 @@ class TestValidation:
         assert ok is False
         assert row.get("_validation_failed") is True
 
-    def test_zero_insider_usd_sets_nan_and_fails(self):
+    def test_zero_insider_usd_is_valid(self):
+        # 0.0 means "no purchases" — valid signal, not a data error
         from backend.market_intel.validator import validate_amounts
         row = _row(insider_usd=0.0)
         ok, issues = validate_amounts([row])
-        assert ok is False
-        assert math.isnan(row["insider_usd"])
-        assert row.get("_validation_failed") is True
+        assert ok is True
+        assert row.get("_validation_failed") is not True
 
     def test_negative_market_cap_sets_nan_and_fails(self):
         from backend.market_intel.validator import validate_amounts

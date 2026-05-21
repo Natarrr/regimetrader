@@ -41,16 +41,9 @@ import numpy as np
 
 from regime_trader.scoring.normalize import normalize_score
 from regime_trader.utils.io import save_json_atomic
+from backend.market_intel.validator import detect_anomalies, PipelineIntegrityError  # noqa: F401 (re-exported)
 
 log = logging.getLogger("generate_top_lists")
-
-
-class PipelineIntegrityError(RuntimeError):
-    """Raised when too few tickers pass the schema gate to produce a valid ranking.
-
-    Prevents top_lists.json from being written with a near-empty or degenerate
-    universe, which would cause the Discord bot to send misleading signals.
-    """
 
 
 WEIGHTS: Dict[str, float] = {
@@ -483,6 +476,15 @@ def generate(
             current_vix,
             top_lists["vix_multiplier"],
         )
+
+    # Stage 2: anomaly circuit breakers on scored universe.
+    # Runs on the raw results rows (carry volume_spike, insider_usd, market_cap,
+    # cap_tier, news_score, _stale_data) — writes anomaly_report_latest.json when
+    # anomalies are found, writes nothing when the universe is clean.
+    try:
+        detect_anomalies(results, run_id=run_id, log_dir=log_dir)
+    except Exception as exc:
+        log.warning("Stage 2 anomaly detection failed (non-fatal): %s", exc)
 
     out_json = log_dir / "top_lists.json"
     save_json_atomic(out_json, top_lists)

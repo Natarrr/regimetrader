@@ -36,6 +36,7 @@ if str(ROOT) not in sys.path:
 
 from regime_trader.utils.io import save_json_atomic  # noqa: E402
 from regime_trader.services.quiver_client import QuiverClient as _QuiverClient  # noqa: E402
+from backend.market_intel.validator import validate_raw  # noqa: E402
 
 log = logging.getLogger("run_pipeline")
 
@@ -1273,18 +1274,55 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     congress_count = len(congress_data)
     duration      = round(time.time() - t0, 2)
 
+    # ── Stage 1 gate: stamp computed_at + run validate_raw ────────────────────
+    # Stamp a row-level timestamp on every result so validate_dates() has a
+    # per-row anchor.  Rows already carrying computed_at are left unchanged.
+    pipeline_run_ts = datetime.now(timezone.utc).isoformat()
+    for row in results:
+        if "computed_at" not in row:
+            row["computed_at"] = pipeline_run_ts
+
+    # Build source_meta from the live run timestamps so validate_dates() can
+    # check whether Quiver/Finnhub/EDGAR feeds are stale at source level.
+    source_meta: Dict[str, Dict[str, Any]] = {
+        "quiver":   {"last_updated": pipeline_run_ts},
+        "finnhub":  {"last_updated": pipeline_run_ts},
+        "edgar":    {"last_updated": pipeline_run_ts},
+        "none":     {"last_updated": pipeline_run_ts},
+    }
+
+    try:
+        clean_rows, quarantined_rows, val_issues = validate_raw(results, source_meta)
+        quarantine_count = len(quarantined_rows)
+        if quarantine_count:
+            log.warning(
+                "Stage 1 gate: %d/%d tickers quarantined — %s",
+                quarantine_count,
+                len(results),
+                ", ".join({i.code for i in val_issues if i.code != "STALE_DATA"}),
+            )
+        else:
+            log.info("Stage 1 gate: all %d tickers passed validation", len(results))
+    except Exception as exc:
+        # PipelineIntegrityError or unexpected — log but do not swallow; re-raise
+        log.error("Stage 1 gate FAILED: %s", exc)
+        raise
+
     status = {
         "_edgar_meta": {
-            "last_run":             datetime.now(timezone.utc).isoformat(),
+            "last_run":             pipeline_run_ts,
             "run_duration_seconds": duration,
             "ticker_count":         len(tickers),
             "edgar_count":          edgar_count,
             "fmp_count":            fmp_count,
             "congress_count":       congress_count,
             "error_count":          errors,
+            "quarantine_count":     quarantine_count,
         },
-        "weights": WEIGHTS,
-        "results": results,
+        "source_meta":   source_meta,
+        "weights":       WEIGHTS,
+        "results":       results,   # all rows (clean + quarantined with _validation_failed flag)
+        "computed_at":   pipeline_run_ts,
     }
 
     out = log_dir / "intel_source_status.json"

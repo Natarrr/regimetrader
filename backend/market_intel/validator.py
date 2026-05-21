@@ -21,13 +21,22 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
-from backend.market_intel.generate_top_lists import PipelineIntegrityError
 from regime_trader.scoring.normalize import (
     normalize_score,
     winsorize as _winsorize_np,
 )
 
 log = logging.getLogger("validator")
+
+
+class PipelineIntegrityError(RuntimeError):
+    """Raised when too many tickers fail Stage 1 validation.
+
+    Defined here (validator.py) to avoid a circular import with
+    generate_top_lists.py, which imports detect_anomalies from this module.
+    Re-exported from generate_top_lists for backward compatibility.
+    """
+
 
 # ── Tier ceilings for log_scale_insider ───────────────────────────────────────
 _TIER_CEILING: Dict[str, float] = {
@@ -136,11 +145,11 @@ def validate_tickers(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationI
 
 # ── validate_amounts ──────────────────────────────────────────────────────────
 
-_AMOUNT_FIELDS = ("insider_usd", "market_cap")
-
-
 def validate_amounts(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationIssue]]:
-    """Check insider_usd and market_cap are positive finite numbers.
+    """Check market_cap is positive finite; insider_usd is finite and non-negative.
+
+    market_cap <= 0 or None → MISSING_AMOUNT quarantine (ratio math breaks).
+    insider_usd == 0 is valid ("no purchases") — only NaN/None/Inf are bad.
 
     Invalid values are set to float("nan") in-place.
     Row is tagged _validation_failed=True on any failure.
@@ -149,25 +158,47 @@ def validate_amounts(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationI
     issues: List[ValidationIssue] = []
     for row in rows:
         ticker = row.get("ticker", "?")
-        for field in _AMOUNT_FIELDS:
-            val = row.get(field)
-            bad = False
-            if val is None:
-                bad = True
-            else:
-                try:
-                    fval = float(val)
-                    if math.isnan(fval) or math.isinf(fval) or fval <= 0:
-                        bad = True
-                except (TypeError, ValueError):
-                    bad = True
-            if bad:
-                row[field] = float("nan")
-                row["_validation_failed"] = True
-                issues.append(ValidationIssue(
-                    ticker=ticker, field=field,
-                    code="MISSING_AMOUNT", original_value=val,
-                ))
+
+        # market_cap: must be strictly positive — cannot score without it
+        cap_val = row.get("market_cap")
+        cap_bad = False
+        if cap_val is None:
+            cap_bad = True
+        else:
+            try:
+                cap_f = float(cap_val)
+                if math.isnan(cap_f) or math.isinf(cap_f) or cap_f <= 0:
+                    cap_bad = True
+            except (TypeError, ValueError):
+                cap_bad = True
+        if cap_bad:
+            row["market_cap"] = float("nan")
+            row["_validation_failed"] = True
+            issues.append(ValidationIssue(
+                ticker=ticker, field="market_cap",
+                code="MISSING_AMOUNT", original_value=cap_val,
+            ))
+
+        # insider_usd: 0.0 is valid ("no purchases"); only NaN/None/Inf are bad
+        usd_val = row.get("insider_usd")
+        usd_bad = False
+        if usd_val is None:
+            usd_bad = True
+        else:
+            try:
+                usd_f = float(usd_val)
+                if math.isnan(usd_f) or math.isinf(usd_f):
+                    usd_bad = True
+            except (TypeError, ValueError):
+                usd_bad = True
+        if usd_bad:
+            row["insider_usd"] = float("nan")
+            row["_validation_failed"] = True
+            issues.append(ValidationIssue(
+                ticker=ticker, field="insider_usd",
+                code="MISSING_AMOUNT", original_value=usd_val,
+            ))
+
     return (len(issues) == 0, issues)
 
 
@@ -240,6 +271,12 @@ def validate_dates(
             continue  # no need to check individual timestamps
 
         ts_str = row.get("computed_at")
+        if not ts_str:
+            # Row-level timestamp absent — fall back to the source's last_updated
+            # so a provider omitting computed_at is treated as "potentially stale"
+            # rather than immediately quarantined with INVALID_DATE.
+            row_source_name = row.get("insider_source", "")
+            ts_str = source_meta.get(row_source_name, {}).get("last_updated")
         dt = _parse_dt(ts_str)
 
         if dt is None:
