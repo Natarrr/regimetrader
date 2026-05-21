@@ -449,7 +449,6 @@ def build_payload(
     """
     generated_at = top_lists.get("generated_at", "")
     run_id       = top_lists.get("source_run_id", top_lists.get("run_id", ""))
-    ticker_count = top_lists.get("ticker_count", 0)
     weights      = top_lists.get("weights", {})
     top_buys     = top_lists.get("top_buys") or []
 
@@ -468,14 +467,9 @@ def build_payload(
 
     # ── Market Regime Sentinel (VIX → macro context, line 2 of description) ─
     vix_val = top_lists.get("vix")
-    vix_str = f"  ·  {get_market_regime(float(vix_val))}" if vix_val is not None else ""
-
-    # ── Congress boost active? ─────────────────────────────────────────────
-    congress_boost_on = any(float(e.get("congress_boost", 0.0)) > 0.0 for e in top_buys)
 
     # ── Anomaly map — normalised early, shared by color + counts ──────────
     anomaly_map = anomaly_map or {}
-    anomaly_count = len(set(anomaly_map.keys()) & {e.get("ticker") for e in top_buys})
 
     # ── Kill-switch ────────────────────────────────────────────────────────
     kill_switch = top_lists.get("kill_switch", False)
@@ -486,17 +480,10 @@ def build_payload(
     if age_h is not None and age_h > _STALE_HOURS:
         color = _COLOR_RED
 
-    # ── Data-Gap Indicator — footer annotation for missing/lagging sources ─
+    # ── Data-Gap Indicator — feed-down detection for alerts ──────────────
     _KNOWN_SOURCES = {"edgar", "insider", "congress", "news", "momentum"}
     present_sources = set(weights.keys()) if weights else set()
     missing_sources = sorted(_KNOWN_SOURCES - present_sources) if present_sources else []
-    lagging_sources: List[str] = []
-    if weights_redistributed and not missing_sources:
-        lagging_sources = sorted(
-            (k for k in _NOMINAL_WEIGHTS if abs(weights.get(k, 0) - _NOMINAL_WEIGHTS[k]) > 0.05),
-            key=lambda k: abs(weights.get(k, 0) - _NOMINAL_WEIGHTS[k]),
-            reverse=True,
-        )[:2]
 
     # ── Buyback lookup: in-flight join of satellite.cannibals[] onto top_buys
     # satellite_insights.json is optional — graceful degradation on absence.
@@ -590,8 +577,7 @@ def build_payload(
         fields.extend(_ticker_fields(top_buys, max_n=5, budget=1900, is_mid_cap=False))
 
     # ── Mid Cap section ───────────────────────────────────────────────────
-    mid_caps   = top_lists.get("mid_caps")   or []
-    small_caps = top_lists.get("small_caps") or []
+    mid_caps = top_lists.get("mid_caps") or []
 
     if mid_caps:
         fields.append({
