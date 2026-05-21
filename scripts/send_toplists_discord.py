@@ -149,7 +149,11 @@ _ALL_FACTORS = (
 _CAP_TIER_LABEL = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}
 
 
-def _ticker_detail_field(rank: int, entry: Dict[str, Any]) -> Dict[str, Any]:
+def _ticker_detail_field(
+    rank: int,
+    entry: Dict[str, Any],
+    anomaly_flags: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """One embed field per ticker — full breakdown for mobile scroll.
 
     Layout (per field):
@@ -177,8 +181,9 @@ def _ticker_detail_field(rank: int, entry: Dict[str, Any]) -> Dict[str, Any]:
     meta_parts = [p for p in (sector, _fmt_cap(cap) if cap else "", tier) if p]
     meta = "  ·  ".join(meta_parts)
 
+    flag_tag = "  ⚠️" if anomaly_flags else ""
     lines = [
-        f"{medal} **{ticker}**{ceo}  —  *{badge}*  —  `{score:.2f}`  `{bar}`",
+        f"{medal} **{ticker}**{ceo}{flag_tag}  —  *{badge}*  —  `{score:.2f}`  `{bar}`",
         f"*{meta}*" if meta else "",
         "─" * 20,
     ]
@@ -198,9 +203,16 @@ def _ticker_detail_field(rank: int, entry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _ticker_fields(entries: List[Dict]) -> List[Dict[str, Any]]:
+def _ticker_fields(
+    entries: List[Dict],
+    anomaly_map: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
     """Return one detail field per top buy (up to 5)."""
-    return [_ticker_detail_field(i, e) for i, e in enumerate(entries[:5], 1)]
+    anomaly_map = anomaly_map or {}
+    return [
+        _ticker_detail_field(i, e, anomaly_flags=anomaly_map.get(e.get("ticker", "")))
+        for i, e in enumerate(entries[:5], 1)
+    ]
 
 
 def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
@@ -421,7 +433,37 @@ def _load_satellite(log_dir: Path) -> dict | None:
         return None
 
 
-def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
+    """Load anomaly_report_latest.json. Returns {ticker: [flags]} dict.
+
+    Returns empty dict on any failure — anomaly display is best-effort.
+    """
+    path = log_dir / "anomaly_report_latest.json"
+    if not path.exists():
+        return {}
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            return {}
+        result: Dict[str, List[str]] = {}
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            ticker = rec.get("ticker", "")
+            flag   = rec.get("flag", "")
+            if ticker and flag and ticker != "__SOURCE__":
+                result.setdefault(ticker, []).append(flag)
+        return result
+    except Exception as exc:
+        log.warning("anomaly_report_latest.json unreadable: %s", exc)
+        return {}
+
+
+def build_payload(
+    top_lists: Dict[str, Any],
+    satellite: Optional[Dict[str, Any]] = None,
+    anomaly_map: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, Any]:
     """Build the Discord webhook JSON payload with embeds."""
     generated_at = top_lists.get("generated_at", "")
     run_id       = top_lists.get("source_run_id", top_lists.get("run_id", ""))
@@ -468,6 +510,10 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
             f"⛔  MACRO KILL-SWITCH ACTIVE  —  {vix_note}"
             f"scores dampened ×{vix_mult:.2f}.  Do NOT act on HIGH BUY signals."
         )
+    if anomaly_map:
+        stale_flags = [flag for flags in anomaly_map.values() for flag in flags if flag == "STALE_SOURCE"]
+        if stale_flags:
+            alerts.append("⚠️  STALE DATA SOURCE detected — scores may be unreliable. Check anomaly_report_latest.json.")
 
     alert_block = ("\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)) if alerts else ""
 
@@ -497,7 +543,7 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
         # 1. At-a-glance summary of all picks
         fields.append(_top_conviction_field(top_buys))
         # 2. One detail field per ticker — full factor breakdown
-        fields.extend(_ticker_fields(top_buys))
+        fields.extend(_ticker_fields(top_buys, anomaly_map=anomaly_map))
 
     # 3. Opportunities — Cap tiers
     mid_caps   = top_lists.get("mid_caps") or []
@@ -697,8 +743,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     # ── Build and send ─────────────────────────────────────────────────────────
-    satellite = _load_satellite(args.log_dir)
-    payload   = build_payload(top_lists, satellite=satellite)
+    satellite   = _load_satellite(args.log_dir)
+    anomaly_map = _load_anomaly_report(args.log_dir)
+    payload     = build_payload(top_lists, satellite=satellite, anomaly_map=anomaly_map)
 
     if args.dry_run:
         out = json.dumps(payload, indent=2, ensure_ascii=False)
