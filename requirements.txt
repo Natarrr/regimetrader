@@ -45,7 +45,7 @@ sentence-transformers>=2.6.0 # Fallback embeddings (no API key needed)
 # vectorbt>=0.26.0           # Uncomment for GPU-accelerated backtesting
 
 # ── Claude / Anthropic SDK ────────────────────────────────────────────────────
-anthropic>=0.28.0            # Claude API (intelligence engine + RAG rationale)
+anthropic>=0.28.0,<2.0.0     # Claude API (intelligence engine + RAG rationale)
 
 # ── The Laureate Engine — Backend ─────────────────────────────────────────────
 arch>=6.3.0                  # GJR-GARCH (Engle 2003 Nobel) — Module B
