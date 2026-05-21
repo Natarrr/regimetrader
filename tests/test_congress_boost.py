@@ -227,3 +227,83 @@ class TestShadowScore:
 
         for entry in result["top_buys"]:
             assert "congress_boost" in entry
+
+
+# ── TestPromotedLog ───────────────────────────────────────────────────────────
+
+class TestPromotedLog:
+
+    def _make_entry(self, ticker: str, final_score: float, boost: float = 0.0) -> Dict[str, Any]:
+        return {
+            "ticker":         ticker,
+            "final_score":    final_score,
+            "congress_boost": boost,
+        }
+
+    def _call(self, top_buys, shadow_top_buys, tmp_path, run_id="r1"):
+        from backend.market_intel.generate_top_lists import _log_promoted
+        _log_promoted(top_buys, shadow_top_buys, tmp_path, run_id)
+
+    def test_boost_history_written_when_promoted(self, tmp_path):
+        top_buys    = [self._make_entry("NVDA", 0.77, boost=0.10)]
+        shadow      = [self._make_entry("AAPL", 0.75), self._make_entry("MSFT", 0.72)]
+        self._call(top_buys, shadow, tmp_path)
+        assert (tmp_path / "boost_history.log").exists()
+
+    def test_boost_history_not_written_when_no_promoted(self, tmp_path):
+        # congress_boost=0.0 on all entries → no write
+        top_buys = [self._make_entry("AAPL", 0.75, boost=0.0)]
+        shadow   = [self._make_entry("AAPL", 0.75)]
+        self._call(top_buys, shadow, tmp_path)
+        assert not (tmp_path / "boost_history.log").exists()
+
+    def test_boost_history_record_schema(self, tmp_path):
+        top_buys = [self._make_entry("NVDA", 0.77, boost=0.10)]
+        shadow   = [self._make_entry("MSFT", 0.75)]
+        self._call(top_buys, shadow, tmp_path, run_id="schema-test")
+        line = (tmp_path / "boost_history.log").read_text().strip()
+        record = json.loads(line)
+        for key in ("run_id", "timestamp", "ticker", "shadow_rank",
+                    "boosted_rank", "score_delta", "congress_boost"):
+            assert key in record, f"missing key {key}"
+
+    def test_boost_history_appends_not_overwrites(self, tmp_path):
+        top_buys = [self._make_entry("NVDA", 0.77, boost=0.10)]
+        shadow   = [self._make_entry("MSFT", 0.75)]
+        self._call(top_buys, shadow, tmp_path, run_id="run1")
+        self._call(top_buys, shadow, tmp_path, run_id="run2")
+        lines = [l for l in (tmp_path / "boost_history.log").read_text().splitlines() if l]
+        assert len(lines) == 2, "each run must append a new line, not overwrite"
+
+    def test_shadow_rank_correct_when_ticker_was_in_shadow(self, tmp_path):
+        # NVDA was rank 3 in shadow, boost moves it to rank 1
+        shadow   = [
+            self._make_entry("AAPL", 0.80),
+            self._make_entry("MSFT", 0.78),
+            self._make_entry("NVDA", 0.70),
+        ]
+        top_buys = [
+            self._make_entry("NVDA", 0.77, boost=0.10),
+            self._make_entry("AAPL", 0.80),
+            self._make_entry("MSFT", 0.78),
+        ]
+        self._call(top_buys, shadow, tmp_path)
+        record = json.loads((tmp_path / "boost_history.log").read_text().strip())
+        assert record["ticker"] == "NVDA"
+        assert record["shadow_rank"] == 3
+        assert record["boosted_rank"] == 1
+
+    def test_shadow_rank_none_when_ticker_entered_from_outside(self, tmp_path):
+        # AMD was not in shadow top-5, boost brings it in
+        shadow   = [self._make_entry("AAPL", 0.80), self._make_entry("MSFT", 0.78)]
+        top_buys = [self._make_entry("AMD", 0.77, boost=0.10)]
+        self._call(top_buys, shadow, tmp_path)
+        record = json.loads((tmp_path / "boost_history.log").read_text().strip())
+        assert record["shadow_rank"] is None
+
+    def test_score_delta_positive_for_boosted_ticker(self, tmp_path):
+        shadow   = [self._make_entry("NVDA", 0.70)]
+        top_buys = [self._make_entry("NVDA", 0.77, boost=0.10)]
+        self._call(top_buys, shadow, tmp_path)
+        record = json.loads((tmp_path / "boost_history.log").read_text().strip())
+        assert record["score_delta"] > 0

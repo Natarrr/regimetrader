@@ -406,6 +406,77 @@ def _apply_congress_boost(
     return entries
 
 
+def _log_promoted(
+    top_buys: List[Dict[str, Any]],
+    shadow_top_buys: List[Dict[str, Any]],
+    log_dir: Path,
+    run_id: str,
+) -> None:
+    """Append one JSON line per promoted ticker to boost_history.log.
+
+    A ticker is "promoted" when it appears in top_buys but not in
+    shadow_top_buys — meaning the Congress boost moved it into the top-5.
+
+    Each line contains:
+      run_id, timestamp, ticker, shadow_rank (1-based, None if absent),
+      boosted_rank (1-based), score_delta (boosted - shadow), congress_boost.
+
+    Designed for append-only accumulation: after 3 months, a single
+    `jq -r '...'` pass produces the full promotion history for backtesting.
+    Never raises — log failures are silently swallowed.
+    """
+    shadow_index: Dict[str, int] = {e["ticker"]: i + 1 for i, e in enumerate(shadow_top_buys)}
+    shadow_scores: Dict[str, float] = {e["ticker"]: e["final_score"] for e in shadow_top_buys}
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    lines: List[str] = []
+    for boosted_rank, entry in enumerate(top_buys, 1):
+        ticker = entry["ticker"]
+        boost = entry.get("congress_boost", 0.0)
+        if boost <= 0.0:
+            continue
+
+        shadow_rank = shadow_index.get(ticker)
+        # score_delta: how much the boost moved the final_score
+        score_delta = round(boost * entry["final_score"] / (1.0 + boost), 4) if boost > 0 else 0.0
+        # if ticker was already in shadow top_buys, delta is boosted - shadow score
+        if ticker in shadow_scores:
+            score_delta = round(entry["final_score"] - shadow_scores[ticker], 4)
+
+        record = {
+            "run_id":        run_id,
+            "timestamp":     now_str,
+            "ticker":        ticker,
+            "shadow_rank":   shadow_rank,
+            "boosted_rank":  boosted_rank,
+            "score_delta":   score_delta,
+            "congress_boost": round(boost, 4),
+        }
+
+        if shadow_rank is not None:
+            msg = (
+                f"Ticker {ticker} promoted from rank {shadow_rank} to rank {boosted_rank}. "
+                f"Delta: +{score_delta:.4f} score (Congress Boost: +{boost:.2f})"
+            )
+        else:
+            msg = (
+                f"Ticker {ticker} entered top_buys at rank {boosted_rank} via Congress boost. "
+                f"Delta: +{score_delta:.4f} score (Congress Boost: +{boost:.2f})"
+            )
+        log.info(msg)
+        lines.append(json.dumps(record, separators=(",", ":")))
+
+    if not lines:
+        return
+
+    history_path = Path(log_dir) / "boost_history.log"
+    try:
+        with history_path.open("a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except Exception as exc:
+        log.warning("Could not write boost_history.log: %s", exc)
+
+
 def _sector_picks(entries: List[Dict[str, Any]], n: int = 3) -> Dict[str, List[Dict[str, Any]]]:
     """Select top n tickers per target sector, ranked by final_score descending."""
     result: Dict[str, List[Dict[str, Any]]] = {}
@@ -545,15 +616,7 @@ def generate(
 
     kill_switch = current_vix is not None and current_vix >= 30
 
-    # Detect promoted tickers (present in top_buys but not in shadow_top_buys)
-    shadow_tickers = {e["ticker"] for e in shadow_top_buys}
-    boosted_tickers = {e["ticker"] for e in top_buys}
-    promoted = boosted_tickers - shadow_tickers
-    if promoted:
-        log.info(
-            "Congress boost promoted %d ticker(s) into top_buys: %s",
-            len(promoted), ", ".join(sorted(promoted)),
-        )
+    _log_promoted(top_buys, shadow_top_buys, log_dir, run_id)
 
     top_lists: Dict[str, Any] = {
         "generated_at":    datetime.now(timezone.utc).isoformat(),
