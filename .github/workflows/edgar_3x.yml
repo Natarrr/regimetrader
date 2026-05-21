@@ -85,7 +85,7 @@ jobs:
           for ATTEMPT in 1 2 3; do
             echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
             START=$(date +%s)
-            if python scripts/run_pipeline.py \
+            if timeout 55m python scripts/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
               --max-workers  4 \
               --log-dir      "$LOG_DIR" \
@@ -137,6 +137,24 @@ jobs:
             --verbose \
             $FORCE
 
+      # ── 6b. Gate — validate top_lists.json before Discord fires ─────────────
+      - name: Validate top_lists.json
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+          p = Path("logs/top_lists.json")
+          if not p.exists():
+              print("::error::top_lists.json was not written — pipeline failed silently")
+              sys.exit(1)
+          d = json.loads(p.read_text())
+          if not d.get("top_buys"):
+              print("::error::top_lists.json exists but top_buys is empty")
+              sys.exit(1)
+          count = d.get("ticker_count", 0)
+          print(f"Validated: {len(d['top_buys'])} top buys, {count} tickers scored")
+          EOF
+
       # ── 7. Generate satellite insights ──────────────────────────────────────
       - name: Generate satellite insights
         continue-on-error: true
@@ -168,13 +186,16 @@ jobs:
             echo '|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json
-          with open("logs/top_lists.json") as f:
-              d = json.load(f)
-          for i, t in enumerate(d.get('top_buys', [])[:5], 1):
-              f = t.get('factors', {})
-              print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | {t['badge']} | "
-                    f"{f.get('edgar', 0):.2f} | {f.get('insider', 0):.2f} | "
-                    f"{f.get('congress', 0):.2f} | {f.get('news', 0):.2f} | {f.get('momentum', 0):.2f} |")
+          try:
+              with open("logs/top_lists.json") as f:
+                  d = json.load(f)
+              for i, t in enumerate(d.get('top_buys', [])[:5], 1):
+                  fac = t.get('factors', {})
+                  print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | {t['badge']} | "
+                        f"{fac.get('edgar', 0):.2f} | {fac.get('insider', 0):.2f} | "
+                        f"{fac.get('congress', 0):.2f} | {fac.get('news', 0):.2f} | {fac.get('momentum', 0):.2f} |")
+          except Exception as e:
+              print(f"| — | _summary unavailable: {e}_ | | | | | | | |")
           EOF
           else
             echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
