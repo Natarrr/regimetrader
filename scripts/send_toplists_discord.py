@@ -656,15 +656,7 @@ def build_payload(
             "inline": False,
         })
 
-    # ── Footer: latency · coverage (data-gap) · mode ──────────────────────
-    latency_part = f"Latency: {pipeline_latency_s:.0f}s  |  " if pipeline_latency_s is not None else ""
-    coverage_pct = f"{min(100, round(ticker_count / 1.6))}%" if ticker_count else "—"
-    if missing_sources:
-        gap_note = f" (No: {', '.join(s.upper() for s in missing_sources)})"
-    elif lagging_sources:
-        gap_note = f" (Lag: {', '.join(s.upper() for s in lagging_sources)})"
-    else:
-        gap_note = ""
+    # ── Footer ────────────────────────────────────────────────────────────
     footer_text = f"Run: {run_id}  |  Pipeline: {pipeline_nm}"
 
     embed = {
