@@ -268,3 +268,79 @@ class TestValidation:
         clean, quarantined, issues = validate_raw(rows, _source_meta())
         assert len(clean) == 5
         assert quarantined == []
+
+
+# ── TestAnomalyDetection ───────────────────────────────────────────────────────
+
+class TestAnomalyDetection:
+    def _detect(self, rows, run_id="test-run", tmp_path=None):
+        from backend.market_intel.validator import detect_anomalies
+        if tmp_path is None:
+            import tempfile, pathlib
+            tmp_path = pathlib.Path(tempfile.mkdtemp())
+        return detect_anomalies(rows, run_id=run_id, log_dir=tmp_path), tmp_path
+
+    def test_volume_spike_flagged(self):
+        # mean = 5.0, spike = 150 → 30× mean > 10× threshold
+        rows = [_row(f"T{i}", volume_spike=5.0) for i in range(4)]
+        rows.append(_row("SPIKE", volume_spike=150.0))
+        records, _ = self._detect(rows)
+        assert any(r["ticker"] == "SPIKE" and r["flag"] == "VOLUME_SPIKE" for r in records)
+
+    def test_volume_below_threshold_not_flagged(self):
+        rows = [_row(f"T{i}", volume_spike=5.0) for i in range(5)]
+        records, _ = self._detect(rows)
+        assert not any(r["flag"] == "VOLUME_SPIKE" for r in records)
+
+    def test_insider_cap_limit_large(self):
+        # 0.9% > 0.5% large ceiling
+        cap = 1e12
+        row = _row("BA", insider_usd=cap * 0.009, market_cap=cap, cap_tier="large")
+        records, _ = self._detect([row])
+        assert any(r["ticker"] == "BA" and r["flag"] == "INSIDER_CAP_LIMIT" for r in records)
+
+    def test_insider_cap_limit_small_not_triggered(self):
+        # 0.9% < 2.0% small ceiling → no flag
+        cap = 50_000_000.0
+        row = _row("SMALL", insider_usd=cap * 0.009, market_cap=cap, cap_tier="small")
+        records, _ = self._detect([row])
+        assert not any(r["ticker"] == "SMALL" and r["flag"] == "INSIDER_CAP_LIMIT" for r in records)
+
+    def test_sentiment_extreme_high(self):
+        row = _row("HYPE", news_score=0.97)
+        records, _ = self._detect([row])
+        assert any(r["ticker"] == "HYPE" and r["flag"] == "SENTIMENT_EXTREME" for r in records)
+
+    def test_sentiment_extreme_low(self):
+        row = _row("DOOM", news_score=0.02)
+        records, _ = self._detect([row])
+        assert any(r["ticker"] == "DOOM" and r["flag"] == "SENTIMENT_EXTREME" for r in records)
+
+    def test_normal_sentiment_not_flagged(self):
+        row = _row("NORM", news_score=0.65)
+        records, _ = self._detect([row])
+        assert not any(r["flag"] == "SENTIMENT_EXTREME" for r in records)
+
+    def test_anomaly_report_written_to_disk(self, tmp_path):
+        rows = [_row("BA", insider_usd=1e12 * 0.009, market_cap=1e12, cap_tier="large")]
+        records, _ = self._detect(rows, run_id="r123", tmp_path=tmp_path)
+        assert (tmp_path / "anomaly_report_r123.json").exists()
+
+    def test_anomaly_report_latest_written(self, tmp_path):
+        rows = [_row("BA", insider_usd=1e12 * 0.009, market_cap=1e12, cap_tier="large")]
+        self._detect(rows, run_id="r456", tmp_path=tmp_path)
+        assert (tmp_path / "anomaly_report_latest.json").exists()
+
+    def test_anomaly_report_schema_valid(self, tmp_path):
+        rows = [_row("BA", insider_usd=1e12 * 0.009, market_cap=1e12, cap_tier="large")]
+        records, _ = self._detect(rows, run_id="r789", tmp_path=tmp_path)
+        for record in records:
+            for key in ("run_id", "ticker", "timestamp", "flag", "value", "threshold", "action", "source"):
+                assert key in record, f"missing key {key} in {record}"
+
+    def test_no_file_written_when_no_anomalies(self, tmp_path):
+        rows = [_row(f"T{i}") for i in range(3)]
+        records, _ = self._detect(rows, run_id="clean", tmp_path=tmp_path)
+        assert records == []
+        assert not (tmp_path / "anomaly_report_clean.json").exists()
+        assert not (tmp_path / "anomaly_report_latest.json").exists()

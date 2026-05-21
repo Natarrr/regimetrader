@@ -317,3 +317,133 @@ def validate_raw(
         raise PipelineIntegrityError(msg)
 
     return (clean_rows, failed_rows, all_issues)
+
+
+# ── AnomalyRecord + detect_anomalies ──────────────────────────────────────────
+
+def _write_atomic(path: Path, data: Any) -> None:
+    """Write JSON atomically using os.replace() — safe for concurrent readers."""
+    payload = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def detect_anomalies(
+    rows: List[Dict[str, Any]],
+    run_id: str,
+    log_dir: Path,
+) -> List[Dict[str, Any]]:
+    """Stage 2 circuit breakers — run after normalization, before final ranking.
+
+    Checks:
+      VOLUME_SPIKE       — volume_spike > 10× universe mean
+      INSIDER_CAP_LIMIT  — insider_usd / market_cap > tier ceiling
+      SENTIMENT_EXTREME  — news_score > 0.95 or < 0.05
+      STALE_DATA         — _stale_data flag set by validate_dates (flag_only)
+
+    Writes anomaly_report_{run_id}.json and anomaly_report_latest.json.
+    Returns list of AnomalyRecord dicts (empty = no anomalies, no file written).
+    """
+    now_str = datetime.now(timezone.utc).isoformat()
+    records: List[Dict[str, Any]] = []
+
+    def _record(ticker: str, flag: str, value: float, threshold: float,
+                action: str, source: str = "") -> Dict[str, Any]:
+        return {
+            "run_id":    run_id,
+            "ticker":    ticker,
+            "timestamp": now_str,
+            "flag":      flag,
+            "value":     round(value, 6),
+            "threshold": round(threshold, 6),
+            "action":    action,
+            "source":    source,
+        }
+
+    # ── VOLUME_SPIKE ──────────────────────────────────────────────────────────
+    vol_values = [float(r.get("volume_spike") or 0) for r in rows]
+    universe_mean_vol = float(np.median(vol_values)) if vol_values else 0.0
+    spike_threshold = universe_mean_vol * 10.0
+    for row in rows:
+        v = float(row.get("volume_spike") or 0)
+        if universe_mean_vol > 0 and v > spike_threshold:
+            records.append(_record(
+                row.get("ticker", "?"), "VOLUME_SPIKE",
+                value=v, threshold=spike_threshold, action="flag_only",
+                source=row.get("insider_source", ""),
+            ))
+
+    # ── INSIDER_CAP_LIMIT ─────────────────────────────────────────────────────
+    for row in rows:
+        usd = row.get("insider_usd")
+        cap = row.get("market_cap")
+        tier = row.get("cap_tier", "large")
+        if not usd or not cap:
+            continue
+        try:
+            usd_f = float(usd)
+            cap_f = float(cap)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(usd_f) or math.isnan(cap_f) or cap_f <= 0:
+            continue
+        ceiling = _TIER_CEILING.get(tier, _TIER_CEILING["large"])
+        ratio = usd_f / cap_f
+        if ratio > ceiling:
+            records.append(_record(
+                row.get("ticker", "?"), "INSIDER_CAP_LIMIT",
+                value=ratio, threshold=ceiling, action="flag_only",
+                source=row.get("insider_source", ""),
+            ))
+
+    # ── SENTIMENT_EXTREME ─────────────────────────────────────────────────────
+    for row in rows:
+        ns = row.get("news_score")
+        if ns is None:
+            continue
+        v = float(ns)
+        if v > 0.95:
+            records.append(_record(
+                row.get("ticker", "?"), "SENTIMENT_EXTREME",
+                value=v, threshold=0.95, action="flag_only",
+            ))
+        elif v < 0.05:
+            records.append(_record(
+                row.get("ticker", "?"), "SENTIMENT_EXTREME",
+                value=v, threshold=0.05, action="flag_only",
+            ))
+
+    # ── STALE_DATA (propagate flag from validate_dates) ───────────────────────
+    for row in rows:
+        if row.get("_stale_data"):
+            records.append(_record(
+                row.get("ticker", "?"), "STALE_DATA",
+                value=0.0, threshold=0.0, action="flag_only",
+                source=row.get("insider_source", ""),
+            ))
+
+    if not records:
+        return []
+
+    # ── Write audit files ──────────────────────────────────────────────────────
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _write_atomic(log_dir / f"anomaly_report_{run_id}.json", records)
+    _write_atomic(log_dir / "anomaly_report_latest.json", records)
+
+    log.info("detect_anomalies: %d anomaly record(s) written for run %s", len(records), run_id)
+    return records
