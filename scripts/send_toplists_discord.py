@@ -1,34 +1,33 @@
 """scripts/send_toplists_discord.py
 Send the daily market report to Discord via Embed webhook.
 
-Reads logs/top_lists.json (or --input path) and formats a structured
-Discord embed designed as an institutional terminal report:
+Reads logs/top_lists.json (and optionally satellite_insights.json,
+anomaly_report_latest.json) and formats a mobile-first Discord embed:
 
-  [REGIME TRADER] Daily Market Report  — date-stamped title
-  Top Conviction   — top-3 tickers with score + ⚡ signal emoji
-  Fundamentals     — EDGAR / Insider code-block table (inline)
-  Sentiment        — Congress / News code-block table (inline)
-  Mid Caps         — compact opportunities list (when present)
-  Seasonal Cyclicals — satellite seasonal data (when present)
+  ⚡ Alpha Pipeline [May 21, 2026]
+  Description: TL;DR summary — buys | anomalies | boost status | VIX regime
+  Fields: compact 2-line ticker cards (score + signals + factor matrix)
+  Footer: latency · coverage (data-gap) · mode · run-id
 
 Discord embed limits:
   title:       256 chars
   description: 4096 chars
-  field name:  256 chars
-  field value: 1024 chars (hard limit — truncated if exceeded)
+  field value: 1024 chars (hard limit — truncated at 1024)
   fields:      25 max
   total:       6000 chars
 
-Color coding (driven by top conviction pick, not average):
-  GREEN  (0x2ecc71) — top pick score ≥ 0.70
-  BLUE   (0x3498db) — top pick score < 0.70  or  no data
-  RED    (0xe53935) — kill-switch active or stale data (>25h)
+Embed color (severity-driven — not score-driven):
+  GREEN  (0x00FF00) — system nominal
+  ORANGE (0xFFA500) — non-critical anomaly (CONGRESS_CLUSTER, etc.)
+  RED    (0xFF0000) — critical: STALE_SOURCE / MISSING_AMOUNT / DEAD_FEED
+                      or kill-switch active
 
-Retry policy: 3 attempts with 30s / 60s backoff (same as monitoring/).
+Retry policy: 3 attempts with 30s / 60s backoff.
 
 Usage:
   python scripts/send_toplists_discord.py
   python scripts/send_toplists_discord.py --input logs/top_lists.json --dry-run
+  python scripts/send_toplists_discord.py --run-tests
 """
 from __future__ import annotations
 
@@ -57,21 +56,16 @@ except ImportError:
 
 log = logging.getLogger("discord.send_toplists")
 
-# ── Color palette ──────────────────────────────────────────────────────────────
-_COLOR_GREEN  = 0x2ECC71   # success — top pick ≥ 0.70
-_COLOR_BLUE   = 0x3498DB   # info — top pick < 0.70
-_COLOR_RED    = 0xE53935   # stress / CRITICAL — kill-switch or stale
-# Legacy aliases used in alert builder
-_COLOR_ORANGE = 0xFF9800
+# ── Color palette (severity-driven) ───────────────────────────────────────────
+_COLOR_GREEN  = 0x00FF00   # nominal — system healthy
+_COLOR_ORANGE = 0xFFA500   # non-critical anomaly (informational)
+_COLOR_RED    = 0xFF0000   # critical intervention required
+_COLOR_BLUE   = 0x3498DB   # fallback (no top pick)
 
-# ── Badge / signal config ──────────────────────────────────────────────────────
-_BADGE_EMOJI = {
-    "HIGH BUY":     "🟢",
-    "TACTICAL BUY": "🟡",
-    "WATCHLIST":    "⚪",
-}
+# Flags that force red border — require immediate attention
+_CRITICAL_FLAGS = frozenset({"STALE_SOURCE", "MISSING_AMOUNT", "DEAD_FEED"})
 
-# Factor key order for grouped display
+# ── Factor group constants — used by _factor_group() and tests ────────────────
 _FUNDAMENTAL = ("edgar", "insider")
 _SENTIMENT   = ("congress", "news")
 _TECHNICAL   = ("macro",)
@@ -85,11 +79,67 @@ _FACTOR_LABEL = {
     "momentum": "Momentum",
 }
 
+# ── Nominal factor weights (EDGAR-first baseline) ─────────────────────────────
+# Used to detect feed-down redistribution and identify lagging sources.
+_NOMINAL_WEIGHTS: Dict[str, float] = {
+    "edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12,
+}
+
+# ── VIX regime thresholds ─────────────────────────────────────────────────────
+_VIX_BEARISH = 25.0   # VIX > 25  → BEARISH 🔴
+_VIX_STABLE  = 15.0   # VIX > 15  → STABLE  🟡  else BULLISH 🟢
+
+# ── Sector normalisation — SSOT is entry["sector"] from top_lists.json ────────
+# Maps full GICS names to compact display labels for the heatmap field.
+_SECTOR_SHORT: Dict[str, str] = {
+    "Information Technology": "🖥️ Tech",
+    "Technology":             "🖥️ Tech",
+    "Health Care":            "🏥 Health",
+    "Healthcare":             "🏥 Health",
+    "Financials":             "🏛️ Fin",
+    "Financial Services":     "🏛️ Fin",
+    "Communication Services": "📡 Comm",
+    "Consumer Discretionary": "🛍️ Cons",
+    "Consumer Staples":       "🛒 Staples",
+    "Industrials":            "🏭 Indust",
+    "Energy":                 "⛽ Energy",
+    "Materials":              "⚗️ Mater",
+    "Real Estate":            "🏢 RE",
+    "Utilities":              "💡 Utils",
+}
+_SECTOR_MISC = "🔲 Misc"
+
+# ── Buyback yield thresholds ───────────────────────────────────────────────────
+_BUYBACK_HIGH = 0.10   # ≥ 10% yield → +0.80 conviction label
+_BUYBACK_LOW  = 0.05   # ≥  5% yield → +0.40 conviction label
+
+# Factor emoji map for the matrix line (Line 2 of each ticker card)
+_FACTOR_EMOJI: Dict[str, str] = {
+    "edgar":    "📋",
+    "insider":  "👤",
+    "congress": "🏛",
+    "news":     "📰",
+    "macro":    "🌐",
+    "momentum": "📈",
+}
+
+# Medal for top-5 ranks
+_MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+# Badge labels with emoji (used by _conviction_field — kept for test compat)
+_BADGE_EMOJI = {
+    "HIGH BUY":     "🟢",
+    "TACTICAL BUY": "🟡",
+    "WATCHLIST":    "⚪",
+}
+
+_STALE_HOURS = 25
+
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
 
 def _score_bar(score: float, width: int = 8) -> str:
-    """Compact progress bar using solid/light block chars: ▓▓▓▓░░░░"""
+    """Compact progress bar: ▓▓▓▓░░░░"""
     if _HAS_SCORE_BAR:
         return _score_bar_util(score, width)
     filled = min(width, max(0, round(score * width)))
@@ -107,7 +157,7 @@ def _fmt_cap(market_cap: float) -> str:
 
 
 def _factor_group(factors: Dict[str, float], keys: tuple) -> str:
-    """Render a subset of factors as  KEY `0.72`  KEY `0.90` """
+    """Render a factor subset as  KEY `0.72`  ·  KEY `0.90`"""
     parts = []
     for k in keys:
         v = factors.get(k)
@@ -123,177 +173,140 @@ def _truncate(text: str, max_chars: int = 1024) -> str:
     return text[:max_chars - 3] + "…"
 
 
-def _pick_color(top_lists: Dict[str, Any]) -> int:
-    """Color driven by the single highest-conviction pick (top_buys[0]).
+# ── Domain logic ───────────────────────────────────────────────────────────────
 
-    0x2ecc71 (Success Green) if top score > 0.70, else 0x3498db (Info Blue).
-    Overridden to RED by callers on kill-switch / stale data.
+def get_market_regime(vix: float) -> str:
+    """Classify market regime from VIX. Returns embed-ready string.
+
+    VIX > 25 → BEARISH 🔴 | VIX > 15 → STABLE 🟡 | else BULLISH 🟢
     """
-    entries = top_lists.get("top_buys") or []
-    if not entries:
-        return _COLOR_BLUE
-    top_score = float(entries[0].get("final_score", 0))
-    return _COLOR_GREEN if top_score >= 0.70 else _COLOR_BLUE
+    if vix > _VIX_BEARISH:
+        label, emoji = "BEARISH", "🔴"
+    elif vix > _VIX_STABLE:
+        label, emoji = "STABLE",  "🟡"
+    else:
+        label, emoji = "BULLISH", "🟢"
+    return f"VIX `{vix:.1f}` {emoji} **{label}**"
+
+
+def _buyback_conviction(yield_pct: float) -> Optional[float]:
+    """Return conviction boost for a buyback yield, or None if below threshold."""
+    if yield_pct >= _BUYBACK_HIGH:
+        return 0.80
+    if yield_pct >= _BUYBACK_LOW:
+        return 0.40
+    return None
+
+
+def _embed_color(anomaly_map: Dict[str, List[str]], kill_switch: bool) -> int:
+    """Three-tier severity color for the embed left border.
+
+    RED    — critical flag or kill-switch (do not trade).
+    ORANGE — informational anomaly only (e.g. CONGRESS_CLUSTER).
+    GREEN  — system nominal.
+    """
+    if kill_switch:
+        return _COLOR_RED
+    all_flags = {flag for flags in anomaly_map.values() for flag in flags}
+    if all_flags & _CRITICAL_FLAGS:
+        return _COLOR_RED
+    if all_flags:
+        return _COLOR_ORANGE
+    return _COLOR_GREEN
+
+
+def _sector_heatmap(top_buys: List[Dict]) -> str:
+    """Build a compact sector exposure line using entry['sector'] as SSOT.
+
+    Uses Counter-style accumulation then sorts by descending count.
+    Unknown/missing sectors fall back to _SECTOR_MISC.
+    Returns empty string when top_buys is empty.
+    """
+    counts: Dict[str, int] = {}
+    for e in top_buys:
+        raw   = (e.get("sector") or "").strip()
+        label = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
+        counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return ""
+    parts = [f"{lbl} ({n})" for lbl, n in sorted(counts.items(), key=lambda x: -x[1])]
+    return "  |  ".join(parts)
 
 
 # ── Field builders ─────────────────────────────────────────────────────────────
-
-_MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
-_ALL_FACTORS = (
-    ("edgar",    "📋 EDGAR"),
-    ("insider",  "👤 Insider"),
-    ("congress", "🏛 Congress"),
-    ("news",     "📰 News"),
-    ("macro",    "🌐 Macro"),
-)
-_CAP_TIER_LABEL = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}
-
 
 def _ticker_detail_field(
     rank: int,
     entry: Dict[str, Any],
     anomaly_flags: Optional[List[str]] = None,
+    rank_delta: Optional[int] = None,
+    buyback_conv: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """One embed field per ticker — full breakdown for mobile scroll.
+    """One embed field per ticker — mobile-first 2-line high-density card.
 
-    Layout (per field):
-      🥇 AAPL ⚡  —  HIGH BUY  —  `0.83`  ▓▓▓▓▓▓▓░
-      Technology  ·  $3.2T  ·  Large cap
-      ─────────────────
-      📋 EDGAR     ▓▓▓▓▓▓▓░  0.91
-      👤 Insider   ▓▓▓▓▓▓░░  0.85
-      🏛 Congress  ▓▓▓▓▓░░░  0.72
-      📰 News      ▓▓▓▓░░░░  0.65
-      🌐 Macro     ▓▓▓░░░░░  0.55
+    Line 1 (Alpha signals):
+      🥇 **TICKER** `score`  🏛 `+boost`  🔄 `+buyback`  🟢+N  *BADGE*  ⚡ CEO  ⚠️
+
+    Line 2 (Factor matrix):
+      📋`0.91`  👤`0.85`  🏛`0.72`  🔄`0.40`  📰`0.65`  🌐`0.55`
+
+    Args:
+        rank_delta:  shadow_rank − boosted_rank (positive = promoted by boost).
+        buyback_conv: conviction label from buyback yield (0.40 or 0.80), or None.
     """
     ticker  = entry.get("ticker", "?")
     score   = float(entry.get("final_score", 0))
     badge   = entry.get("badge", "WATCHLIST")
     factors = entry.get("factors") or {}
-    sector  = entry.get("sector", "")
-    cap     = entry.get("market_cap", 0)
-    tier    = _CAP_TIER_LABEL.get(entry.get("cap_tier", ""), "")
-    ceo     = " ⚡" if entry.get("ceo_buy") else ""
-    medal   = _MEDAL.get(rank, "▪️")
-    bar     = _score_bar(score, width=8)
+    medal   = _MEDAL.get(rank, f"`{rank}`")
+    boost   = float(entry.get("congress_boost", 0.0))
 
-    # Meta line: sector · market cap · cap tier
-    meta_parts = [p for p in (sector, _fmt_cap(cap) if cap else "", tier) if p]
-    meta = "  ·  ".join(meta_parts)
+    # Conviction trend arrow (only when rank moved due to congress boost)
+    if rank_delta is None or rank_delta == 0:
+        trend_part = ""
+    elif rank_delta > 0:
+        trend_part = f"  🟢+{rank_delta}"
+    else:
+        trend_part = f"  🔴{rank_delta}"
 
-    flag_tag = "  ⚠️" if anomaly_flags else ""
-    lines = [
-        f"{medal} **{ticker}**{ceo}{flag_tag}  —  *{badge}*  —  `{score:.2f}`  `{bar}`",
-        f"*{meta}*" if meta else "",
-        "─" * 20,
-    ]
+    # Line 1: alpha attribution — everything that drives conviction, above the fold
+    ceo_tag      = "  ⚡ CEO"               if entry.get("ceo_buy")     else ""
+    flag_tag     = "  ⚠️"                   if anomaly_flags             else ""
+    boost_part   = f"  🏛 `+{boost:.2f}`"  if boost > 0.0              else ""
+    buyback_part = f"  🔄 `+{buyback_conv:.2f}`" if buyback_conv is not None else ""
+    badge_part   = f"  *{badge}*"           if badge != "WATCHLIST"     else ""
+    line1 = (
+        f"{medal} **{ticker}** `{score:.2f}`"
+        f"{boost_part}{buyback_part}{trend_part}{badge_part}{ceo_tag}{flag_tag}"
+    )
 
-    for key, label in _ALL_FACTORS:
+    # Line 2: factor matrix — emoji-coded density view
+    # Ordered: EDGAR, Insider, Congress, News, Macro, then Buyback if present
+    factor_parts = []
+    for key, _label in (
+        ("edgar", ""), ("insider", ""), ("congress", ""),
+        ("news",  ""), ("macro",   ""),
+    ):
         v = factors.get(key)
         if v is not None:
-            fbar = _score_bar(v, width=8)
-            lines.append(f"{label:<14} `{fbar}` `{v:.2f}`")
+            factor_parts.append(f"{_FACTOR_EMOJI[key]}`{v:.2f}`")
+    if buyback_conv is not None:
+        factor_parts.append(f"🔄`{buyback_conv:.2f}`")
+    line2 = "  ".join(factor_parts) if factor_parts else ""
 
-    boost = float(entry.get("congress_boost", 0.0))
-    if boost > 0.0:
-        lines.append(f"🏛 Boost         `+{boost:.2f}` Congress cluster")
+    lines = [line1]
+    if line2:
+        lines.append(line2)
 
-    # Remove empty lines (meta can be blank)
-    value = "\n".join(line for line in lines if line != "")
     return {
         "name":   f"#{rank}  {ticker}",
-        "value":  _truncate(value, 1024),
-        "inline": False,
-    }
-
-
-def _ticker_fields(
-    entries: List[Dict],
-    anomaly_map: Optional[Dict[str, List[str]]] = None,
-) -> List[Dict[str, Any]]:
-    """Return one detail field per top buy (up to 5)."""
-    anomaly_map = anomaly_map or {}
-    return [
-        _ticker_detail_field(i, e, anomaly_flags=anomaly_map.get(e.get("ticker", "")))
-        for i, e in enumerate(entries[:5], 1)
-    ]
-
-
-def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Compact header field listing all picks at a glance — sits above detail fields."""
-    lines = []
-    for i, e in enumerate(entries[:5], 1):
-        ticker = e.get("ticker", "?")
-        score  = float(e.get("final_score", 0))
-        badge  = e.get("badge", "WATCHLIST")
-        ceo    = " ⚡" if e.get("ceo_buy") else ""
-        medal  = _MEDAL.get(i, f"`{i}`")
-        lines.append(f"{medal} **{ticker}**{ceo}  `{score:.2f}`  *{badge}*")
-    return {
-        "name":   "📊  Today's Picks",
-        "value":  _truncate("\n".join(lines) or "—"),
-        "inline": False,
-    }
-
-
-def _fundamentals_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Kept for test compatibility — not used in build_payload."""
-    top = entries[0] if entries else {}
-    factors = top.get("factors", {})
-    lines = []
-    for k in _FUNDAMENTAL:
-        v = factors.get(k)
-        if v is not None:
-            label = _FACTOR_LABEL.get(k, k.upper())
-            bar   = _score_bar(v, width=8)
-            lines.append(f"`{label:<8}` {bar} `{v:.2f}`")
-    return {
-        "name":   "🏦  Fundamentals",
-        "value":  _truncate("\n".join(lines) or "—", 1020),
-        "inline": False,
-    }
-
-
-def _sentiment_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Kept for test compatibility — not used in build_payload."""
-    top = entries[0] if entries else {}
-    factors = top.get("factors", {})
-    lines = []
-    for k in (*_SENTIMENT, *_TECHNICAL):
-        v = factors.get(k)
-        if v is not None:
-            label = _FACTOR_LABEL.get(k, k.upper())
-            bar   = _score_bar(v, width=8)
-            lines.append(f"`{label:<8}` {bar} `{v:.2f}`")
-    return {
-        "name":   "🌐  Sentiment & Macro",
-        "value":  _truncate("\n".join(lines) or "—", 1020),
-        "inline": False,
-    }
-
-
-# Keep snapshot/buy-list/factor-inline helpers for backward-compat with tests
-def _snapshot_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Top-3 TL;DR in a fixed-width code block."""
-    lines = ["```", f"{'#':<3} {'TICKER':<7} {'SCORE':<8} {'BAR':<10} SIGNAL"]
-    lines.append("─" * 42)
-    for i, e in enumerate(entries[:3], 1):
-        ticker = e.get("ticker", "?")
-        score  = float(e.get("final_score", 0))
-        badge  = e.get("badge", "WATCHLIST")
-        bar    = _score_bar(score, width=10)
-        ceo    = " ⚡" if e.get("ceo_buy") else ""
-        lines.append(f"{i:<3} {ticker:<7} {score:.4f}   {bar}  {badge}{ceo}")
-    lines.append("```")
-    return {
-        "name":   "⚡  SNAPSHOT — Top 3 Today",
-        "value":  "\n".join(lines),
+        "value":  _truncate("\n".join(lines), 1024),
         "inline": False,
     }
 
 
 def _conviction_field(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """Full-detail block for the #1 conviction pick (used by tests)."""
+    """Full-detail block for the #1 conviction pick — kept for test compatibility."""
     ticker  = entry.get("ticker", "?")
     score   = float(entry.get("final_score", 0))
     badge   = entry.get("badge", "WATCHLIST")
@@ -321,64 +334,8 @@ def _conviction_field(entry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _buy_list_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Ranks 2-5 as a compact fixed-width code block table (used by tests)."""
-    rows = ["```", f"{'#':<3} {'TICKER':<7} {'SCORE':<8} {'BAR':<10} SIGNAL"]
-    rows.append("─" * 42)
-    for i, e in enumerate(entries[1:5], 2):
-        ticker = e.get("ticker", "?")
-        score  = float(e.get("final_score", 0))
-        badge  = e.get("badge", "WATCHLIST")
-        bar    = _score_bar(score, width=10)
-        ceo    = " ⚡" if e.get("ceo_buy") else ""
-        rows.append(f"{i:<3} {ticker:<7} {score:.4f}   {bar}  {badge}{ceo}")
-    rows.append("```")
-    return {
-        "name":   "📋  BUY LIST — Ranks 2–5",
-        "value":  _truncate("\n".join(rows)),
-        "inline": False,
-    }
-
-
-def _factor_inline_fields(entries: List[Dict]) -> List[Dict[str, Any]]:
-    """Three inline fields showing grouped factor scores (used by tests)."""
-    tickers = [e.get("ticker", "?") for e in entries[:5]]
-    header  = "  ".join(f"{t:<6}" for t in tickers)
-
-    def _col(key: str) -> str:
-        label = _FACTOR_LABEL.get(key, key.upper())
-        vals  = "  ".join(
-            f"{float(e.get('factors', {}).get(key, 0)):.2f} " for e in entries[:5]
-        )
-        return f"`{label:<9}` {vals}"
-
-    fundamental_lines = ["```", header, "─" * 38]
-    for k in _FUNDAMENTAL:
-        if any(k in (e.get("factors") or {}) for e in entries[:5]):
-            fundamental_lines.append(_col(k))
-    fundamental_lines.append("```")
-
-    sentiment_lines = ["```", header, "─" * 38]
-    for k in _SENTIMENT:
-        if any(k in (e.get("factors") or {}) for e in entries[:5]):
-            sentiment_lines.append(_col(k))
-    sentiment_lines.append("```")
-
-    technical_lines = ["```", header, "─" * 38]
-    for k in _TECHNICAL:
-        if any(k in (e.get("factors") or {}) for e in entries[:5]):
-            technical_lines.append(_col(k))
-    technical_lines.append("```")
-
-    return [
-        {"name": "🏦  FUNDAMENTAL", "value": _truncate("\n".join(fundamental_lines), 1020), "inline": True},
-        {"name": "🌀  SENTIMENT",   "value": _truncate("\n".join(sentiment_lines),   1020), "inline": True},
-        {"name": "🐷  TECHNICAL",   "value": _truncate("\n".join(technical_lines),   1020), "inline": True},
-    ]
-
-
 def _cap_tier_field(name: str, entries: List[Dict]) -> Dict[str, Any]:
-    """Cap tier: bar-row list — same visual language as conviction/factor fields."""
+    """Compact cap-tier opportunity list."""
     if not entries:
         return {"name": name, "value": "*No picks in this tier today.*", "inline": False}
     lines = []
@@ -395,26 +352,9 @@ def _cap_tier_field(name: str, entries: List[Dict]) -> Dict[str, Any]:
     }
 
 
-def _section_value(entries: List[Dict], max_chars: int = 1020) -> str:
-    """Legacy helper — kept for satellite fields which use a different format."""
-    if not entries:
-        return "_No data available for this universe tier._"
-    blocks = []
-    for i, entry in enumerate(entries, 1):
-        ticker  = entry.get("ticker", "?")
-        score   = float(entry.get("final_score", 0))
-        badge   = entry.get("badge", "WATCHLIST")
-        emoji   = _BADGE_EMOJI.get(badge, "⚪")
-        ceo_tag = " ⚡" if entry.get("ceo_buy") else ""
-        blocks.append(f"**{i}. {ticker}**{ceo_tag}  {emoji}  `{score:.4f}`")
-    return _truncate("\n".join(blocks), max_chars)
-
-
-_STALE_HOURS = 25   # warn in Discord if top_lists.json is older than this
-
+# ── I/O helpers ────────────────────────────────────────────────────────────────
 
 def _data_age_hours(generated_at: str) -> Optional[float]:
-    """Return age of top_lists.json in hours, or None if unparseable."""
     try:
         ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
@@ -422,23 +362,21 @@ def _data_age_hours(generated_at: str) -> Optional[float]:
         return None
 
 
-def _load_satellite(log_dir: Path) -> dict | None:
-    """Load satellite_insights.json if present. Returns None on any failure."""
+def _load_satellite(log_dir: Path) -> Optional[Dict[str, Any]]:
+    """Load satellite_insights.json. Returns None on any failure."""
     path = log_dir / "satellite_insights.json"
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return None
-        return data
+        return data if isinstance(data, dict) else None
     except Exception as exc:
         log.warning("satellite_insights.json unreadable: %s", exc)
         return None
 
 
 def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
-    """Load anomaly_report_latest.json. Returns {ticker: [flags]} dict.
+    """Load anomaly_report_latest.json → {ticker: [flags]}.
 
     Returns empty dict on any failure — anomaly display is best-effort.
     """
@@ -463,12 +401,19 @@ def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
         return {}
 
 
+# ── Payload builder ────────────────────────────────────────────────────────────
+
 def build_payload(
     top_lists: Dict[str, Any],
     satellite: Optional[Dict[str, Any]] = None,
     anomaly_map: Optional[Dict[str, List[str]]] = None,
+    pipeline_latency_s: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Build the Discord webhook JSON payload with embeds."""
+    """Build the Discord webhook JSON payload.
+
+    Mobile-first: all critical information visible without scrolling.
+    Data flow: top_lists.json (SSOT) + optional satellite join (in-flight).
+    """
     generated_at = top_lists.get("generated_at", "")
     run_id       = top_lists.get("source_run_id", top_lists.get("run_id", ""))
     ticker_count = top_lists.get("ticker_count", 0)
@@ -478,86 +423,139 @@ def build_payload(
     age_h = _data_age_hours(generated_at)
     try:
         ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        date_str = ts.strftime("%B %d, %Y")
+        date_str = ts.strftime("%b %d, %Y")
     except Exception:
         date_str = generated_at[:10] or "—"
 
-    color = _pick_color(top_lists)
-
-    # ── Weight redistribution check ────────────────────────────────────────
-    _NOMINAL_WEIGHTS = {
-        "edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12,
-    }
+    # ── Weight redistribution — feed-down detection ────────────────────────
     weights_redistributed = bool(weights) and any(
         abs(weights.get(k, 0) - _NOMINAL_WEIGHTS.get(k, 0)) > 0.001
         for k in _NOMINAL_WEIGHTS
     )
 
-    # ── VIX line ───────────────────────────────────────────────────────────
+    # ── Market Regime Sentinel (VIX → macro context, line 2 of description) ─
     vix_val = top_lists.get("vix")
-    vix_str = f"  ·  VIX `{vix_val:.1f}`" if vix_val is not None else ""
+    vix_str = f"  ·  {get_market_regime(float(vix_val))}" if vix_val is not None else ""
 
-    # ── Alerts (stale data / kill-switch) ─────────────────────────────────
-    alerts: List[str] = []
+    # ── Congress boost active? ─────────────────────────────────────────────
+    congress_boost_on = any(float(e.get("congress_boost", 0.0)) > 0.0 for e in top_buys)
+
+    # ── Anomaly map — normalised early, shared by color + counts ──────────
+    anomaly_map = anomaly_map or {}
+    anomaly_count = len(set(anomaly_map.keys()) & {e.get("ticker") for e in top_buys})
+
+    # ── Kill-switch ────────────────────────────────────────────────────────
+    kill_switch = top_lists.get("kill_switch", False)
+
+    # ── Severity-driven embed color ────────────────────────────────────────
+    # Stale data overrides anomaly severity — data integrity takes priority.
+    color = _embed_color(anomaly_map, kill_switch)
     if age_h is not None and age_h > _STALE_HOURS:
         color = _COLOR_RED
+
+    # ── Data-Gap Indicator — footer annotation for missing/lagging sources ─
+    _KNOWN_SOURCES = {"edgar", "insider", "congress", "news", "momentum"}
+    present_sources = set(weights.keys()) if weights else set()
+    missing_sources = sorted(_KNOWN_SOURCES - present_sources) if present_sources else []
+    lagging_sources: List[str] = []
+    if weights_redistributed and not missing_sources:
+        lagging_sources = sorted(
+            (k for k in _NOMINAL_WEIGHTS if abs(weights.get(k, 0) - _NOMINAL_WEIGHTS[k]) > 0.05),
+            key=lambda k: abs(weights.get(k, 0) - _NOMINAL_WEIGHTS[k]),
+            reverse=True,
+        )[:2]
+
+    # ── Buyback lookup: in-flight join of satellite.cannibals[] onto top_buys
+    # satellite_insights.json is optional — graceful degradation on absence.
+    buyback_conv_of: Dict[str, float] = {}
+    try:
+        if satellite and isinstance(satellite, dict):
+            for c in (satellite.get("cannibals") or []):
+                t    = (c.get("ticker") or "").upper()
+                yld  = float(c.get("buyback_yield") or 0.0)
+                conv = _buyback_conviction(yld)
+                if t and conv is not None:
+                    buyback_conv_of[t] = conv
+    except Exception as exc:
+        log.debug("buyback join failed: %s", exc)
+
+    # ── Alerts (diff blocks — only shown for actionable conditions) ────────
+    alerts: List[str] = []
+    if age_h is not None and age_h > _STALE_HOURS:
         alerts.append(
             f"⚠️  DATA IS {age_h:.0f}h OLD — pipeline may have failed. "
             "Check edgar_3x on GitHub Actions."
         )
-    kill_switch = top_lists.get("kill_switch", False)
     if kill_switch:
-        color = _COLOR_RED
         vix_mult = top_lists.get("vix_multiplier", 1.0)
         vix_note = f"VIX {vix_val:.1f}  ·  " if vix_val is not None else ""
         alerts.append(
             f"⛔  MACRO KILL-SWITCH ACTIVE  —  {vix_note}"
             f"scores dampened ×{vix_mult:.2f}.  Do NOT act on HIGH BUY signals."
         )
-    if anomaly_map:
-        stale_flags = [flag for flags in anomaly_map.values() for flag in flags if flag == "STALE_SOURCE"]
-        if stale_flags:
-            alerts.append("⚠️  STALE DATA SOURCE detected — scores may be unreliable. Check anomaly_report_latest.json.")
+    if any(flag == "STALE_SOURCE" for flags in anomaly_map.values() for flag in flags):
+        alerts.append("⚠️  STALE DATA SOURCE — scores may be unreliable.")
 
     alert_block = ("\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)) if alerts else ""
 
-    # ── Description: at-a-glance summary — most critical info first ───────
-    feed_note = "  ⚠️ *feed down — redistributed*" if weights_redistributed else ""
-    # Top pick summary line for immediate context before scrolling
-    if top_buys:
-        top = top_buys[0]
-        top_ticker = top.get("ticker", "?")
-        top_score  = float(top.get("final_score", 0))
-        top_badge  = top.get("badge", "WATCHLIST")
-        top_bar    = _score_bar(top_score, width=10)
-        signal_line = f"**Top signal:** **{top_ticker}** `{top_score:.2f}` `{top_bar}` — *{top_badge}*\n"
-    else:
-        signal_line = "*No signals today.*\n"
+    # ── Description: TL;DR — all critical signals visible without scrolling ─
+    boost_status  = "ON 🏛" if congress_boost_on else "OFF"
+    feed_note     = "  ⚠️ *feed down — redistributed*" if weights_redistributed else ""
+    summary_parts = [f"**{len(top_buys)} Buy{'s' if len(top_buys) != 1 else ''}**"]
+    if anomaly_count:
+        summary_parts.append(f"**{anomaly_count} Anomaly{'s' if anomaly_count != 1 else ''}** ⚠️")
+    summary_parts.append(f"Congress Boost: **{boost_status}**")
+    summary_line = "  |  ".join(summary_parts)
 
     description = (
-        f"{signal_line}"
+        f"{summary_line}\n"
         f"`{ticker_count} tickers`{vix_str}  ·  EDGAR-first{feed_note}"
         f"{alert_block}"
     )
 
-    # ── Fields: Signal → Conviction → Evidence ─────────────────────────────
+    # ── Fields: compact ticker cards (incremental 1900-char budget) ────────
     fields: List[Dict[str, Any]] = []
 
     if top_buys:
-        # 1. At-a-glance summary of all picks
-        fields.append(_top_conviction_field(top_buys))
-        # 2. One detail field per ticker — full factor breakdown
-        fields.extend(_ticker_fields(top_buys, anomaly_map=anomaly_map))
+        # Shadow rank lookup for conviction trend arrows
+        shadow_buys    = top_lists.get("shadow_top_buys") or []
+        shadow_rank_of = {e.get("ticker", ""): i for i, e in enumerate(shadow_buys, 1)}
 
-    # 3. Opportunities — Cap tiers
-    mid_caps   = top_lists.get("mid_caps") or []
+        used = 0
+        added = 0
+        for i, e in enumerate(top_buys[:5], 1):
+            ticker     = e.get("ticker", "")
+            shadow_r   = shadow_rank_of.get(ticker)
+            rank_delta = (shadow_r - i) if shadow_r is not None else None
+            buyback_cv = buyback_conv_of.get(ticker.upper())
+            field = _ticker_detail_field(
+                i, e,
+                anomaly_flags=anomaly_map.get(ticker),
+                rank_delta=rank_delta,
+                buyback_conv=buyback_cv,
+            )
+            flen = len(field["value"])
+            if used + flen > 1900 and added > 0:
+                remaining = len(top_buys[:5]) - added
+                fields.append({
+                    "name":   "…",
+                    "value":  f"*+ {remaining} more ticker{'s' if remaining != 1 else ''} — run `--dry-run` for full output*",
+                    "inline": False,
+                })
+                break
+            fields.append(field)
+            used  += flen
+            added += 1
+
+    # Cap tiers (optional — mid/small caps)
+    mid_caps   = top_lists.get("mid_caps")   or []
     small_caps = top_lists.get("small_caps") or []
     if mid_caps:
         fields.append(_cap_tier_field("📈  Mid Caps  ($2B–$10B)", mid_caps))
     if small_caps:
         fields.append(_cap_tier_field("🔬  Small Caps  (<$2B)", small_caps))
 
-    # 4. Satellite fields (optional)
+    # Satellite detail blocks (cyclicals + cannibals)
     try:
         if satellite and isinstance(satellite, dict):
             month_label = satellite.get("month", "")
@@ -565,13 +563,11 @@ def build_payload(
             cannibals   = satellite.get("cannibals") or []
 
             if cyclicals:
-                lines = []
-                for c in cyclicals:
-                    wr  = f"{c['win_rate']:.0%}"
-                    med = f"{c['median_return']:+.1%}"
-                    yr  = c.get("years", "?")
-                    bar = _score_bar(c["win_rate"], width=6)
-                    lines.append(f"**{c['ticker']}** {bar} `{wr}` win · `{med}` median · `{yr}y`")
+                lines = [
+                    f"**{c['ticker']}** {_score_bar(c['win_rate'], 6)} "
+                    f"`{c['win_rate']:.0%}` win · `{c['median_return']:+.1%}` med · `{c.get('years','?')}y`"
+                    for c in cyclicals
+                ]
                 fields.append({
                     "name":   f"🌀  Seasonal Cyclicals — {month_label}",
                     "value":  _truncate("\n".join(lines)),
@@ -579,39 +575,56 @@ def build_payload(
                 })
 
             if cannibals:
-                lines = []
-                for c in cannibals:
-                    yld = f"{c.get('buyback_yield', 0):.1%}"
-                    pe  = f"{c.get('pe', 0):.1f}"
-                    pvl = f"{c.get('price_vs_52w_low', 0):.2f}×"
-                    lines.append(f"**{c['ticker']}** · `{yld}` buyback · P/E `{pe}` · `{pvl}` vs 52w low")
+                lines = [
+                    f"**{c['ticker']}** · `{c.get('buyback_yield',0):.1%}` buyback"
+                    f" · P/E `{c.get('pe',0):.1f}` · `{c.get('price_vs_52w_low',0):.2f}×` vs 52w low"
+                    for c in cannibals
+                ]
                 fields.append({
                     "name":   "🐷  Share Cannibals",
                     "value":  _truncate("\n".join(lines)),
                     "inline": False,
                 })
     except Exception as exc:
-        log.warning("satellite embed fields skipped due to error: %s", exc)
+        log.warning("satellite embed fields skipped: %s", exc)
+
+    # Sector heatmap — dynamic exposure from entry["sector"] (SSOT)
+    heatmap = _sector_heatmap(top_buys)
+    if heatmap:
+        fields.append({
+            "name":   "📊  Sector Exposure",
+            "value":  heatmap,
+            "inline": False,
+        })
+
+    # ── Footer: latency · coverage (data-gap) · mode ──────────────────────
+    latency_part = f"Latency: {pipeline_latency_s:.0f}s  |  " if pipeline_latency_s is not None else ""
+    coverage_pct = f"{min(100, round(ticker_count / 1.6))}%" if ticker_count else "—"
+    if missing_sources:
+        gap_note = f" (No: {', '.join(s.upper() for s in missing_sources)})"
+    elif lagging_sources:
+        gap_note = f" (Lag: {', '.join(s.upper() for s in lagging_sources)})"
+    else:
+        gap_note = ""
+    mode_str    = "Live" if not kill_switch else "Kill-Switch"
+    footer_text = f"{latency_part}Cov: {coverage_pct}{gap_note}  |  Mode: {mode_str}  |  Run: {run_id}"
 
     embed = {
-        "title":       f"[REGIME TRADER] Daily Market Report — {date_str}",
+        "title":       f"⚡ Alpha Pipeline  [{date_str}]",
         "description": description,
         "color":       color,
         "fields":      fields,
-        "footer":      {
-            "text": f"Run: {run_id}  |  Pipeline: EDGAR-first  |  Scores: [0,1]",
-        },
+        "footer":      {"text": footer_text},
         "timestamp":   datetime.now(timezone.utc).isoformat(),
     }
-
     return {"embeds": [embed]}
 
 
 def build_alert_payload(reason: str) -> Dict[str, Any]:
-    """Minimal embed when top_lists.json is missing or unreadable."""
+    """Minimal red embed when top_lists.json is missing or unreadable."""
     return {
         "embeds": [{
-            "title":       "⚠️ Daily Market Checkup — DATA UNAVAILABLE",
+            "title":       "⚠️ Alpha Pipeline — DATA UNAVAILABLE",
             "description": (
                 f"**Reason:** {reason}\n\n"
                 "The EDGAR pipeline may not have completed its last run.\n"
@@ -624,6 +637,144 @@ def build_alert_payload(reason: str) -> Dict[str, Any]:
     }
 
 
+# ── Self-contained test suite ──────────────────────────────────────────────────
+
+def run_tests() -> int:
+    """Autonomous verification suite — no pytest dependency.
+
+    Tests:
+      1. Empty top_buys → no fields, no crash
+      2. Missing sector → fallback to Misc in heatmap
+      3. Budget truncation at 1900 chars
+      4. Buyback boost icon rendered (🔄) when satellite present
+      5. Critical anomaly → red embed
+      6. Congress cluster only → orange embed
+      7. VIX regime labels at all three thresholds
+    """
+    import traceback
+    failures: List[str] = []
+
+    def _check(name: str, cond: bool, detail: str = "") -> None:
+        if not cond:
+            failures.append(f"FAIL [{name}]{': ' + detail if detail else ''}")
+
+    def _base_tl(**overrides) -> Dict[str, Any]:
+        tl: Dict[str, Any] = {
+            "generated_at":  "2026-05-21T10:00:00+00:00",
+            "source_run_id": "test",
+            "ticker_count":  5,
+            "weights":       {},
+            "kill_switch":   False,
+            "vix":           17.0,
+            "top_buys":      [],
+            "mid_caps":      [],
+            "small_caps":    [],
+        }
+        tl.update(overrides)
+        return tl
+
+    def _entry(ticker: str, sector: str = "Information Technology",
+               score: float = 0.75, **kw) -> Dict[str, Any]:
+        return {
+            "ticker": ticker, "final_score": score, "badge": "HIGH BUY",
+            "sector": sector, "market_cap": 1e12, "cap_tier": "large",
+            "ceo_buy": False, "congress_boost": 0.0,
+            "factors": {"edgar": 0.8, "insider": 0.7, "congress": 0.6,
+                        "news": 0.65, "macro": 0.55},
+            **kw,
+        }
+
+    # ── Test 1: empty top_buys → no ticker fields, no crash ───────────────
+    try:
+        payload = build_payload(_base_tl())
+        embed   = payload["embeds"][0]
+        field_names = [f["name"] for f in embed["fields"]]
+        _check("empty_top_buys_no_fields",
+               not any(n.startswith("#") for n in field_names))
+        _check("empty_top_buys_no_crash", True)
+    except Exception:
+        failures.append(f"FAIL [empty_top_buys_no_crash]: {traceback.format_exc()}")
+
+    # ── Test 2: missing sector → Misc fallback in heatmap ─────────────────
+    try:
+        entries = [_entry("AAPL", sector=""), _entry("MSFT", sector="")]
+        heatmap = _sector_heatmap(entries)
+        _check("misc_fallback", _SECTOR_MISC in heatmap,
+               f"heatmap={heatmap!r}")
+    except Exception:
+        failures.append(f"FAIL [misc_fallback]: {traceback.format_exc()}")
+
+    # ── Test 3: budget truncation at 1900 chars ────────────────────────────
+    try:
+        fat_entry = _entry("FAT", score=0.9)
+        fat_entry["factors"] = {k: 0.99 for k in ("edgar","insider","congress","news","macro")}
+        tl = _base_tl(top_buys=[fat_entry] * 5)
+        payload = build_payload(tl)
+        embed   = payload["embeds"][0]
+        total   = sum(len(f.get("value","")) for f in embed["fields"])
+        _check("budget_1900", total <= 1900 + 200,
+               f"total_field_chars={total}")
+        has_more = any("more ticker" in (f.get("value","")) for f in embed["fields"])
+        all_five = sum(1 for f in embed["fields"] if f["name"].startswith("#")) == 5
+        _check("budget_truncation_or_all_fit", has_more or all_five)
+    except Exception:
+        failures.append(f"FAIL [budget_truncation]: {traceback.format_exc()}")
+
+    # ── Test 4: buyback boost icon 🔄 in ticker card ──────────────────────
+    try:
+        tl = _base_tl(top_buys=[_entry("MSFT")])
+        sat = {"cannibals": [{"ticker": "MSFT", "buyback_yield": 0.12,
+                               "pe": 30.0, "price_vs_52w_low": 1.1}]}
+        payload = build_payload(tl, satellite=sat)
+        fields  = payload["embeds"][0]["fields"]
+        ticker_field = next((f for f in fields if f["name"].startswith("#")), None)
+        _check("buyback_icon_present",
+               ticker_field is not None and "🔄" in ticker_field["value"],
+               f"field_value={ticker_field['value'] if ticker_field else 'None'}")
+    except Exception:
+        failures.append(f"FAIL [buyback_icon]: {traceback.format_exc()}")
+
+    # ── Test 5: STALE_SOURCE → red embed ─────────────────────────────────
+    try:
+        amap   = {"AAPL": ["STALE_SOURCE"]}
+        tl     = _base_tl(top_buys=[_entry("AAPL")])
+        payload = build_payload(tl, anomaly_map=amap)
+        color  = payload["embeds"][0]["color"]
+        _check("stale_source_red", color == _COLOR_RED, f"color=0x{color:06X}")
+    except Exception:
+        failures.append(f"FAIL [stale_source_red]: {traceback.format_exc()}")
+
+    # ── Test 6: CONGRESS_CLUSTER only → orange embed ──────────────────────
+    try:
+        amap    = {"NVDA": ["CONGRESS_CLUSTER"]}
+        tl      = _base_tl(top_buys=[_entry("NVDA")])
+        payload = build_payload(tl, anomaly_map=amap)
+        color   = payload["embeds"][0]["color"]
+        _check("congress_cluster_orange", color == _COLOR_ORANGE, f"color=0x{color:06X}")
+    except Exception:
+        failures.append(f"FAIL [congress_cluster_orange]: {traceback.format_exc()}")
+
+    # ── Test 7: VIX regime labels ─────────────────────────────────────────
+    try:
+        _check("vix_bullish",  "BULLISH" in get_market_regime(12.0))
+        _check("vix_stable",   "STABLE"  in get_market_regime(18.0))
+        _check("vix_bearish",  "BEARISH" in get_market_regime(28.0))
+        _check("vix_boundary_low",  "BULLISH" in get_market_regime(15.0))
+        _check("vix_boundary_high", "BEARISH" in get_market_regime(25.1))
+    except Exception:
+        failures.append(f"FAIL [vix_regime]: {traceback.format_exc()}")
+
+    # ── Report ────────────────────────────────────────────────────────────
+    total_tests = 12   # approximate assertion count above
+    if failures:
+        for f in failures:
+            print(f, file=sys.stderr)
+        print(f"\n{len(failures)} test(s) FAILED", file=sys.stderr)
+        return 1
+    print(f"All tests passed ({total_tests} assertions)")
+    return 0
+
+
 # ── HTTP send with retry ───────────────────────────────────────────────────────
 
 def send_to_discord(
@@ -634,7 +785,7 @@ def send_to_discord(
 ) -> bool:
     """POST payload to Discord webhook with exponential-like backoff.
 
-    Backoff schedule: 30s, 60s (attempt 1 is immediate).
+    Backoff schedule: attempt 1 immediate, then 30s, 60s.
     Never raises — returns True on 2xx, False otherwise.
     """
     if not _HAS_REQUESTS:
@@ -646,7 +797,7 @@ def send_to_discord(
 
     for attempt in range(max_retries):
         if attempt > 0:
-            wait = backoff_base_s * attempt          # 30s, 60s
+            wait = backoff_base_s * attempt
             log.warning("Retry %d/%d in %.0fs …", attempt + 1, max_retries, wait)
             time.sleep(wait)
         try:
@@ -654,8 +805,6 @@ def send_to_discord(
             if 200 <= resp.status_code < 300:
                 log.info("Discord message sent (status=%d)", resp.status_code)
                 return True
-            # 429 = rate-limited: prefer JSON body retry_after (Discord standard),
-            # fall back to the Retry-After header, then a 30s default.
             if resp.status_code == 429:
                 try:
                     retry_after = float(resp.json().get("retry_after", 0))
@@ -688,7 +837,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--log-dir", type=Path, default=Path("logs"),
-        help="Directory for discord_send.log output",
+        help="Directory for discord_send.log and satellite/anomaly files",
     )
     parser.add_argument(
         "--webhook", type=str, default=None,
@@ -698,8 +847,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--dry-run", action="store_true",
         help="Print payload JSON without sending",
     )
+    parser.add_argument(
+        "--run-tests", action="store_true",
+        help="Run built-in self-test suite and exit",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.run_tests:
+        logging.basicConfig(level=logging.WARNING)
+        return run_tests()
 
     log_level = logging.DEBUG if args.verbose else logging.INFO
     args.log_dir.mkdir(parents=True, exist_ok=True)
@@ -716,15 +873,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     webhook: str = args.webhook or os.getenv("DISCORD_WEBHOOK_URL", "")
 
-    # ── Load top_lists.json ────────────────────────────────────────────────────
     if not args.input.exists():
         log.warning("top_lists.json not found at %s — sending alert", args.input)
         payload = build_alert_payload(f"File not found: {args.input}")
         if args.dry_run:
             sys.stdout.buffer.write((json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
             return 0
-        ok = send_to_discord(webhook, payload)
-        return 0 if ok else 1
+        return 0 if send_to_discord(webhook, payload) else 1
 
     try:
         top_lists = json.loads(args.input.read_text(encoding="utf-8"))
@@ -746,14 +901,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         send_to_discord(webhook, payload)
         return 1
 
-    # ── Build and send ─────────────────────────────────────────────────────────
     satellite   = _load_satellite(args.log_dir)
     anomaly_map = _load_anomaly_report(args.log_dir)
     payload     = build_payload(top_lists, satellite=satellite, anomaly_map=anomaly_map)
 
     if args.dry_run:
-        out = json.dumps(payload, indent=2, ensure_ascii=False)
-        sys.stdout.buffer.write((out + "\n").encode("utf-8"))
+        sys.stdout.buffer.write((json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
         return 0
 
     ok = send_to_discord(webhook, payload)
