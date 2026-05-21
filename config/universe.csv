@@ -11,7 +11,7 @@ TMUS,Communication Services,large
 EA,Communication Services,large
 WBD,Communication Services,mid
 FOXA,Communication Services,large
-IPG,Communication Services,mid
+RDDT,Communication Services,mid
 OMC,Communication Services,large
 TTD,Communication Services,large
 AMZN,Consumer Discretionary,large
@@ -57,8 +57,8 @@ HAL,Energy,mid
 DVN,Energy,large
 BKR,Energy,large
 FANG,Energy,large
-HES,Energy,large
-MRO,Energy,mid
+CTRA,Energy,large
+PR,Energy,mid
 JPM,Financials,large
 BAC,Financials,large
 WFC,Financials,large
