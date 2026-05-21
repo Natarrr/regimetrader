@@ -81,12 +81,12 @@ class TestBuildPayloadSatellite:
         assert not any("CANNIBALS" in n.upper() for n in field_names)
 
     def test_without_satellite_has_core_fields(self):
-        """satellite=None → description has TL;DR summary + per-ticker fields present."""
+        """satellite=None → description has 2-line mobile header + per-ticker fields present."""
         payload = build_payload(_top_lists(), satellite=None)
         embed = payload["embeds"][0]
         field_names = [f["name"] for f in embed["fields"]]
-        # TL;DR summary now lives in description (mobile-first: above the fold)
-        assert "Buy" in embed["description"]
+        # 2-line mobile header: brand tag + VIX regime
+        assert "[REGIME TRADER]" in embed["description"]
         # At least one per-ticker detail field (named "#1  TICKER")
         assert any(n.startswith("#") for n in field_names)
 
