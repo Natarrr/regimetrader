@@ -282,12 +282,16 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
     import requests as _req
 
     # ── Check 24-hour cache ───────────────────────────────────────────────────
+    # Truthy check on by_ticker: an empty {} from a failed S3 run must not be
+    # served as a valid cache hit — it would silence the Quiver fallback for
+    # up to 24h, leaving congress_score=0.0 for all tickers.
     if CONGRESS_CACHE_PATH.exists():
         try:
             cached = json.loads(CONGRESS_CACHE_PATH.read_text(encoding="utf-8"))
             age_h = (time.time() - float(cached.get("_ts", 0))) / 3600
-            if age_h < _CONGRESS_TTL_HOURS:
-                return cached.get("by_ticker", {})
+            by_ticker_cached = cached.get("by_ticker", {})
+            if age_h < _CONGRESS_TTL_HOURS and by_ticker_cached:
+                return by_ticker_cached
         except Exception:
             pass
 
