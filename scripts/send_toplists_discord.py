@@ -451,7 +451,7 @@ def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
                 continue
             ticker = rec.get("ticker", "")
             flag   = rec.get("flag", "")
-            if ticker and flag and ticker != "__SOURCE__":
+            if ticker and flag:
                 result.setdefault(ticker, []).append(flag)
         return result
     except Exception as exc:

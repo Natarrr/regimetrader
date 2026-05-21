@@ -235,17 +235,19 @@ class TestValidation:
             assert row.get("_validation_failed") is not True
 
     def test_failure_threshold_raises_integrity_error(self):
+        from backend.market_intel.generate_top_lists import PipelineIntegrityError
         from backend.market_intel.validator import validate_raw
         # All 5 tickers have zero market_cap → all fail
         rows = [_row(f"T{i}", market_cap=0.0) for i in range(5)]
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(PipelineIntegrityError) as exc_info:
             validate_raw(rows, _source_meta(), failure_threshold=0.20)
         assert "failed validation" in str(exc_info.value).lower()
 
     def test_integrity_error_message_contains_summary(self):
+        from backend.market_intel.generate_top_lists import PipelineIntegrityError
         from backend.market_intel.validator import validate_raw
         rows = [_row(f"T{i}", market_cap=0.0) for i in range(5)]
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(PipelineIntegrityError) as exc_info:
             validate_raw(rows, _source_meta(), failure_threshold=0.20)
         msg = str(exc_info.value)
         assert "MISSING_AMOUNT" in msg

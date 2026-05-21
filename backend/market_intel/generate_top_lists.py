@@ -442,24 +442,25 @@ def generate(
                   quiver_evidence=row.get("quiver_evidence"))
         for row, nf in zip(results, norm_factor_list)
     ]
+    # Propagate Stage 1 validation flag from raw rows into entries
+    for entry, row in zip(entries, results):
+        if row.get("_validation_failed"):
+            entry["_validation_failed"] = True
     _assign_cap_tiers(entries)
 
     score_desc = lambda e: e["final_score"]  # noqa: E731
 
-    top_buys = sorted(entries, key=score_desc, reverse=True)[:5]
+    # Exclude tickers that failed Stage 1 validation before slicing to top-N
+    valid_entries = [e for e in entries if not e.get("_validation_failed")]
+    top_buys = sorted(valid_entries, key=score_desc, reverse=True)[:5]
     mid_caps = sorted(
-        [e for e in entries if e["cap_tier"] == "mid"],
+        [e for e in valid_entries if e["cap_tier"] == "mid"],
         key=score_desc, reverse=True,
     )[:5]
     small_caps = sorted(
-        [e for e in entries if e["cap_tier"] == "small"],
+        [e for e in valid_entries if e["cap_tier"] == "small"],
         key=score_desc, reverse=True,
     )[:5]
-
-    # Exclude tickers that failed Stage 1 validation — prevents false-positive buy signals
-    top_buys = [r for r in top_buys if not r.get("_validation_failed")]
-    mid_caps = [r for r in mid_caps if not r.get("_validation_failed")]
-    small_caps = [r for r in small_caps if not r.get("_validation_failed")]
 
     kill_switch = current_vix is not None and current_vix >= 30
     top_lists: Dict[str, Any] = {
