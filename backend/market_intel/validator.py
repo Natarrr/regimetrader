@@ -93,3 +93,43 @@ class Normalizer:
         if arr.size == 0:
             return arr
         return normalize_score(arr, lo_pct=0, hi_pct=100, out_min=0.0, out_max=1.0)
+
+
+# ── Validation data structures ────────────────────────────────────────────────
+
+import re as _re
+
+_TICKER_RE = _re.compile(r"^[A-Z]{1,5}$")
+
+
+class ValidationIssue:
+    __slots__ = ("ticker", "field", "code", "original_value")
+
+    def __init__(self, ticker: str, field: str, code: str, original_value: Any = None) -> None:
+        self.ticker = ticker
+        self.field = field
+        self.code = code
+        self.original_value = original_value
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"ValidationIssue({self.code} ticker={self.ticker} field={self.field})"
+
+
+# ── validate_tickers ──────────────────────────────────────────────────────────
+
+def validate_tickers(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationIssue]]:
+    """Check each ticker matches ^[A-Z]{1,5}$.
+
+    Mutates rows in-place: sets _validation_failed=True on bad rows.
+    Never raises.
+    """
+    issues: List[ValidationIssue] = []
+    for row in rows:
+        t = row.get("ticker", "")
+        if not isinstance(t, str) or not _TICKER_RE.match(t):
+            row["_validation_failed"] = True
+            issues.append(ValidationIssue(
+                ticker=str(t), field="ticker",
+                code="INVALID_TICKER", original_value=t,
+            ))
+    return (len(issues) == 0, issues)

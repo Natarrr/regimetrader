@@ -114,3 +114,40 @@ class TestNormalizer:
         result = Normalizer.cross_sectional_norm(series)
         # min-max scaled to [0,1] — mean ≈ 0.5 for symmetric input
         assert abs(float(result.mean()) - 0.5) < 0.1
+
+
+# ── TestValidation ─────────────────────────────────────────────────────────────
+
+class TestValidation:
+    def _validate_tickers(self, rows):
+        from backend.market_intel.validator import validate_tickers
+        return validate_tickers(rows)
+
+    def test_valid_ticker_passes(self):
+        ok, issues = self._validate_tickers([_row("AAPL")])
+        assert ok is True
+        assert issues == []
+
+    def test_empty_ticker_quarantined(self):
+        row = _row("")
+        ok, issues = self._validate_tickers([row])
+        assert ok is False
+        assert row.get("_validation_failed") is True
+
+    def test_numeric_ticker_quarantined(self):
+        row = _row("123AB")
+        ok, issues = self._validate_tickers([row])
+        assert ok is False
+        assert row.get("_validation_failed") is True
+
+    def test_lowercase_ticker_quarantined(self):
+        row = _row("aapl")
+        ok, issues = self._validate_tickers([row])
+        assert ok is False
+        assert row.get("_validation_failed") is True
+
+    def test_too_long_ticker_quarantined(self):
+        row = _row("TOOLONG")
+        ok, issues = self._validate_tickers([row])
+        assert ok is False
+        assert row.get("_validation_failed") is True
