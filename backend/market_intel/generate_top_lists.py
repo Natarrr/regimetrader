@@ -343,6 +343,69 @@ def _assign_cap_tiers(entries: List[Dict[str, Any]]) -> None:
             entry["cap_tier"] = "small"
 
 
+def _apply_congress_boost(
+    entries: List[Dict[str, Any]],
+    log_dir: Path,
+) -> List[Dict[str, Any]]:
+    """Apply Congress conviction multiplier to final_score before ranking.
+
+    Reads anomaly_report_latest.json (written by detect_anomalies) and looks for
+    CONGRESS_CLUSTER records.  For each matching ticker:
+
+        boosted_score = final_score × (1 + 0.10 × conviction_score)
+
+    Rationale for 0.10 coefficient: a cluster of 5 members (conviction=1.0)
+    lifts the score by exactly 10% — enough to move a 0.72 ticker ahead of a
+    0.75 one when conviction is high, but not enough to manufacture a HIGH BUY
+    from a weak base.  The multiplier is linear so the signal is interpretable.
+
+    All entries receive a ``congress_boost`` field (0.0 = no boost applied) so
+    the shadow score comparison is always possible even when the feed is dead.
+
+    Never raises — a missing or unreadable anomaly report is treated as "no
+    clusters found" and all boosts remain 0.0.
+    """
+    # Load conviction scores from the anomaly report
+    conviction_map: Dict[str, float] = {}
+    report_path = Path(log_dir) / "anomaly_report_latest.json"
+    try:
+        records = json.loads(report_path.read_text(encoding="utf-8"))
+        for rec in records:
+            if rec.get("flag") == "CONGRESS_CLUSTER":
+                ticker = rec.get("ticker", "")
+                if ticker:
+                    conviction_map[ticker] = float(rec.get("conviction_score", 0.0))
+    except FileNotFoundError:
+        pass   # no anomalies detected this run → no boost → correct
+    except Exception as exc:
+        log.warning("Congress boost: could not read anomaly report — %s", exc)
+
+    if conviction_map:
+        log.info(
+            "Congress boost: %d ticker(s) with cluster signal: %s",
+            len(conviction_map),
+            ", ".join(f"{t}(conv={v:.2f})" for t, v in conviction_map.items()),
+        )
+
+    # Apply boost and attach congress_boost field to every entry
+    for entry in entries:
+        ticker = entry.get("ticker", "")
+        conviction = conviction_map.get(ticker, 0.0)
+        if conviction > 0.0:
+            raw_final = entry["final_score"]
+            boosted = round(raw_final * (1.0 + 0.10 * conviction), 4)
+            entry["final_score"] = boosted
+            entry["congress_boost"] = round(0.10 * conviction, 4)
+            log.debug(
+                "Congress boost applied: %s %.4f → %.4f (conv=%.2f)",
+                ticker, raw_final, boosted, conviction,
+            )
+        else:
+            entry["congress_boost"] = 0.0
+
+    return entries
+
+
 def _sector_picks(entries: List[Dict[str, Any]], n: int = 3) -> Dict[str, List[Dict[str, Any]]]:
     """Select top n tickers per target sector, ranked by final_score descending."""
     result: Dict[str, List[Dict[str, Any]]] = {}
@@ -441,10 +504,35 @@ def generate(
             entry["_validation_failed"] = True
     _assign_cap_tiers(entries)
 
-    score_desc = lambda e: e["final_score"]  # noqa: E731
-
     # Exclude tickers that failed Stage 1 validation before slicing to top-N
     valid_entries = [e for e in entries if not e.get("_validation_failed")]
+
+    # Stage 2: anomaly circuit breakers on scored universe.
+    # Runs on the raw results rows (carry volume_spike, insider_usd, market_cap,
+    # cap_tier, news_score, _stale_data) — writes anomaly_report_latest.json when
+    # anomalies are found (including CONGRESS_CLUSTER conviction scores), writes
+    # nothing when the universe is clean.
+    try:
+        detect_anomalies(results, run_id=run_id, log_dir=log_dir)
+    except Exception as exc:
+        log.warning("Stage 2 anomaly detection failed (non-fatal): %s", exc)
+
+    # Shadow score: capture raw ranking BEFORE congress boost so callers can
+    # compare which tickers the boost promoted.  Shallow-copy each entry dict
+    # so the boost mutations below do not retroactively alter shadow scores.
+    import copy as _copy
+    shadow_top_buys = [
+        _copy.copy(e)
+        for e in sorted(valid_entries, key=lambda e: e["final_score"], reverse=True)[:5]
+    ]
+
+    # Congress boost: reads anomaly_report_latest.json (just written above) and
+    # applies conviction multiplier to final_score in-place.  Must run AFTER
+    # detect_anomalies so the report is fresh.  No-op when feed is dead.
+    _apply_congress_boost(valid_entries, log_dir)
+
+    score_desc = lambda e: e["final_score"]  # noqa: E731
+
     top_buys = sorted(valid_entries, key=score_desc, reverse=True)[:5]
     mid_caps = sorted(
         [e for e in valid_entries if e["cap_tier"] == "mid"],
@@ -456,6 +544,17 @@ def generate(
     )[:5]
 
     kill_switch = current_vix is not None and current_vix >= 30
+
+    # Detect promoted tickers (present in top_buys but not in shadow_top_buys)
+    shadow_tickers = {e["ticker"] for e in shadow_top_buys}
+    boosted_tickers = {e["ticker"] for e in top_buys}
+    promoted = boosted_tickers - shadow_tickers
+    if promoted:
+        log.info(
+            "Congress boost promoted %d ticker(s) into top_buys: %s",
+            len(promoted), ", ".join(sorted(promoted)),
+        )
+
     top_lists: Dict[str, Any] = {
         "generated_at":    datetime.now(timezone.utc).isoformat(),
         "source_run_id":   run_id,
@@ -465,26 +564,11 @@ def generate(
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
         "top_buys":        top_buys,
+        "shadow_top_buys": shadow_top_buys,
         "mid_caps":        mid_caps,
         "small_caps":      small_caps,
         "sector_picks":    _sector_picks(entries),
     }
-    if kill_switch:
-        log.warning(
-            "⚠️  MACRO KILL-SWITCH ACTIVE — VIX %.1f — all scores dampened ×%.2f. "
-            "Do NOT send HIGH BUY alerts to Discord.",
-            current_vix,
-            top_lists["vix_multiplier"],
-        )
-
-    # Stage 2: anomaly circuit breakers on scored universe.
-    # Runs on the raw results rows (carry volume_spike, insider_usd, market_cap,
-    # cap_tier, news_score, _stale_data) — writes anomaly_report_latest.json when
-    # anomalies are found, writes nothing when the universe is clean.
-    try:
-        detect_anomalies(results, run_id=run_id, log_dir=log_dir)
-    except Exception as exc:
-        log.warning("Stage 2 anomaly detection failed (non-fatal): %s", exc)
 
     out_json = log_dir / "top_lists.json"
     save_json_atomic(out_json, top_lists)
