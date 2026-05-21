@@ -104,7 +104,7 @@ class TestNormalizer:
         from backend.market_intel.validator import Normalizer
         series = np.array([0.1] * 98 + [1000.0, -1000.0])
         result = Normalizer.winsorize(series)
-        assert result.max() <= 1.0 + 1e-6
+        assert result.max() <= 0.1 + 1e-6
         assert result.min() >= 0.1 - 1e-6
 
     def test_cross_sectional_norm_mean_near_neutral(self):
