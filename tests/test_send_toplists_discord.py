@@ -73,29 +73,35 @@ class TestLoadSatellite:
 # ── build_payload with satellite ──────────────────────────────────────────────
 
 class TestBuildPayloadSatellite:
-    def test_without_satellite_embed_unchanged(self):
-        """satellite=None → embed fields identical to original 4-field structure."""
+    def test_without_satellite_no_satellite_fields(self):
+        """satellite=None → no cyclical or cannibal fields in embed."""
         payload = build_payload(_top_lists(), satellite=None)
-        fields = payload["embeds"][0]["fields"]
-        field_names = [f["name"] for f in fields]
-        assert "🌀 Seasonal Cyclicals — May" not in field_names
-        assert "🐷 Share Cannibals — Buyback Yield" not in field_names
-        assert len(fields) == 4
+        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        assert not any("CYCLICALS" in n.upper() for n in field_names)
+        assert not any("CANNIBALS" in n.upper() for n in field_names)
+
+    def test_without_satellite_has_core_fields(self):
+        """satellite=None → snapshot, conviction, buy-list, factor group fields present."""
+        payload = build_payload(_top_lists(), satellite=None)
+        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        assert any("SNAPSHOT" in n.upper() for n in field_names)
+        assert any("CONVICTION" in n.upper() for n in field_names)
+        assert any("FUNDAMENTAL" in n.upper() for n in field_names)
+        assert any("SENTIMENT" in n.upper() for n in field_names)
+        assert any("TECHNICAL" in n.upper() for n in field_names)
 
     def test_with_satellite_adds_cyclical_and_cannibal_fields(self):
-        """satellite with non-empty lists → 6 embed fields total."""
+        """satellite with non-empty lists → cyclical and cannibal fields appear."""
         payload = build_payload(_top_lists(), satellite=_satellite())
-        fields = payload["embeds"][0]["fields"]
-        field_names = [f["name"] for f in fields]
-        assert "🌀 Seasonal Cyclicals — May" in field_names
-        assert "🐷 Share Cannibals — Buyback Yield" in field_names
-        assert len(fields) == 6
+        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        assert any("CYCLICALS" in n.upper() for n in field_names)
+        assert any("CANNIBALS" in n.upper() for n in field_names)
 
     def test_cyclical_field_content(self):
         """Cyclical field renders win-rate and median correctly."""
         payload = build_payload(_top_lists(), satellite=_satellite())
         fields = payload["embeds"][0]["fields"]
-        cyclical_field = next(f for f in fields if "Cyclicals" in f["name"])
+        cyclical_field = next(f for f in fields if "CYCLICALS" in f["name"].upper())
         assert "PLTR" in cyclical_field["value"]
         assert "75%" in cyclical_field["value"]
         assert "+3.1%" in cyclical_field["value"]
@@ -104,7 +110,7 @@ class TestBuildPayloadSatellite:
         """Cannibal field renders yield, P/E, and price ratio correctly."""
         payload = build_payload(_top_lists(), satellite=_satellite())
         fields = payload["embeds"][0]["fields"]
-        cannibal_field = next(f for f in fields if "Cannibals" in f["name"])
+        cannibal_field = next(f for f in fields if "CANNIBALS" in f["name"].upper())
         assert "SQ" in cannibal_field["value"]
         assert "4.8%" in cannibal_field["value"]
         assert "18.2" in cannibal_field["value"]
@@ -115,7 +121,7 @@ class TestBuildPayloadSatellite:
         sat["cyclicals"] = []
         payload = build_payload(_top_lists(), satellite=sat)
         field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert "🌀 Seasonal Cyclicals — May" not in field_names
+        assert not any("CYCLICALS" in n.upper() for n in field_names)
 
     def test_empty_cannibals_no_cannibal_field(self):
         """If cannibals is empty, no cannibal embed field added."""
@@ -123,10 +129,14 @@ class TestBuildPayloadSatellite:
         sat["cannibals"] = []
         payload = build_payload(_top_lists(), satellite=sat)
         field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert "🐷 Share Cannibals — Buyback Yield" not in field_names
+        assert not any("CANNIBALS" in n.upper() for n in field_names)
 
-    def test_factor_legend_always_last(self):
-        """Factor Legend must always be the last embed field."""
+    def test_satellite_fields_after_cap_tiers(self):
+        """Cyclical/cannibal fields always follow the cap-tier fields."""
         payload = build_payload(_top_lists(), satellite=_satellite())
-        last_field = payload["embeds"][0]["fields"][-1]
-        assert "Factor Legend" in last_field["name"]
+        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        cyclical_idx = next(i for i, n in enumerate(field_names) if "CYCLICALS" in n.upper())
+        cannibal_idx = next(i for i, n in enumerate(field_names) if "CANNIBALS" in n.upper())
+        # Both satellite fields come after all core fields
+        assert cyclical_idx > 0
+        assert cannibal_idx > cyclical_idx

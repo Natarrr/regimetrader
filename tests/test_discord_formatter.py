@@ -1,51 +1,93 @@
 """tests/test_discord_formatter.py
-Unit tests for Discord formatter — factor line uses "momentum" key.
+Unit tests for Discord formatter helpers.
 """
 from __future__ import annotations
 import pytest
 
 
-class TestFormatFactorLine:
-    def test_reads_momentum_key(self):
-        from scripts.send_toplists_discord import _format_factor_line
-        factors = {
-            "edgar": 0.80, "insider": 0.70, "congress": 0.60,
-            "news": 0.55, "momentum": 0.65,
+class TestFactorGroup:
+    """Tests for _factor_group — grouped factor rendering used in conviction field."""
+
+    def test_renders_edgar_and_insider(self):
+        from scripts.send_toplists_discord import _factor_group, _FUNDAMENTAL
+        factors = {"edgar": 0.80, "insider": 0.70}
+        out = _factor_group(factors, _FUNDAMENTAL)
+        assert "0.80" in out
+        assert "0.70" in out
+        assert "EDGAR" in out
+        assert "Insider" in out
+
+    def test_renders_congress_and_news(self):
+        from scripts.send_toplists_discord import _factor_group, _SENTIMENT
+        factors = {"congress": 0.60, "news": 0.55}
+        out = _factor_group(factors, _SENTIMENT)
+        assert "0.60" in out
+        assert "0.55" in out
+
+    def test_renders_macro(self):
+        from scripts.send_toplists_discord import _factor_group, _TECHNICAL
+        factors = {"macro": 0.99}
+        out = _factor_group(factors, _TECHNICAL)
+        assert "0.99" in out
+
+    def test_missing_key_omitted_not_defaulted(self):
+        from scripts.send_toplists_discord import _factor_group, _FUNDAMENTAL
+        # missing insider → only edgar rendered, no 0.00 filler
+        out = _factor_group({"edgar": 0.72}, _FUNDAMENTAL)
+        assert "0.72" in out
+        assert "Insider" not in out
+
+    def test_empty_factors_returns_dash(self):
+        from scripts.send_toplists_discord import _factor_group, _FUNDAMENTAL
+        assert _factor_group({}, _FUNDAMENTAL) == "—"
+
+
+class TestConvictionField:
+    """Conviction field must expose key signals for the #1 pick."""
+
+    def _entry(self, **overrides):
+        base = {
+            "ticker": "AAPL", "final_score": 0.82, "badge": "HIGH BUY",
+            "sector": "Technology", "market_cap": 3e12, "ceo_buy": False,
+            "factors": {"edgar": 0.80, "insider": 0.90, "congress": 0.60,
+                        "news": 0.70, "macro": 0.50},
         }
-        line = _format_factor_line(factors)
-        assert "0.65" in line, "momentum value 0.65 not in output"
+        base.update(overrides)
+        return base
 
-    def test_momentum_key_present_gives_non_default(self):
-        from scripts.send_toplists_discord import _format_factor_line
-        factors_with    = {"edgar": 0.5, "insider": 0.5, "congress": 0.5, "news": 0.5, "momentum": 0.99}
-        factors_without = {"edgar": 0.5, "insider": 0.5, "congress": 0.5, "news": 0.5}
-        line_with    = _format_factor_line(factors_with)
-        line_without = _format_factor_line(factors_without)
-        assert "0.99" in line_with,    "momentum 0.99 not rendered"
-        assert "0.99" not in line_without
+    def test_ticker_in_field(self):
+        from scripts.send_toplists_discord import _conviction_field
+        f = _conviction_field(self._entry())
+        assert "AAPL" in f["value"]
 
-    def test_macro_key_ignored(self):
-        from scripts.send_toplists_discord import _format_factor_line
-        factors = {
-            "edgar": 0.5, "insider": 0.5, "congress": 0.5,
-            "news": 0.5, "macro": 0.99,
-        }
-        line = _format_factor_line(factors)
-        assert "0.99" not in line, "'macro' key must not affect output"
+    def test_score_in_field(self):
+        from scripts.send_toplists_discord import _conviction_field
+        f = _conviction_field(self._entry())
+        assert "0.8200" in f["value"]
 
-    def test_output_contains_all_five_emojis(self):
-        from scripts.send_toplists_discord import _format_factor_line
-        factors = {"edgar": 0.5, "insider": 0.5, "congress": 0.5, "news": 0.5, "momentum": 0.5}
-        line = _format_factor_line(factors)
-        for emoji in ("📋", "🏦", "🏛️", "📰", "📈"):
-            assert emoji in line, f"{emoji} missing from factor line"
+    def test_ceo_buy_tag_shown(self):
+        from scripts.send_toplists_discord import _conviction_field
+        f = _conviction_field(self._entry(ceo_buy=True))
+        assert "CEO BUY" in f["value"]
 
-    def test_missing_factor_defaults_to_zero_not_neutral(self):
-        from scripts.send_toplists_discord import _format_factor_line
-        # Missing factors must show 0.00, not 0.50 — dead feed is penalised
-        line = _format_factor_line({})
-        assert "0.00" in line, "missing factor must default to 0.00, not 0.50"
-        assert "0.50" not in line, "missing factor must not default to neutral 0.50"
+    def test_ceo_buy_tag_absent_when_false(self):
+        from scripts.send_toplists_discord import _conviction_field
+        f = _conviction_field(self._entry(ceo_buy=False))
+        assert "CEO BUY" not in f["value"]
+
+    def test_factor_groups_all_present(self):
+        from scripts.send_toplists_discord import _conviction_field
+        f = _conviction_field(self._entry())
+        assert "Fundamental" in f["value"]
+        assert "Sentiment" in f["value"]
+        assert "Technical" in f["value"]
+
+    def test_missing_factor_omitted_not_zero(self):
+        from scripts.send_toplists_discord import _conviction_field
+        entry = self._entry()
+        del entry["factors"]["insider"]
+        f = _conviction_field(entry)
+        assert "Insider" not in f["value"]
 
 
 class TestBuildPayloadWeights:
