@@ -463,6 +463,38 @@ def detect_anomalies(
                 value=v, threshold=0.05, action="flag_only",
             ))
 
+    # ── CONGRESS_CLUSTER ─────────────────────────────────────────────────────
+    # Fires when >= CONGRESS_CLUSTER_MIN distinct members bought the same
+    # ticker.  Representatives come from quiver_evidence.congress.representatives
+    # (a list already present on every scored row).  When the congress feed is
+    # dead (empty list), no cluster can form — the check silently passes.
+    #
+    # Thresholds calibrated against empirical Congress trading patterns:
+    #   - Typical S&P 500 ticker: 0–2 members/quarter
+    #   - "Interesting" signal: >= 3 members (top ~5% of distribution)
+    #   - "High-conviction" cluster: >= 5 members (top ~1%)
+    #
+    # The conviction score attached to the record scales linearly:
+    #   3 members → 0.60   5 members → 1.00   (capped at 1.0)
+    _CLUSTER_MIN = 3
+    _CLUSTER_HIGH = 5
+
+    for row in rows:
+        evidence = row.get("quiver_evidence") or {}
+        congress_ev = evidence.get("congress") or {}
+        reps = congress_ev.get("representatives") or []
+        distinct_members = len(set(reps))
+        if distinct_members >= _CLUSTER_MIN:
+            conviction = min(1.0, (distinct_members - _CLUSTER_MIN) /
+                             max(1, _CLUSTER_HIGH - _CLUSTER_MIN) * 0.40 + 0.60)
+            records.append(_record(
+                row.get("ticker", "?"), "CONGRESS_CLUSTER",
+                value=float(distinct_members),
+                threshold=float(_CLUSTER_MIN),
+                action="boost_candidate",
+                source=evidence.get("source", ""),
+            ) | {"conviction_score": round(conviction, 4)})
+
     # ── STALE_DATA (propagate flag from validate_dates) ───────────────────────
     for row in rows:
         if row.get("_stale_data"):

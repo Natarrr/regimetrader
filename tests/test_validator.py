@@ -44,6 +44,35 @@ def _row(
         "insider_source": source,
     }
 
+def _row_with_congress(
+    ticker: str = "AAPL",
+    members: int = 0,
+    purchases: int = 0,
+    sales: int = 0,
+    **kwargs,
+) -> Dict[str, Any]:
+    """Build a scored row with a realistic quiver_evidence.congress payload.
+
+    `members` controls the number of distinct representative names injected,
+    which is what CONGRESS_CLUSTER counts.  When members=0 the list is empty
+    (simulates a dead congress feed).
+    """
+    row = _row(ticker, **kwargs)
+    reps = [f"Rep.{i}" for i in range(members)]
+    row["quiver_evidence"] = {
+        "congress": {
+            "purchases": purchases or members,
+            "sales": sales,
+            "net": (purchases or members) - sales,
+            "recency_days": 5,
+            "representatives": reps,
+        },
+        "source": "quiver",
+        "insider_source": row.get("insider_source", "quiver"),
+    }
+    return row
+
+
 def _source_meta(quiver_age_hours: float = 1.0) -> Dict[str, Any]:
     return {
         "quiver": {"last_updated": _ago_iso(hours=quiver_age_hours)},
@@ -345,3 +374,71 @@ class TestAnomalyDetection:
         assert records == []
         assert not (tmp_path / "anomaly_report_clean.json").exists()
         assert not (tmp_path / "anomaly_report_latest.json").exists()
+
+    # ── CONGRESS_CLUSTER tests ────────────────────────────────────────────────
+
+    def test_congress_cluster_fires_at_min_threshold(self):
+        # Exactly 3 distinct members → cluster fires
+        row = _row_with_congress("NVDA", members=3)
+        records, _ = self._detect([row])
+        assert any(r["ticker"] == "NVDA" and r["flag"] == "CONGRESS_CLUSTER"
+                   for r in records)
+
+    def test_congress_cluster_below_threshold_not_flagged(self):
+        # 2 members < 3 threshold → no flag
+        row = _row_with_congress("MSFT", members=2)
+        records, _ = self._detect([row])
+        assert not any(r["flag"] == "CONGRESS_CLUSTER" for r in records)
+
+    def test_congress_cluster_zero_members_not_flagged(self):
+        # Dead congress feed → empty representatives list → no flag
+        row = _row_with_congress("AAPL", members=0)
+        records, _ = self._detect([row])
+        assert not any(r["flag"] == "CONGRESS_CLUSTER" for r in records)
+
+    def test_congress_cluster_conviction_score_at_min(self):
+        # 3 members → conviction_score = 0.60
+        row = _row_with_congress("AMD", members=3)
+        records, _ = self._detect([row])
+        cluster = next(r for r in records if r["flag"] == "CONGRESS_CLUSTER")
+        assert abs(cluster["conviction_score"] - 0.60) < 1e-4
+
+    def test_congress_cluster_conviction_score_at_high(self):
+        # 5 members → conviction_score = 1.00
+        row = _row_with_congress("META", members=5)
+        records, _ = self._detect([row])
+        cluster = next(r for r in records if r["flag"] == "CONGRESS_CLUSTER")
+        assert abs(cluster["conviction_score"] - 1.00) < 1e-4
+
+    def test_congress_cluster_conviction_score_capped_above_high(self):
+        # 10 members → conviction_score capped at 1.00
+        row = _row_with_congress("TSLA", members=10)
+        records, _ = self._detect([row])
+        cluster = next(r for r in records if r["flag"] == "CONGRESS_CLUSTER")
+        assert cluster["conviction_score"] == 1.0
+
+    def test_congress_cluster_action_is_boost_candidate(self):
+        row = _row_with_congress("JPM", members=4)
+        records, _ = self._detect([row])
+        cluster = next(r for r in records if r["flag"] == "CONGRESS_CLUSTER")
+        assert cluster["action"] == "boost_candidate"
+
+    def test_congress_cluster_value_is_member_count(self):
+        row = _row_with_congress("GS", members=4)
+        records, _ = self._detect([row])
+        cluster = next(r for r in records if r["flag"] == "CONGRESS_CLUSTER")
+        assert cluster["value"] == 4.0
+
+    def test_congress_cluster_no_quiver_evidence_not_flagged(self):
+        # Row without quiver_evidence key entirely → no crash, no flag
+        row = _row("AMZN")
+        records, _ = self._detect([row])
+        assert not any(r["flag"] == "CONGRESS_CLUSTER" for r in records)
+
+    def test_congress_cluster_schema_has_conviction_score(self, tmp_path):
+        # Verify conviction_score is present in the written JSON report
+        row = _row_with_congress("GOOG", members=3)
+        records, _ = self._detect([row], run_id="cc-schema", tmp_path=tmp_path)
+        cluster_records = [r for r in records if r["flag"] == "CONGRESS_CLUSTER"]
+        assert cluster_records, "expected at least one CONGRESS_CLUSTER record"
+        assert "conviction_score" in cluster_records[0]
