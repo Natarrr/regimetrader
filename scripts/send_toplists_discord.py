@@ -194,6 +194,10 @@ def _ticker_detail_field(
             fbar = _score_bar(v, width=8)
             lines.append(f"{label:<14} `{fbar}` `{v:.2f}`")
 
+    boost = float(entry.get("congress_boost", 0.0))
+    if boost > 0.0:
+        lines.append(f"🏛 Boost         `+{boost:.2f}` Congress cluster")
+
     # Remove empty lines (meta can be blank)
     value = "\n".join(line for line in lines if line != "")
     return {
