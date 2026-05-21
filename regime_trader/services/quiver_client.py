@@ -156,9 +156,14 @@ class QuiverClient:
         Response fields: Representative, BioGuideID, ReportDate, TransactionDate,
         Ticker, Transaction, Range, House, Amount, Party, TickerType,
         ExcessReturn, PriceChange.
+
+        Cache note: an empty list [] is NOT cached — a previous failed run
+        (S3 403, network error) may have written [] to disk.  Treating [] as
+        a valid cache hit would silence the live feed indefinitely until the
+        6-hour TTL expires.  We only cache non-empty results.
         """
         cached = self._cache_read("congresstrading", "all")
-        if cached is not None:
+        if cached:   # truthy check: ignores None AND stale empty-list cache
             return cached
         if not self._api_key:
             return []
