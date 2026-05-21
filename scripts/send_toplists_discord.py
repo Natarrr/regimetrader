@@ -531,64 +531,77 @@ def build_payload(
 
     alert_block = ("\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)) if alerts else ""
 
-    # ── Description: TL;DR — all critical signals visible without scrolling ─
-    boost_status  = "ON 🏛" if congress_boost_on else "OFF"
-    feed_note     = "  ⚠️ *feed down — redistributed*" if weights_redistributed else ""
-    summary_parts = [f"**{len(top_buys)} Buy{'s' if len(top_buys) != 1 else ''}**"]
-    if anomaly_count:
-        summary_parts.append(f"**{anomaly_count} Anomaly{'s' if anomaly_count != 1 else ''}** ⚠️")
-    summary_parts.append(f"Congress Boost: **{boost_status}**")
-    summary_line = "  |  ".join(summary_parts)
+    # ── Description: 2-line mobile header ─────────────────────────────────
+    feed_note   = "  ⚠️ *feed down — redistributed*" if weights_redistributed else ""
+    vix_regime  = get_market_regime(float(vix_val)) if vix_val is not None else "VIX —"
+    pipeline_nm = top_lists.get("pipeline", "EDGAR-first")
 
     description = (
-        f"{summary_line}\n"
-        f"`{ticker_count} tickers`{vix_str}  ·  EDGAR-first{feed_note}"
+        f"**[REGIME TRADER]** Daily Market Report — **{date_str}**\n"
+        f"{vix_regime}{feed_note}"
         f"{alert_block}"
     )
 
-    # ── Fields: compact ticker cards (incremental 1900-char budget) ────────
+    # ── Fields ────────────────────────────────────────────────────────────
     fields: List[Dict[str, Any]] = []
 
-    if top_buys:
-        # Shadow rank lookup for conviction trend arrows
-        shadow_buys    = top_lists.get("shadow_top_buys") or []
-        shadow_rank_of = {e.get("ticker", ""): i for i, e in enumerate(shadow_buys, 1)}
+    shadow_buys    = top_lists.get("shadow_top_buys") or []
+    shadow_rank_of = {e.get("ticker", ""): i for i, e in enumerate(shadow_buys, 1)}
 
-        used = 0
-        added = 0
-        for i, e in enumerate(top_buys[:5], 1):
-            ticker     = e.get("ticker", "")
-            shadow_r   = shadow_rank_of.get(ticker)
+    def _ticker_fields(entries, max_n, budget, is_mid_cap):
+        """Render up to max_n ticker cards within character budget."""
+        result = []
+        used   = 0
+        added  = 0
+        for i, e in enumerate(entries[:max_n], 1):
+            ticker_    = e.get("ticker", "")
+            shadow_r   = shadow_rank_of.get(ticker_)
             rank_delta = (shadow_r - i) if shadow_r is not None else None
-            buyback_cv = buyback_conv_of.get(ticker.upper())
+            buyback_cv = buyback_conv_of.get(ticker_.upper())
             field = _ticker_detail_field(
                 i, e,
-                anomaly_flags=anomaly_map.get(ticker),
+                anomaly_flags=anomaly_map.get(ticker_),
                 rank_delta=rank_delta,
                 buyback_conv=buyback_cv,
+                mid_cap=is_mid_cap,
             )
             flen = len(field["value"])
-            if used + flen > 1900 and added > 0:
-                remaining = len(top_buys[:5]) - added
-                fields.append({
+            if used + flen > budget and added > 0:
+                shown = added
+                total = min(max_n, len(entries))
+                result.append({
                     "name":   "…",
-                    "value":  f"*+ {remaining} more ticker{'s' if remaining != 1 else ''} — run `--dry-run` for full output*",
+                    "value":  f"... [{shown}/{total}] shown — full report in logs",
                     "inline": False,
                 })
                 break
-            fields.append(field)
+            result.append(field)
             used  += flen
             added += 1
+        return result
 
-    # Cap tiers (optional — mid/small caps)
+    # ── Large Cap section ─────────────────────────────────────────────────
+    if top_buys:
+        fields.append({
+            "name":   "🏆 Top 5 — Large Caps",
+            "value":  "​",
+            "inline": False,
+        })
+        fields.extend(_ticker_fields(top_buys, max_n=5, budget=1900, is_mid_cap=False))
+
+    # ── Mid Cap section ───────────────────────────────────────────────────
     mid_caps   = top_lists.get("mid_caps")   or []
     small_caps = top_lists.get("small_caps") or []
-    if mid_caps:
-        fields.append(_cap_tier_field("📈  Mid Caps  ($2B–$10B)", mid_caps))
-    if small_caps:
-        fields.append(_cap_tier_field("🔬  Small Caps  (<$2B)", small_caps))
 
-    # Satellite detail blocks (cyclicals + cannibals)
+    if mid_caps:
+        fields.append({
+            "name":   "📈 Top 3 — Mid Caps ($2B–$10B)",
+            "value":  "​",
+            "inline": False,
+        })
+        fields.extend(_ticker_fields(mid_caps, max_n=3, budget=1900, is_mid_cap=True))
+
+    # ── Satellite detail blocks (cyclicals + cannibals) ───────────────────
     try:
         if satellite and isinstance(satellite, dict):
             month_label = satellite.get("month", "")
@@ -621,12 +634,25 @@ def build_payload(
     except Exception as exc:
         log.warning("satellite embed fields skipped: %s", exc)
 
-    # Sector heatmap — dynamic exposure from entry["sector"] (SSOT)
-    heatmap = _sector_heatmap(top_buys)
-    if heatmap:
+    # ── Sector Exposure — structured chip grid ────────────────────────────
+    all_entries = list(top_buys[:5]) + list(mid_caps[:3])
+    structured  = _sector_heatmap_structured(all_entries)
+    if structured:
+        sorted_sectors = sorted(
+            structured.items(),
+            key=lambda kv: (-len(kv[1]), -(kv[1][0][1] if kv[1] else 0)),
+        )
+        sector_lines = []
+        for lbl, pairs in sorted_sectors:
+            total_in_sector = sum(
+                1 for e in all_entries
+                if _SECTOR_SHORT.get((e.get("sector") or "").strip(), _SECTOR_MISC) == lbl
+            )
+            chips = "  ".join(f"`{t}` {s:.2f}" for t, s in pairs)
+            sector_lines.append(f"{lbl} ({total_in_sector})  {chips}")
         fields.append({
             "name":   "📊  Sector Exposure",
-            "value":  heatmap,
+            "value":  _truncate("\n".join(sector_lines), 1024),
             "inline": False,
         })
 
@@ -639,8 +665,7 @@ def build_payload(
         gap_note = f" (Lag: {', '.join(s.upper() for s in lagging_sources)})"
     else:
         gap_note = ""
-    mode_str    = "Live" if not kill_switch else "Kill-Switch"
-    footer_text = f"{latency_part}Cov: {coverage_pct}{gap_note}  |  Mode: {mode_str}  |  Run: {run_id}"
+    footer_text = f"Run: {run_id}  |  Pipeline: {pipeline_nm}"
 
     embed = {
         "title":       f"⚡ Alpha Pipeline  [{date_str}]",
@@ -846,8 +871,76 @@ def run_tests() -> int:
     except Exception:
         failures.append(f"FAIL [heatmap_structured]: {traceback.format_exc()}")
 
+    # ── Test 11: header description format ────────────────────────────────────
+    try:
+        tl = _base_tl(vix=18.3)
+        payload = build_payload(tl)
+        desc = payload["embeds"][0]["description"]
+        _check("header_regime_trader_tag", "[REGIME TRADER]" in desc, f"desc={desc!r}")
+        _check("header_vix_value",         "18.3" in desc,            f"desc={desc!r}")
+        _check("header_stable_regime",     "STABLE" in desc,          f"desc={desc!r}")
+    except Exception:
+        failures.append(f"FAIL [header_description]: {traceback.format_exc()}")
+
+    # ── Test 12: section-title separator fields ────────────────────────────────
+    try:
+        tl = _base_tl(top_buys=[_entry("AAPL")])
+        payload = build_payload(tl)
+        names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        _check("large_cap_section_title",
+               any("Large Cap" in n for n in names), f"names={names}")
+    except Exception:
+        failures.append(f"FAIL [section_titles]: {traceback.format_exc()}")
+
+    # ── Test 13: Mid Cap fields rendered ──────────────────────────────────────
+    try:
+        mid = [_entry("CRDO", sector="Materials", score=0.74),
+               _entry("TMDX", sector="Health Care", score=0.69)]
+        tl = _base_tl(top_buys=[_entry("AAPL")], mid_caps=mid)
+        payload = build_payload(tl)
+        names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        _check("midcap_section_title",
+               any("Mid Cap" in n for n in names), f"names={names}")
+        _check("midcap_ticker_field",
+               any("CRDO" in n for n in names),    f"names={names}")
+    except Exception:
+        failures.append(f"FAIL [midcap_fields]: {traceback.format_exc()}")
+
+    # ── Test 14: Sector Exposure chip format ───────────────────────────────────
+    try:
+        tl = _base_tl(top_buys=[_entry("AAPL", sector="Information Technology", score=0.87),
+                                  _entry("MSFT", sector="Information Technology", score=0.81)])
+        payload = build_payload(tl)
+        fields  = payload["embeds"][0]["fields"]
+        sector_field = next((f for f in fields if "Sector" in f["name"]), None)
+        _check("sector_field_exists", sector_field is not None)
+        val = sector_field["value"] if sector_field else ""
+        _check("sector_chip_aapl", "AAPL" in val, f"val={val!r}")
+        _check("sector_chip_msft", "MSFT" in val, f"val={val!r}")
+    except Exception:
+        failures.append(f"FAIL [sector_chips]: {traceback.format_exc()}")
+
+    # ── Test 15: truncation message format updated ────────────────────────
+    try:
+        fat_entry = _entry("FAT", score=0.9)
+        fat_entry["factors"] = {k: 0.99 for k in ("edgar","insider","congress","news","macro")}
+        tl = _base_tl(top_buys=[fat_entry] * 5)
+        payload = build_payload(tl)
+        fields  = payload["embeds"][0]["fields"]
+        trunc_field = next((f for f in fields if "shown" in f.get("value", "")), None)
+        all_five    = sum(1 for f in fields if f["name"].startswith("#")) == 5
+        _check("truncation_or_all_fit",
+               trunc_field is not None or all_five,
+               f"fields={[f['name'] for f in fields]}")
+        if trunc_field:
+            _check("truncation_new_format",
+                   "shown — full report in logs" in trunc_field["value"],
+                   f"val={trunc_field['value']!r}")
+    except Exception:
+        failures.append(f"FAIL [truncation_format]: {traceback.format_exc()}")
+
     # ── Report ────────────────────────────────────────────────────────────
-    total_tests = 20   # approximate assertion count above
+    total_tests = 30   # approximate assertion count above
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
