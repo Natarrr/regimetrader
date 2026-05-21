@@ -1,0 +1,39 @@
+[run]
+# Alpha-Critical: measure only the core scoring / signal engine
+source =
+    backend/market_intel
+    regime_trader/scoring
+    regime_trader/models
+    regime_trader/services/quiver_client.py
+    scripts/send_toplists_discord.py
+
+omit =
+    # Live scaffolding — hard to unit-test, not trading logic
+    scripts/run_pipeline.py
+    backend/engine_worker.py
+    monitoring/*
+    # UI
+    regime_trader/ui/*
+    # Data ingestion / offline tools
+    backend/data/*
+    scripts/backtest_signals.py
+    scripts/mock_webhook_server.py
+    scripts/check_imports.py
+    scripts/check_secrets.py
+    scripts/audit/*
+    # Dead / manual / offline
+    regime_trader/utils/volatility.py
+    regime_trader/services/revolut_commodities_parser.py
+    regime_trader/services/revolut_parser.py
+    regime_trader/scanners/*
+    # Quant model stubs (untested by design in CI)
+    backend/quant_models/*
+    backend/tests/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    ^\s*\.\.\.$

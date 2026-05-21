@@ -157,26 +157,8 @@ jobs:
           CI: "true"
         run: |
           pytest tests/ -q --tb=short -m "not slow" --timeout=60 \
-            --cov=regime_trader --cov=scripts --cov=backend --cov=monitoring \
-            --cov-report=term-missing --cov-fail-under=60 \
-            --cov-omit="regime_trader/ui/streamlit_app.py" \
-            --cov-omit="regime_trader/ui/portfolio_advisor_engine.py" \
-            --cov-omit="regime_trader/utils/volatility.py" \
-            --cov-omit="regime_trader/services/revolut_commodities_parser.py" \
-            --cov-omit="regime_trader/services/revolut_parser.py" \
-            --cov-omit="regime_trader/scanners/discovery_scanner.py" \
-            --cov-omit="regime_trader/scanners/market_intel_macro.py" \
-            --cov-omit="backend/engine_worker.py" \
-            --cov-omit="backend/data/fred_service.py" \
-            --cov-omit="backend/data/schemas.py" \
-            --cov-omit="backend/quant_models/*" \
-            --cov-omit="backend/tests/*" \
-            --cov-omit="scripts/backtest_signals.py" \
-            --cov-omit="scripts/run_pipeline.py" \
-            --cov-omit="scripts/mock_webhook_server.py" \
-            --cov-omit="scripts/check_imports.py" \
-            --cov-omit="scripts/audit/*" \
-            --cov-omit="monitoring/minsky_alert.py"
+            --cov --cov-config=.coveragerc \
+            --cov-report=term-missing --cov-fail-under=60
 
       - name: Run test suite — backend/tests/
         # backend/tests/ is optional — skip gracefully if directory absent
