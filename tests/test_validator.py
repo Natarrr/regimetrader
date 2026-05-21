@@ -4,11 +4,9 @@ All fixtures are in-memory — no network calls.
 """
 from __future__ import annotations
 
-import json
 import math
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
@@ -276,7 +274,8 @@ class TestAnomalyDetection:
     def _detect(self, rows, run_id="test-run", tmp_path=None):
         from backend.market_intel.validator import detect_anomalies
         if tmp_path is None:
-            import tempfile, pathlib
+            import pathlib
+            import tempfile
             tmp_path = pathlib.Path(tempfile.mkdtemp())
         return detect_anomalies(rows, run_id=run_id, log_dir=tmp_path), tmp_path
 

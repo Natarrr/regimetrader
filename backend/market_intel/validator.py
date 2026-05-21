@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import re as _re
 import tempfile
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -96,8 +97,6 @@ class Normalizer:
 
 
 # ── Validation data structures ────────────────────────────────────────────────
-
-import re as _re
 
 _TICKER_RE = _re.compile(r"^[A-Z]{1,5}$")
 
