@@ -480,11 +480,6 @@ def build_payload(
     if age_h is not None and age_h > _STALE_HOURS:
         color = _COLOR_RED
 
-    # ── Data-Gap Indicator — feed-down detection for alerts ──────────────
-    _KNOWN_SOURCES = {"edgar", "insider", "congress", "news", "momentum"}
-    present_sources = set(weights.keys()) if weights else set()
-    missing_sources = sorted(_KNOWN_SOURCES - present_sources) if present_sources else []
-
     # ── Buyback lookup: in-flight join of satellite.cannibals[] onto top_buys
     # satellite_insights.json is optional — graceful degradation on absence.
     buyback_conv_of: Dict[str, float] = {}
