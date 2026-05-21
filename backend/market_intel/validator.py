@@ -133,3 +133,40 @@ def validate_tickers(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationI
                 code="INVALID_TICKER", original_value=t,
             ))
     return (len(issues) == 0, issues)
+
+
+# ── validate_amounts ──────────────────────────────────────────────────────────
+
+_AMOUNT_FIELDS = ("insider_usd", "market_cap")
+
+
+def validate_amounts(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationIssue]]:
+    """Check insider_usd and market_cap are positive finite numbers.
+
+    Invalid values are set to float("nan") in-place.
+    Row is tagged _validation_failed=True on any failure.
+    Never raises.
+    """
+    issues: List[ValidationIssue] = []
+    for row in rows:
+        ticker = row.get("ticker", "?")
+        for field in _AMOUNT_FIELDS:
+            val = row.get(field)
+            bad = False
+            if val is None:
+                bad = True
+            else:
+                try:
+                    fval = float(val)
+                    if math.isnan(fval) or math.isinf(fval) or fval <= 0:
+                        bad = True
+                except (TypeError, ValueError):
+                    bad = True
+            if bad:
+                row[field] = float("nan")
+                row["_validation_failed"] = True
+                issues.append(ValidationIssue(
+                    ticker=ticker, field=field,
+                    code="MISSING_AMOUNT", original_value=val,
+                ))
+    return (len(issues) == 0, issues)

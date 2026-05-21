@@ -151,3 +151,34 @@ class TestValidation:
         ok, issues = self._validate_tickers([row])
         assert ok is False
         assert row.get("_validation_failed") is True
+
+    def test_zero_insider_usd_sets_nan_and_fails(self):
+        from backend.market_intel.validator import validate_amounts
+        row = _row(insider_usd=0.0)
+        ok, issues = validate_amounts([row])
+        assert ok is False
+        assert math.isnan(row["insider_usd"])
+        assert row.get("_validation_failed") is True
+
+    def test_negative_market_cap_sets_nan_and_fails(self):
+        from backend.market_intel.validator import validate_amounts
+        row = _row(market_cap=-1.0)
+        ok, issues = validate_amounts([row])
+        assert ok is False
+        assert math.isnan(row["market_cap"])
+        assert row.get("_validation_failed") is True
+
+    def test_none_insider_usd_sets_nan(self):
+        from backend.market_intel.validator import validate_amounts
+        row = _row()
+        row["insider_usd"] = None
+        ok, issues = validate_amounts([row])
+        assert ok is False
+        assert math.isnan(row["insider_usd"])
+
+    def test_valid_amounts_pass(self):
+        from backend.market_intel.validator import validate_amounts
+        row = _row(insider_usd=50_000.0, market_cap=3e12)
+        ok, issues = validate_amounts([row])
+        assert ok is True
+        assert issues == []
