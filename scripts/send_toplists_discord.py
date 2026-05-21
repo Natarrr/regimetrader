@@ -156,44 +156,39 @@ def _top_conviction_field(entries: List[Dict]) -> Dict[str, Any]:
 
 
 def _fundamentals_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Fundamentals: Factor | Score code-block table — inline."""
+    """Fundamentals: compact Factor | Score block — full-width, mobile-safe."""
     top = entries[0] if entries else {}
     factors = top.get("factors", {})
-    rows = ["```", f"{'Factor':<12} Score", "─" * 20]
+    # Max row width: 9 (label) + 1 + 4 (score) = 14 chars — never wraps on mobile
+    rows = ["```", f"{'Factor':<9} Score", "─" * 16]
     for k in _FUNDAMENTAL:
         v = factors.get(k)
         if v is not None:
             label = _FACTOR_LABEL.get(k, k.upper())
-            rows.append(f"{label:<12} {v:.4f}")
+            rows.append(f"{label:<9} {v:.4f}")
     rows.append("```")
     return {
         "name":   "Fundamentals",
         "value":  _truncate("\n".join(rows), 1020),
-        "inline": True,
+        "inline": False,
     }
 
 
 def _sentiment_field(entries: List[Dict]) -> Dict[str, Any]:
-    """Sentiment: Factor | Score code-block table — inline."""
+    """Sentiment + Technical: compact Factor | Score block — full-width, mobile-safe."""
     top = entries[0] if entries else {}
     factors = top.get("factors", {})
-    rows = ["```", f"{'Factor':<12} Score", "─" * 20]
-    for k in _SENTIMENT:
+    rows = ["```", f"{'Factor':<9} Score", "─" * 16]
+    for k in (*_SENTIMENT, *_TECHNICAL):
         v = factors.get(k)
         if v is not None:
             label = _FACTOR_LABEL.get(k, k.upper())
-            rows.append(f"{label:<12} {v:.4f}")
-    # Also include technical / macro in this table if present (keeps inline pair tight)
-    for k in _TECHNICAL:
-        v = factors.get(k)
-        if v is not None:
-            label = _FACTOR_LABEL.get(k, k.upper())
-            rows.append(f"{label:<12} {v:.4f}")
+            rows.append(f"{label:<9} {v:.4f}")
     rows.append("```")
     return {
         "name":   "Sentiment",
         "value":  _truncate("\n".join(rows), 1020),
-        "inline": True,
+        "inline": False,
     }
 
 
@@ -303,20 +298,20 @@ def _factor_inline_fields(entries: List[Dict]) -> List[Dict[str, Any]]:
 
 
 def _cap_tier_field(name: str, entries: List[Dict]) -> Dict[str, Any]:
-    """Compact code-block table for a cap tier (mid or small)."""
+    """Compact code-block table for a cap tier — full-width, mobile-safe (<24 chars/row)."""
     if not entries:
-        return {"name": name, "value": "_No data._", "inline": True}
-    rows = ["```", f"{'#':<3} {'TICKER':<7} SCORE"]
-    rows.append("─" * 22)
+        return {"name": name, "value": "_No data._", "inline": False}
+    # Row: "1  TICKER  0.7200 ⚡"  = 2+6+7+1 = max ~18 chars
+    rows = ["```", f"{'#':<2} {'TICKER':<6} SCORE", "─" * 18]
     for i, e in enumerate(entries[:5], 1):
         score = float(e.get("final_score", 0))
-        ceo   = "⚡" if e.get("ceo_buy") else " "
-        rows.append(f"{i:<3} {e.get('ticker','?'):<7} {score:.4f} {ceo}")
+        ceo   = " ⚡" if e.get("ceo_buy") else ""
+        rows.append(f"{i:<2} {e.get('ticker','?'):<6} {score:.4f}{ceo}")
     rows.append("```")
     return {
         "name":   name,
         "value":  _truncate("\n".join(rows), 1020),
-        "inline": True,
+        "inline": False,
     }
 
 
@@ -446,33 +441,33 @@ def build_payload(top_lists: Dict[str, Any], satellite: Optional[Dict[str, Any]]
             cannibals   = satellite.get("cannibals") or []
 
             if cyclicals:
-                rows = ["```", f"{'#':<3} {'TICKER':<7} {'WIN%':<7} {'MEDIAN':>7}  YRS"]
-                rows.append("─" * 34)
+                # Row max: "1  TICKER  75%  +3.1%  9" = ~24 chars
+                rows = ["```", f"{'#':<2} {'TKR':<5} {'WIN':<5} {'MED':<7} YRS", "─" * 24]
                 for i, c in enumerate(cyclicals, 1):
                     wr  = f"{c['win_rate']:.0%}"
                     med = f"{c['median_return']:+.1%}"
                     yr  = c.get("years", "?")
-                    rows.append(f"{i:<3} {c['ticker']:<7} {wr:<7} {med:>7}  {yr}")
+                    rows.append(f"{i:<2} {c['ticker']:<5} {wr:<5} {med:<7} {yr}")
                 rows.append("```")
                 fields.append({
                     "name":   f"Seasonal Cyclicals — {month_label}",
                     "value":  _truncate("\n".join(rows)),
-                    "inline": True,
+                    "inline": False,
                 })
 
             if cannibals:
-                rows = ["```", f"{'#':<3} {'TICKER':<7} {'YIELD':<7} {'P/E':>5}  P/52wL"]
-                rows.append("─" * 34)
+                # Row max: "1  TICKER  4.8%  18.2  1.18×" = ~26 chars
+                rows = ["```", f"{'#':<2} {'TKR':<5} {'YLD':<5} {'P/E':<5} P/52w", "─" * 26]
                 for i, c in enumerate(cannibals, 1):
                     yld = f"{c.get('buyback_yield', 0):.1%}"
                     pe  = f"{c.get('pe', 0):.1f}"
                     pvl = f"{c.get('price_vs_52w_low', 0):.2f}×"
-                    rows.append(f"{i:<3} {c['ticker']:<7} {yld:<7} {pe:>5}  {pvl}")
+                    rows.append(f"{i:<2} {c['ticker']:<5} {yld:<5} {pe:<5} {pvl}")
                 rows.append("```")
                 fields.append({
                     "name":   "Share Cannibals — Buyback Yield",
                     "value":  _truncate("\n".join(rows)),
-                    "inline": True,
+                    "inline": False,
                 })
     except Exception as exc:
         log.warning("satellite embed fields skipped due to error: %s", exc)
