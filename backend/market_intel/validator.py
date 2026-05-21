@@ -170,3 +170,102 @@ def validate_amounts(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationI
                     code="MISSING_AMOUNT", original_value=val,
                 ))
     return (len(issues) == 0, issues)
+
+
+# ── validate_dates ────────────────────────────────────────────────────────────
+
+_CLOCK_SKEW_SECONDS = 60.0
+
+
+def _parse_dt(ts: Any) -> Optional[datetime]:
+    """Parse ISO-8601 string to UTC-aware datetime. Returns None on failure."""
+    if not isinstance(ts, str):
+        return None
+    try:
+        from dateutil.parser import isoparse
+        dt = isoparse(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def validate_dates(
+    rows: List[Dict[str, Any]],
+    source_meta: Dict[str, Dict[str, Any]],
+    max_age_days: int = 5,
+    source_stale_hours: float = 48.0,
+) -> Tuple[bool, List[ValidationIssue]]:
+    """Check computed_at timestamps and source freshness.
+
+    Row-level checks (per ticker):
+      - INVALID_DATE:  unparseable -> _validation_failed=True
+      - FUTURE_DATE:   > now + 60s -> _validation_failed=True
+      - STALE_DATA:    age > max_age_days -> _stale_data=True (flag_only, NOT failed)
+
+    Source-level check (quarantines all rows from that source):
+      - STALE_SOURCE:  source last_updated > source_stale_hours -> _validation_failed=True
+
+    Never raises.
+    """
+    from datetime import timedelta
+    issues: List[ValidationIssue] = []
+    now = datetime.now(timezone.utc)
+
+    # ── Source-level staleness check first ─────────────────────────────────────
+    stale_sources: set = set()
+    for source_name, meta in source_meta.items():
+        lu_str = meta.get("last_updated")
+        lu_dt = _parse_dt(lu_str)
+        if lu_dt is None:
+            continue
+        age_h = (now - lu_dt).total_seconds() / 3600.0
+        if age_h > source_stale_hours:
+            stale_sources.add(source_name)
+            issues.append(ValidationIssue(
+                ticker="__SOURCE__", field="last_updated",
+                code="STALE_SOURCE",
+                original_value=f"{source_name} age={age_h:.1f}h",
+            ))
+
+    # ── Per-row checks ─────────────────────────────────────────────────────────
+    for row in rows:
+        ticker = row.get("ticker", "?")
+
+        # Source quarantine
+        row_source = row.get("insider_source", "")
+        if row_source in stale_sources:
+            row["_validation_failed"] = True
+            row["_stale_source"] = True
+            continue  # no need to check individual timestamps
+
+        ts_str = row.get("computed_at")
+        dt = _parse_dt(ts_str)
+
+        if dt is None:
+            row["_validation_failed"] = True
+            issues.append(ValidationIssue(
+                ticker=ticker, field="computed_at",
+                code="INVALID_DATE", original_value=ts_str,
+            ))
+            continue
+
+        if dt > now + timedelta(seconds=_CLOCK_SKEW_SECONDS):
+            row["_validation_failed"] = True
+            issues.append(ValidationIssue(
+                ticker=ticker, field="computed_at",
+                code="FUTURE_DATE", original_value=ts_str,
+            ))
+            continue
+
+        age_days = (now - dt).total_seconds() / 86400.0
+        if age_days > max_age_days:
+            row["_stale_data"] = True   # flag_only — not _validation_failed
+            issues.append(ValidationIssue(
+                ticker=ticker, field="computed_at",
+                code="STALE_DATA", original_value=ts_str,
+            ))
+
+    all_ok = all(i.code not in ("INVALID_DATE", "FUTURE_DATE", "STALE_SOURCE") for i in issues)
+    return (all_ok, issues)

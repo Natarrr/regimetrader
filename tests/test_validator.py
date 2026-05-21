@@ -182,3 +182,56 @@ class TestValidation:
         ok, issues = validate_amounts([row])
         assert ok is True
         assert issues == []
+
+    def test_unparseable_date_quarantines_ticker(self):
+        from backend.market_intel.validator import validate_dates
+        row = _row()
+        row["computed_at"] = "not-a-date"
+        ok, issues = validate_dates([row], _source_meta())
+        assert ok is False
+        assert row.get("_validation_failed") is True
+        assert any(i.code == "INVALID_DATE" for i in issues)
+
+    def test_future_date_quarantines_ticker(self):
+        from backend.market_intel.validator import validate_dates
+        row = _row(timestamp=_future_iso(hours=2))
+        ok, issues = validate_dates([row], _source_meta())
+        assert ok is False
+        assert row.get("_validation_failed") is True
+        assert any(i.code == "FUTURE_DATE" for i in issues)
+
+    def test_stale_row_flag_only(self):
+        from backend.market_intel.validator import validate_dates
+        row = _row(timestamp=_ago_iso(days=6))
+        ok, issues = validate_dates([row], _source_meta(), max_age_days=5)
+        # flag_only — row stays, but _stale_data=True, NOT _validation_failed
+        assert row.get("_stale_data") is True
+        assert row.get("_validation_failed") is not True
+
+    def test_fresh_row_passes(self):
+        from backend.market_intel.validator import validate_dates
+        row = _row(timestamp=_ago_iso(hours=1))
+        ok, issues = validate_dates([row], _source_meta())
+        assert ok is True
+        assert issues == []
+        assert row.get("_validation_failed") is not True
+
+    def test_stale_source_quarantines_all_source_rows(self):
+        from backend.market_intel.validator import validate_dates
+        rows = [_row(source="quiver") for _ in range(3)]
+        meta = _source_meta(quiver_age_hours=61)  # > 48h threshold
+        ok, issues = validate_dates(rows, meta, source_stale_hours=48)
+        assert ok is False
+        for row in rows:
+            assert row.get("_validation_failed") is True
+            assert row.get("_stale_source") is True
+        assert any(i.code == "STALE_SOURCE" for i in issues)
+
+    def test_fresh_source_does_not_quarantine(self):
+        from backend.market_intel.validator import validate_dates
+        rows = [_row(source="quiver") for _ in range(3)]
+        meta = _source_meta(quiver_age_hours=2)   # well within 48h
+        ok, issues = validate_dates(rows, meta, source_stale_hours=48)
+        assert ok is True
+        for row in rows:
+            assert row.get("_validation_failed") is not True
