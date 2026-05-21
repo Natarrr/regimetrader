@@ -5,7 +5,6 @@ Historical validation: yield curve was inverted 2006-2007 pre-GFC.
 """
 import numpy as np
 import pandas as pd
-import pytest
 
 from backend.quant_models.monetary_pulse import (
     yield_spread,
@@ -40,7 +39,6 @@ class TestYieldSpread:
 
     def test_is_inverted_true_when_negative(self, yield_data_pre_gfc):
         gs10, gs2 = yield_data_pre_gfc
-        spread = yield_spread(gs10, gs2)
         # Manufacture a clearly inverted series for the check
         inverted = pd.Series([-50.0, -30.0, -20.0])
         assert is_inverted(inverted) is True
@@ -100,7 +98,6 @@ class TestHPFilter:
 class TestMonetaryRegime:
     def test_tightening_when_inverted(self, yield_data_pre_gfc, m2v_series):
         gs10, gs2 = yield_data_pre_gfc
-        spread = yield_spread(gs10, gs2)
         inverted_spread = pd.Series([-30.0, -50.0, -20.0])
         regime = monetary_regime(inverted_spread, m2v_series)
         assert regime == "TIGHTENING"

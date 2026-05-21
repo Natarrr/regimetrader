@@ -3,8 +3,6 @@ Validates Module C — Valuation Radar (Shiller / Thaler).
 
 Historical validation: CAPE > 30 in 2007 pre-GFC, CAPE < 15 in 2009 trough.
 """
-import pytest
-import numpy as np
 import pandas as pd
 
 from backend.quant_models.valuation_radar import (

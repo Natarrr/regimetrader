@@ -593,7 +593,6 @@ def generate_macro_synthesis(
     """
     paras: List[str] = []
     crude = prices.get("CL=F") or {}
-    brent = prices.get("BZ=F") or {}
     gold = prices.get("GC=F") or {}
     copper = prices.get("HG=F") or {}
     wheat = prices.get("ZW=F") or {}

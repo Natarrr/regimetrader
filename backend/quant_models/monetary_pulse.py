@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import Tuple
 
-import numpy as np
 import pandas as pd
 from statsmodels.tsa.filters.hp_filter import hpfilter
 
@@ -18,7 +17,7 @@ from statsmodels.tsa.filters.hp_filter import hpfilter
 # ── Yield Curve ────────────────────────────────────────────────────────────────
 
 def yield_spread(gs10: pd.Series, gs2: pd.Series) -> pd.Series:
-    """Friedman (1968 Nobel) — Monetary tightening leads recession by 12-18M.
+    r"""Friedman (1968 Nobel) — Monetary tightening leads recession by 12-18M.
 
     The 10Y-2Y Treasury spread is the canonical leading indicator of credit
     conditions. When it inverts (Δ < 0) the Fed has tightened faster than
@@ -43,7 +42,7 @@ def yield_spread(gs10: pd.Series, gs2: pd.Series) -> pd.Series:
 def is_inverted(spread_bps: pd.Series) -> bool:
     """Friedman (1968 Nobel) — Returns True when the latest spread is negative.
 
-    # $\text{inverted} = \mathbf{1}[\Delta_t < 0]$
+    # $\text{inverted} = \\mathbf{1}[\\Delta_t < 0]$
     """
     return float(spread_bps.iloc[-1]) < 0.0
 
@@ -86,7 +85,7 @@ def hp_filter_trend(series: pd.Series, lam: int = 1600) -> Tuple[pd.Series, pd.S
     Standard smoothing parameter: λ=1600 for quarterly data (Hodrick-Prescott 1997).
     Use λ=129600 for monthly, λ=6.25 for annual.
 
-    # $\min_{\tau} \sum_{t}(y_t - \tau_t)^2 + \lambda \sum_{t}(\Delta^2 \tau_t)^2$
+    # $\\min_{\tau} \\sum_{t}(y_t - \tau_t)^2 + \\lambda \\sum_{t}(\\Delta^2 \tau_t)^2$
 
     Args:
         series: Time series to decompose (quarterly GDP preferred).
@@ -112,7 +111,7 @@ def monetary_regime(spread_bps: pd.Series, m2v: pd.Series) -> str:
     - Steep spread + rising velocity      → EASING     (credit expansion)
     - Otherwise                           → NEUTRAL
 
-    # $\text{regime} = f(\Delta_t, V_t)$
+    # $\text{regime} = f(\\Delta_t, V_t)$
 
     Args:
         spread_bps: Yield spread in basis points (from yield_spread()).

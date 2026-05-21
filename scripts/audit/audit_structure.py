@@ -119,9 +119,9 @@ def _raw_metrics(root: Path, pkg: str, graph: Dict, max_mtime: float) -> Dict[st
 def _weighted_score(m_l: Dict, m_r: Dict) -> Tuple[float, float]:
     sl = sr = 0.0
     for key, w in _WEIGHTS.items():
-        l, r = m_l[key], m_r[key]
-        denom = max(l, r, 1e-9)
-        sl += w * (l / denom)
+        line, r = m_l[key], m_r[key]
+        denom = max(line, r, 1e-9)
+        sl += w * (line / denom)
         sr += w * (r / denom)
     return sl, sr
 

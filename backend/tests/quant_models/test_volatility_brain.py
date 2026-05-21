@@ -4,7 +4,6 @@ Validates Module B — Volatility Brain (Engle / Merton).
 Historical validation: SPY Oct 2008 should yield GARCH persistence > 0.90.
 """
 import numpy as np
-import pytest
 
 from backend.quant_models.volatility_brain import (
     fit_gjr_garch,

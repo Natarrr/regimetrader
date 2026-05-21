@@ -37,7 +37,6 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -190,7 +189,6 @@ class HMMRegimeDetector:
         # Map to labels — compress if fewer states than labels
         label_pool = _LABELS[:]
         self._state_to_label = {}
-        n = min(len(sorted_states), len(label_pool))
         for rank, (state, _) in enumerate(sorted_states):
             label_idx = min(rank, len(label_pool) - 1)
             self._state_to_label[state] = label_pool[label_idx]

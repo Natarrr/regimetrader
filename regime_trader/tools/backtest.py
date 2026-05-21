@@ -26,12 +26,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -61,7 +59,6 @@ def _load_prices_yfinance(tickers: List[str], start: str, end: str) -> Dict[str,
     """
     try:
         import yfinance as yf
-        import pandas as pd
     except ImportError:
         log.error("yfinance not installed — cannot download price data")
         return {}
@@ -118,11 +115,6 @@ def _cache_prices(prices: Dict[str, Any], start: str, end: str) -> None:
 
 def _load_cached_prices(start: str, end: str) -> Optional[Dict[str, Any]]:
     """Load prices from local cache (supports offline replay)."""
-    try:
-        import pandas as pd
-    except ImportError:
-        return None
-
     path = _PRICE_ROOT / f"{start}_{end}.json"
     if not path.exists():
         return None

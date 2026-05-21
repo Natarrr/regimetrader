@@ -34,8 +34,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from regime_trader.utils.io import save_json_atomic
-from regime_trader.services.quiver_client import QuiverClient as _QuiverClient
+from regime_trader.utils.io import save_json_atomic  # noqa: E402
+from regime_trader.services.quiver_client import QuiverClient as _QuiverClient  # noqa: E402
 
 log = logging.getLogger("run_pipeline")
 

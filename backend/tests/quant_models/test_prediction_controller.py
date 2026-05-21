@@ -5,7 +5,6 @@ Historical validation:
 - Sep 2008: all 3 Minsky conditions should fire → CRITICAL
 - Mar 2020: CAPE was low (not overvalued) → WARNING/WATCH at most
 """
-import pytest
 
 from backend.quant_models.prediction_controller import classify_regime, minsky_moment
 from backend.data.schemas import MinskyStatusOut

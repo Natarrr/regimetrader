@@ -6,7 +6,7 @@ BaseModel subclasses so FastAPI can validate and document every endpoint.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal
 
 from pydantic import BaseModel, Field
 
