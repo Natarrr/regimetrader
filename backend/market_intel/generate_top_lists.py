@@ -575,6 +575,11 @@ def generate(
             entry["_validation_failed"] = True
     _assign_cap_tiers(entries)
 
+    # source_reliability dampening — scale final_score by data-source confidence
+    for _e in entries:
+        _rel = float(_e.get("source_reliability", 1.0))
+        _e["final_score"] = round(_e["final_score"] * _rel, 4)
+
     # Exclude tickers that failed Stage 1 validation before slicing to top-N
     valid_entries = [e for e in entries if not e.get("_validation_failed")]
 
