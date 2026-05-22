@@ -1119,13 +1119,17 @@ def _load_registry_tickers() -> Dict[str, List[str]]:
 
 
 def _registry_meta() -> Dict[str, Dict[str, Any]]:
-    """Return {ticker: {sector, cap_tier}} from ticker_registry.json."""
+    """Return {ticker: {sector, cap_tier, company_name}} from ticker_registry.json."""
     reg_path = ROOT / "config" / "ticker_registry.json"
     try:
         data = json.loads(reg_path.read_text(encoding="utf-8"))
         meta: Dict[str, Dict[str, Any]] = {}
         for e in data.get("europe", []) + data.get("asia", []):
-            meta[e["ticker"]] = {"sector": e["sector"], "cap_tier": e["cap_tier"]}
+            meta[e["ticker"]] = {
+                "sector":       e["sector"],
+                "cap_tier":     e["cap_tier"],
+                "company_name": e.get("name", ""),
+            }
         return meta
     except Exception:
         return {}
@@ -1157,6 +1161,7 @@ def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
                       entry.source_reliability, 4)
         return {
             "ticker":               entry.ticker,
+            "company_name":         entry.raw_factors.get("company_name", ""),
             "final_score":          score,
             "momentum_score":       momentum_score,
             "insider_score":        insider_score,
@@ -1191,6 +1196,7 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
                       entry.source_reliability, 4)
         return {
             "ticker":               entry.ticker,
+            "company_name":         entry.raw_factors.get("company_name", ""),
             "final_score":          score,
             "momentum_score":       momentum_score,
             "insider_score":        insider_score,
@@ -1446,6 +1452,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 m = _meta.get(e.ticker, {})
                 e.sector = m.get("sector", "Unknown")
                 e.cap_tier = m.get("cap_tier", "large")
+                e.raw_factors["company_name"] = m.get("company_name", "")
 
             scorer_map = {"EUROPE": _score_ticker_eu, "ASIA": _score_ticker_asia}
             with ThreadPoolExecutor(max_workers=4) as eu_pool:

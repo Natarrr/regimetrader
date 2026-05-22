@@ -590,6 +590,7 @@ def generate(
             continue
         entries.append({
             "ticker":          row["ticker"],
+            "company_name":    row.get("company_name", ""),
             "sector":          row.get("sector", "Unknown"),
             "cap_tier":        row.get("cap_tier", "large"),
             "market_cap":      float(row.get("market_cap", 0.0)),

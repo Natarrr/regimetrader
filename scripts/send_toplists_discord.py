@@ -277,7 +277,9 @@ def _ticker_detail_field(
         rank_delta:  shadow_rank − boosted_rank (positive = promoted by boost).
         buyback_conv: conviction boost from buyback yield (0.40 or 0.80), or None.
     """
-    ticker  = entry.get("ticker", "?")
+    ticker       = entry.get("ticker", "?")
+    company_name = (entry.get("company_name") or "").strip()
+    display_name = f"{company_name} ({ticker})" if company_name else ticker
     score   = float(entry.get("final_score", 0))
     badge   = entry.get("badge", "WATCHLIST")
     factors = entry.get("factors") or {}
@@ -307,7 +309,7 @@ def _ticker_detail_field(
     flag_tag = "  ⚠️"    if anomaly_flags          else ""
 
     line1 = (
-        f"{rank_token} **{ticker}** — {badge} — `{score:.2f}` {bar_str}"
+        f"{rank_token} **{display_name}** — {badge} — `{score:.2f}` {bar_str}"
         f"{boost_part}{buyback_part}{trend_part}{ceo_tag}{flag_tag}"
     )
 
@@ -332,7 +334,7 @@ def _ticker_detail_field(
     flag  = _MARKET_FLAGS.get(entry.get("market", "USA"), "🇺🇸")
     value = _truncate("\n".join([line1, line2, line3, line4]), 1024)
     return {
-        "name":   f"#{rank} {flag} {ticker}",
+        "name":   f"#{rank} {flag} {display_name}",
         "value":  value,
         "inline": False,
     }
