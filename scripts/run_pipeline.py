@@ -1114,19 +1114,29 @@ def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
         momentum = float(rf.get("momentum", 0))
         eps = float(rf.get("eps", 0))
         mktcap = float(rf.get("market_cap", 0)) or 1.0
-        score = round((momentum * 0.5 + min(eps / 100.0, 1.0) * 0.5) *
+        # Map onto generate_top_lists factor fields (2 populated, 3 absent = within threshold)
+        momentum_score = max(0.0, min(1.0, (momentum + 1.0) / 2.0))  # normalise [-1,1] → [0,1]
+        insider_score  = max(0.0, min(1.0, eps / 100.0))             # eps proxy
+        score = round((momentum_score * 0.5 + insider_score * 0.5) *
                       entry.source_reliability, 4)
         return {
-            "ticker": entry.ticker,
-            "final_score": score,
-            "badge": _badge_from_score(score),
-            "factors": {"momentum": momentum, "eps_proxy": eps},
-            "sector": entry.sector,
-            "cap_tier": entry.cap_tier,
+            "ticker":          entry.ticker,
+            "final_score":     score,
+            "badge":           _badge_from_score(score),
+            "momentum_score":  momentum_score,
+            "insider_score":   insider_score,
+            "edgar_score":     0.0,
+            "congress_score":  0.0,
+            "news_score":      0.0,
+            "sector":          entry.sector,
+            "cap_tier":        entry.cap_tier,
             "source_reliability": entry.source_reliability,
-            "market": "EUROPE",
-            "market_cap": mktcap,
-            "insider_usd": 0.0,
+            "market":          "EUROPE",
+            "market_cap":      mktcap,
+            "insider_usd":     0.0,
+            "news_source":     "none",
+            "volume_spike":    1.0,
+            "momentum_spy_relative": momentum,
         }
     except Exception as exc:
         log.debug("_score_ticker_eu skip %s: %s", entry.ticker, exc)
@@ -1140,19 +1150,29 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
         momentum = float(rf.get("momentum", 0))
         eps = float(rf.get("eps", 0))
         mktcap = float(rf.get("market_cap", 0)) or 1.0
-        score = round((momentum * 0.5 + min(eps / 1000.0, 1.0) * 0.5) *
+        # Map onto generate_top_lists factor fields (2 populated, 3 absent = within threshold)
+        momentum_score = max(0.0, min(1.0, (momentum + 1.0) / 2.0))  # normalise [-1,1] → [0,1]
+        insider_score  = max(0.0, min(1.0, eps / 1000.0))            # eps proxy (JPY-scale)
+        score = round((momentum_score * 0.5 + insider_score * 0.5) *
                       entry.source_reliability, 4)
         return {
-            "ticker": entry.ticker,
-            "final_score": score,
-            "badge": _badge_from_score(score),
-            "factors": {"momentum": momentum, "eps_proxy": eps},
-            "sector": entry.sector,
-            "cap_tier": entry.cap_tier,
+            "ticker":          entry.ticker,
+            "final_score":     score,
+            "badge":           _badge_from_score(score),
+            "momentum_score":  momentum_score,
+            "insider_score":   insider_score,
+            "edgar_score":     0.0,
+            "congress_score":  0.0,
+            "news_score":      0.0,
+            "sector":          entry.sector,
+            "cap_tier":        entry.cap_tier,
             "source_reliability": entry.source_reliability,
-            "market": "ASIA",
-            "market_cap": mktcap,
-            "insider_usd": 0.0,
+            "market":          "ASIA",
+            "market_cap":      mktcap,
+            "insider_usd":     0.0,
+            "news_source":     "none",
+            "volume_spike":    1.0,
+            "momentum_spy_relative": momentum,
         }
     except Exception as exc:
         log.debug("_score_ticker_asia skip %s: %s", entry.ticker, exc)
