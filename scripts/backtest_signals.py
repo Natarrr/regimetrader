@@ -105,6 +105,8 @@ class SignalRecord:
     strategy_era:  str
     source_file:   str
     entry_next_day: bool   # True  → post-market, use T+1 close as entry
+    market:        str = "USA"
+    company_name:  str = ""
 
     # Filled after price download
     entry_price:   Optional[float] = None
@@ -211,6 +213,8 @@ def _parse_snapshot(path: Path) -> List[SignalRecord]:
             strategy_era  = _era_label(weights),
             source_file   = path.name,
             entry_next_day = entry_next_day,
+            market        = entry.get("market", "USA"),
+            company_name  = entry.get("company_name", ""),
         ))
 
     return records
