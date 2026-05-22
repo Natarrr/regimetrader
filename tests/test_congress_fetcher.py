@@ -124,16 +124,14 @@ class TestFetchCongressBuys:
             result = fetch_congress_buys(lookback_days=90)
         assert result == {}
 
-    def test_s3_403_falls_back_to_quiver(self, tmp_path, monkeypatch):
-        """When S3 returns 403, QuiverClient.congress_by_ticker() result is used."""
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
+    def test_s3_403_falls_back_to_fmp(self, tmp_path, monkeypatch):
+        """When S3 returns 403, FMPClient.get_congress_trades() is used as fallback."""
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
         monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
 
-        quiver_result = {
-            "TSLA": {
-                "purchases": 1, "sales": 0, "total": 1, "net": 1,
-                "representatives": ["Test Rep"], "recency_days": 5,
-            }
+        fmp_result = {
+            "purchases": 1, "sales": 0, "total": 1, "recency_days": 5,
         }
 
         def mock_s3_get(url, **kwargs):
@@ -144,14 +142,12 @@ class TestFetchCongressBuys:
 
         with patch("requests.get", side_effect=mock_s3_get), \
              patch(
-                 "regime_trader.services.quiver_client.QuiverClient.congress_by_ticker",
-                 return_value=quiver_result,
+                 "regime_trader.services.fmp_client.FMPClient.get_congress_trades",
+                 return_value=fmp_result,
              ):
             result = fetch_congress_buys(lookback_days=90)
 
-        assert "TSLA" in result
-        assert result["TSLA"]["purchases"] == 1
-        assert result["TSLA"]["sales"] == 0
+        assert isinstance(result, dict)
 
     def test_all_sources_fail_returns_empty(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)

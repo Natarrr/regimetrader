@@ -35,7 +35,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from regime_trader.utils.io import save_json_atomic  # noqa: E402
-from regime_trader.services.quiver_client import QuiverClient as _QuiverClient  # noqa: E402
+from regime_trader.services.fmp_client import FMPClient as _FMPClient  # noqa: E402
 from backend.market_intel.validator import validate_raw  # noqa: E402
 
 log = logging.getLogger("run_pipeline")
@@ -272,27 +272,18 @@ def _parse_congress_transactions(
         by_ticker[ticker]["total"] += 1
 
 
-def _fetch_quiver_congress(cutoff: str) -> Optional[Dict[str, Dict]]:
-    """Delegate to QuiverClient.congress_by_ticker() — avoids duplicating HTTP/cache logic.
+def _fetch_fmp_congress(ticker: str) -> Optional[Dict]:
+    """Fetch congressional trades for a single ticker via FMPClient.
 
-    Returns populated by_ticker dict (with recency_days) on success,
-    None if key is absent or call fails.
+    Returns populated dict (with recency_days) on success, None if key absent or fails.
     """
     try:
-        client = _QuiverClient()
+        client = _FMPClient()
         if not client._api_key:
             return None
-        result = client.congress_by_ticker(lookback_days=180)
-        if result:
-            n_tickers = len(result)
-            n_tx = sum(v["total"] for v in result.values())
-            log.info(
-                "Quiver congress: %d transactions across %d tickers (via QuiverClient)",
-                n_tx, n_tickers,
-            )
-        return result or None
+        return client.get_congress_trades(ticker, lookback_days=180) or None
     except Exception as exc:
-        log.warning("Quiver congress delegation failed: %s", exc)
+        log.warning("FMP congress fetch failed for %s: %s", ticker, exc)
         return None
 
 
@@ -300,7 +291,7 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
     """Stiglitz (2001 Nobel) — fetch congressional trading data.
 
     Primary:  House/Senate Stock Watcher public S3 feeds (no API key).
-    Fallback: Quiver Quantitative /beta/live/congresstrading (QUIVER_API_KEY).
+    Fallback: FMP Ultimate /api/v4/senate-trading + /api/v4/house-trades (FMP_API_KEY).
 
     Filters to the lookback window and counts purchase vs sale transactions
     per ticker.  Results are cached for 24 h.
@@ -338,7 +329,7 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
             if resp.status_code == 403:
                 log.warning(
                     "Congress feed %s returned 403 — S3 bucket restricted; "
-                    "will use Quiver Quantitative fallback (QUIVER_API_KEY).",
+                    "will use FMP Ultimate fallback (FMP_API_KEY).",
                     label,
                 )
                 continue
@@ -349,15 +340,24 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
         except Exception as exc:
             log.warning("Congress feed %s failed: %s", label, exc)
 
-    # ── Fallback: Quiver Quantitative (when S3 yields nothing) ───────────────
+    # ── Fallback: FMP Ultimate (when S3 yields nothing) ──────────────────────
     if not s3_ok or not by_ticker:
-        log.info("S3 congress feeds unavailable — trying Quiver Quantitative fallback…")
-        quiver_data = _fetch_quiver_congress(cutoff)
-        if quiver_data:
-            by_ticker = quiver_data
-        elif not os.getenv("QUIVER_API_KEY"):
+        log.info("S3 congress feeds unavailable — trying FMP Ultimate fallback…")
+        fmp_client = _FMPClient()
+        if fmp_client._api_key:
+            fmp_congress: Dict[str, Dict] = {}
+            for ticker_key in list(by_ticker.keys()):
+                result = _fetch_fmp_congress(ticker_key)
+                if result:
+                    fmp_congress[ticker_key] = result
+            if fmp_congress:
+                by_ticker = fmp_congress
+                n_tx = sum(v.get("total", 0) for v in fmp_congress.values())
+                log.info("FMP congress fallback: %d transactions across %d tickers",
+                         n_tx, len(fmp_congress))
+        else:
             log.warning(
-                "No QUIVER_API_KEY set and S3 feeds are down — "
+                "FMP_API_KEY not set and S3 feeds are down — "
                 "congress factor will be 0.0 (penalised) for all tickers."
             )
 
@@ -590,33 +590,27 @@ def _score_news_yfinance(ticker: str) -> float:
         return 0.0
 
 
-def score_news_finnhub(ticker: str, api_key: str) -> float:
-    """Engle (2003 Nobel) — Finnhub pre-computed sentiment score in [0, 1].
+def score_news_fmp(ticker: str) -> float:
+    """Engle (2003 Nobel) — FMP news sentiment score in [0, 1].
 
-    Finnhub /news-sentiment returns:
-      buzz.weeklyAverage       — normalized buzz volume (0-1)
-      sentiment.bullishPercent — fraction of bullish articles (0-1)
+    Formula: 0.60 * (positive_count / total) + 0.40 * min(1.0, total / 50)
 
-    Score = 0.60 x bullishPercent + 0.40 x min(1.0, weeklyAverage / 0.5)
+    Falls back to _score_news_yfinance() immediately when:
+      - FMP returns [] (EU/Asia tickers with thin coverage on calm days)
+      - total == 0 (zero articles indexed)
 
-    Falls back to _score_news_yfinance() on any API failure.
     Returns 0.0 (not 0.5) if both sources fail — dead feed is penalised.
     """
-    url = f"https://finnhub.io/api/v1/news-sentiment?symbol={ticker}&token={api_key}"
-    try:
-        import requests as _req
-        resp = _req.get(url, timeout=10)
-        resp.raise_for_status()
-        d        = resp.json()
-        bullish  = float(d.get("sentiment", {}).get("bullishPercent", 0.5))
-        buzz     = float(d.get("buzz", {}).get("weeklyAverage", 0.0))
-        buzz_norm = min(1.0, buzz / 0.5)
-        return round(0.60 * bullish + 0.40 * buzz_norm, 4)
-    except Exception:
-        try:
-            return _score_news_yfinance(ticker)
-        except Exception:
-            return 0.0
+    client = _FMPClient()
+    articles = client.get_news_raw_articles(ticker)
+    if not articles:
+        return _score_news_yfinance(ticker)
+    positive = sum(1 for a in articles if a.get("sentiment") == "Positive")
+    total = len(articles)
+    if total == 0:
+        return _score_news_yfinance(ticker)
+    buzz_norm = min(1.0, total / 50.0)
+    return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
 
 
 def fetch_finnhub_insider_purchases(
@@ -817,63 +811,37 @@ def _parse_quiver_trades(
     return round(total_usd, 2), max(0, days_ago)
 
 
-def fetch_quiver_insider_all(
+def fetch_fmp_insider_all(
     tickers: List[str],
     lookback_days: int = 180,
-    max_workers: int = 5,
+    max_workers: int = 10,
 ) -> Dict[str, Tuple[float, int]]:
-    """Fetch insider purchase data for all tickers via Quiver Quantitative.
+    """Fetch insider purchase data for all tickers via FMP Ultimate /api/v4/insider-trading.
 
-    Stiglitz (2001 Nobel) — Quiver pre-parses SEC Form 4 filings into structured
-    JSON, eliminating brittle XML parsing. Uses ThreadPoolExecutor(max_workers=5)
-    to parallelize HTTP calls while respecting Quiver's rate limits.
+    Stiglitz (2001 Nobel) — Form 4 insider purchases are a credible costly-to-fake signal.
+    Uses FMPClient with limit=500 per ticker to cover 180-day lookback for mega-caps.
 
-    QuiverClient has a 6h file-based TTL: the first daily run makes real HTTP
-    calls; the two subsequent runs within the same 6h window read from disk and
-    are effectively free (no network, no concurrency overhead).
-
-    max_workers=5 chosen deliberately:
-      - 160 tickers ÷ 5 workers ≈ 32 batches
-      - At ~200–400ms per Quiver call: total ~6–13s (vs. ~48s serial)
-      - 5 concurrent connections stays well within typical REST API limits
+    max_workers=10 chosen for FMP Ultimate (50 req/s cap, 20 rps default via FMP_MAX_RPS).
 
     Returns {ticker: (total_purchases_usd, days_since_most_recent)}.
     Tickers with no qualifying purchases get (0.0, 0).
-    Returns {} if QUIVER_API_KEY is not set.
+    Returns {} if FMP_API_KEY is not set.
     """
-    client = _QuiverClient()
+    client = _FMPClient()
     if not client._api_key:
-        log.info("QUIVER_API_KEY not set — skipping Quiver insider pre-fetch")
+        log.info("FMP_API_KEY not set -- skipping FMP insider pre-fetch")
         return {}
 
     if not tickers:
         return {}
 
-    # Probe with the first ticker before spinning up the thread pool.
-    # A 403 means the endpoint is not included in the current plan — log once
-    # and return {} immediately without making 159 more pointless HTTP calls.
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
-    try:
-        _ = client.get_insider_trades(tickers[0])   # sets _insider_plan_restricted on 403
-    except Exception as exc:
-        log.debug("Quiver insider probe failed for %s: %s", tickers[0], type(exc).__name__)
-    if client._insider_plan_restricted:
-        log.info(
-            "Quiver insider not available on current plan — "
-            "insider scores will use Finnhub/EDGAR fallback."
-        )
-        return {}
-
     def _fetch_one(ticker: str) -> Tuple[str, Tuple[float, int]]:
-        t0 = time.monotonic()
         try:
-            trades = client.get_insider_trades(ticker) or []
-            result = _parse_quiver_trades(trades, cutoff)
+            result = client.get_insider_purchases(ticker, lookback_days=lookback_days)
         except Exception as exc:
-            log.debug("Quiver insider fetch failed for %s: %s", ticker, type(exc).__name__)
+            log.debug("FMP insider fetch failed for %s: %s", ticker, type(exc).__name__)
             result = (0.0, 0)
-        elapsed = time.monotonic() - t0
-        log.debug("Quiver insider %s: $%.0f elapsed=%.2fs", ticker, result[0], elapsed)
+        log.debug("FMP insider %s: $%.0f", ticker, result[0])
         return ticker, result
 
     results: Dict[str, Tuple[float, int]] = {}
@@ -883,7 +851,7 @@ def fetch_quiver_insider_all(
 
     nonzero = sum(1 for v in results.values() if v[0] > 0)
     log.info(
-        "Quiver insider pre-fetch complete: %d/%d tickers with purchases",
+        "FMP insider pre-fetch complete: %d/%d tickers with purchases",
         nonzero, len(tickers),
     )
     return results
@@ -1256,29 +1224,14 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     spy_return_baseline = _fetch_spy_return()
     log.info("SPY 3-month return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
 
-    # ── Quiver insider — primary source (pre-parsed Form 4, cached 6h) ───────────
-    # Quiver returns structured JSON per ticker — no XML parsing, no per-ticker
-    # rate limit.  QuiverClient has a 6h file-based TTL so repeated runs within
-    # the same window skip HTTP and read from disk.
-    log.info("Pre-fetching Quiver insider transactions for %d tickers…", len(tickers))
-    quiver_insider_cache: Dict[str, Tuple[float, int]] = fetch_quiver_insider_all(tickers)
-
-    # ── Finnhub insider — fallback when Quiver key absent ────────────────────────
-    # Running inside the thread pool (160 concurrent calls) saturates the free
-    # tier immediately; all 429 errors are silently swallowed by the per-ticker
-    # try/except, causing insider=0.0 for every ticker.  Only pre-fetched when
-    # Quiver produced no results (key absent or all zeros).
-    finnhub_key_global = os.getenv("FINNHUB_API_KEY", "")
-    finnhub_insider_cache: Dict[str, Tuple[float, int]] = {}
-    quiver_has_data = any(v[0] > 0 for v in quiver_insider_cache.values())
-    if not quiver_has_data and finnhub_key_global:
-        log.info(
-            "Quiver insider returned no data — falling back to Finnhub for %d tickers…",
-            len(tickers),
-        )
-        finnhub_insider_cache = fetch_all_finnhub_insider(tickers, finnhub_key_global)
-    elif not quiver_has_data:
-        log.info("QUIVER_API_KEY and FINNHUB_API_KEY both absent — insider scoring uses EDGAR XML only")
+    # ── FMP insider — primary source (Form 4, cached 12h, limit=500) ─────────────
+    # FMPClient.get_insider_purchases() returns (total_usd, days) per ticker.
+    # Pre-fetched serially here; the thread pool below reads from the in-memory dict.
+    log.info("Pre-fetching FMP insider transactions for %d tickers…", len(tickers))
+    fmp_insider_cache: Dict[str, Tuple[float, int]] = fetch_fmp_insider_all(tickers)
+    fmp_has_data = any(v[0] > 0 for v in fmp_insider_cache.values())
+    if not fmp_has_data:
+        log.info("FMP insider returned no data -- insider scoring uses EDGAR XML only")
 
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
@@ -1301,31 +1254,18 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         congress_raw = congress_data.get(ticker)
 
         try:
-            finnhub_key = finnhub_key_global  # use pre-fetched key (avoids per-thread env lookup)
-
-            # Insider purchases: Quiver (primary) → Finnhub (fallback) → EDGAR XML.
-            # Quiver and Finnhub caches were both built serially before the thread pool.
-            if ticker in quiver_insider_cache:
-                quiver_usd, quiver_days = quiver_insider_cache[ticker]
-                if quiver_usd > 0:
-                    total_purchases_usd    = quiver_usd
-                    days_since_most_recent = quiver_days
-                    ceo_buy = total_purchases_usd > 25_000
-            elif finnhub_key and ticker in finnhub_insider_cache:
-                insider_usd_finnhub, days_finnhub = finnhub_insider_cache[ticker]
-                if insider_usd_finnhub > 0:
-                    total_purchases_usd    = insider_usd_finnhub
-                    days_since_most_recent = days_finnhub
+            # Insider purchases: FMP Form 4 (primary) → EDGAR XML (fallback).
+            if ticker in fmp_insider_cache:
+                fmp_usd, fmp_days = fmp_insider_cache[ticker]
+                if fmp_usd > 0:
+                    total_purchases_usd    = fmp_usd
+                    days_since_most_recent = fmp_days
                     ceo_buy = total_purchases_usd > 25_000
 
             e_score = score_edgar(form4_count)
             i_score = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
             c_score = score_congress(congress_raw)
-            n_score = (
-                score_news_finnhub(ticker, finnhub_key)
-                if finnhub_key
-                else _score_news_yfinance(ticker)
-            )
+            n_score = score_news_fmp(ticker)
             price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
             m_score = score_momentum(
                 price_data["return_20d"],
@@ -1334,12 +1274,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             )
 
             # Determine which insider source actually provided data
-            _quiver_usd = quiver_insider_cache.get(ticker, (0.0, 0))[0]
-            _finnhub_usd = finnhub_insider_cache.get(ticker, (0.0, 0))[0]
-            if _quiver_usd > 0:
-                insider_source = "quiver"
-            elif _finnhub_usd > 0:
-                insider_source = "finnhub"
+            _fmp_usd = fmp_insider_cache.get(ticker, (0.0, 0))[0]
+            if _fmp_usd > 0:
+                insider_source = "fmp"
             elif total_purchases_usd > 0:
                 insider_source = "edgar"
             else:
@@ -1362,10 +1299,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "insider_source": insider_source,
             }
 
-            if finnhub_key:
-                news_source = "finnhub" if n_score > 0.0 else "none"
-            else:
-                news_source = "yfinance" if n_score > 0.0 else "none"
+            news_source = "fmp" if n_score > 0.0 else "none"
 
             return {
                 "ticker":          ticker,
@@ -1490,10 +1424,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     # Build source_meta from the live run timestamps so validate_dates() can
     # check whether Quiver/Finnhub/EDGAR feeds are stale at source level.
     source_meta: Dict[str, Dict[str, Any]] = {
-        "quiver":   {"last_updated": pipeline_run_ts},
-        "finnhub":  {"last_updated": pipeline_run_ts},
-        "edgar":    {"last_updated": pipeline_run_ts},
-        "none":     {"last_updated": pipeline_run_ts},
+        "fmp":    {"last_updated": pipeline_run_ts},
+        "edgar":  {"last_updated": pipeline_run_ts},
+        "none":   {"last_updated": pipeline_run_ts},
     }
 
     try:
@@ -1533,7 +1466,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     out = log_dir / "intel_source_status.json"
     save_json_atomic(out, status)
     log.info(
-        "Done in %.1fs — tickers=%d edgar=%d fmp_calls=%d congress=%d errors=%d → %s",
+        "Done in %.1fs -- tickers=%d edgar=%d fmp_calls=%d congress=%d errors=%d -> %s",
         duration, len(tickers), edgar_count, fmp_count, congress_count, errors, out,
     )
     return status

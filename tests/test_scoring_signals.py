@@ -1,8 +1,5 @@
 """tests/test_scoring_signals.py
 TDD tests for all five Smart Money scoring signals.
-
-Written against the TARGET implementations — these tests will FAIL against
-the old code and PASS once Tasks 3–4 are complete.
 """
 from __future__ import annotations
 
@@ -15,7 +12,7 @@ import pytest
 def _import():
     from scripts.run_pipeline import (
         score_insider_value,
-        score_news_finnhub,
+        score_news_fmp,
         _score_news_yfinance,
         score_momentum,
         fetch_price_data,
@@ -24,7 +21,7 @@ def _import():
     )
     return (
         score_insider_value,
-        score_news_finnhub,
+        score_news_fmp,
         _score_news_yfinance,
         score_momentum,
         fetch_price_data,
@@ -76,65 +73,64 @@ class TestScoreInsiderValue:
             assert 0.0 <= score <= 1.0, f"Out of bounds for usd={usd}, cap={cap}"
 
 
-class TestScoreNewsFinnhub:
-    def test_all_bullish_returns_above_neutral(self):
-        _, score_news_finnhub, *_ = _import()
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "sentiment": {"bullishPercent": 0.90, "bearishPercent": 0.10},
-            "buzz": {"weeklyAverage": 0.8},
-        }
-        with patch("requests.get", return_value=mock_resp):
-            score = score_news_finnhub("AAPL", "fake-key")
+class TestScoreNewsFMP:
+    """Tests for score_news_fmp() — FMP-based news sentiment scoring."""
+
+    def test_all_positive_returns_above_neutral(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        _, score_news_fmp, *_ = _import()
+        from regime_trader.services.fmp_client import FMPClient
+        articles = [{"sentiment": "Positive"}] * 45 + [{"sentiment": "Negative"}] * 5
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
+            score = score_news_fmp("AAPL")
         assert score > 0.5
 
-    def test_all_bearish_returns_below_neutral(self):
-        _, score_news_finnhub, *_ = _import()
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "sentiment": {"bullishPercent": 0.10, "bearishPercent": 0.90},
-            "buzz": {"weeklyAverage": 0.1},
-        }
-        with patch("requests.get", return_value=mock_resp):
-            score = score_news_finnhub("TSLA", "fake-key")
+    def test_all_negative_returns_below_neutral(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        _, score_news_fmp, *_ = _import()
+        from regime_trader.services.fmp_client import FMPClient
+        articles = [{"sentiment": "Negative"}] * 45 + [{"sentiment": "Positive"}] * 5
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
+            score = score_news_fmp("TSLA")
         assert score < 0.5
 
-    def test_api_failure_falls_back_to_yfinance(self):
-        _, score_news_finnhub, _score_news_yfinance, *_ = _import()
-        with patch("requests.get", side_effect=Exception("timeout")), \
-             patch(
-                 "scripts.run_pipeline._score_news_yfinance",
-                 return_value=0.55,
-             ) as mock_yf:
-            score = score_news_finnhub("MSFT", "fake-key")
+    def test_empty_articles_falls_back_to_yfinance(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        _, score_news_fmp, *_ = _import()
+        from regime_trader.services.fmp_client import FMPClient
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=[]), \
+             patch("scripts.run_pipeline._score_news_yfinance", return_value=0.55) as mock_yf:
+            score = score_news_fmp("MSFT")
         mock_yf.assert_called_once_with("MSFT")
         assert score == pytest.approx(0.55)
 
-    def test_yfinance_fallback_failure_returns_zero_not_neutral(self):
-        _, score_news_finnhub, *_ = _import()
-        with patch("requests.get", side_effect=Exception("timeout")), \
-             patch("scripts.run_pipeline._score_news_yfinance", side_effect=Exception("yf down")):
-            score = score_news_finnhub("GOOG", "fake-key")
-        assert score == pytest.approx(0.0)
+    def test_score_bounded_0_to_1(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        _, score_news_fmp, *_ = _import()
+        from regime_trader.services.fmp_client import FMPClient
+        articles = [{"sentiment": "Positive"}] * 50
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
+            score = score_news_fmp("GOOG")
+        assert 0.0 <= score <= 1.0
 
-    def test_score_formula(self):
-        # bullish=0.60, buzz weeklyAverage=0.5 → buzz_norm=1.0
-        # score = 0.60*0.60 + 0.40*1.0 = 0.36 + 0.40 = 0.76
-        _, score_news_finnhub, *_ = _import()
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {
-            "sentiment": {"bullishPercent": 0.60},
-            "buzz": {"weeklyAverage": 0.5},
-        }
-        with patch("requests.get", return_value=mock_resp):
-            score = score_news_finnhub("AMZN", "fake-key")
+    def test_score_formula(self, monkeypatch):
+        # 30 positive / 50 total → 0.60 * (30/50) + 0.40 * min(1.0, 50/50)
+        #                        = 0.60 * 0.60 + 0.40 * 1.0 = 0.36 + 0.40 = 0.76
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        _, score_news_fmp, *_ = _import()
+        from regime_trader.services.fmp_client import FMPClient
+        articles = [{"sentiment": "Positive"}] * 30 + [{"sentiment": "Negative"}] * 20
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
+            score = score_news_fmp("AMZN")
         assert score == pytest.approx(0.76, abs=0.01)
 
 
-class TestScoreNewsFinnhubYFinanceFallback:
+class TestScoreNewsYFinanceFallback:
     def test_yfinance_failure_returns_zero(self):
         *_, _score_news_yfinance, score_momentum, _, _, _ = _import()
         with patch("yfinance.Ticker", side_effect=Exception("network error")):
@@ -295,9 +291,8 @@ class TestQuiverEvidenceInResults:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC in test")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
-                 patch("scripts.run_pipeline.fetch_quiver_insider_all", return_value={}), \
-                 patch("scripts.run_pipeline.fetch_all_finnhub_insider", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55):
+                 patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
+                 patch("scripts.run_pipeline.score_news_fmp", return_value=0.55):
                 mock_ticker.return_value.news = []
                 status = run(tickers_file, log_dir, max_workers=1)
 
@@ -342,10 +337,8 @@ class TestEvidencePassthroughFields:
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
-                 patch("scripts.run_pipeline.fetch_quiver_insider_all", return_value={}), \
-                 patch("scripts.run_pipeline.fetch_all_finnhub_insider", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_finnhub", return_value=0.55), \
-                 patch.dict(os.environ, {"FINNHUB_API_KEY": "test-key"}):
+                 patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
+                 patch("scripts.run_pipeline.score_news_fmp", return_value=0.55):
                 mock_ticker.return_value.news = []
                 status = run(tickers_file, log_dir, max_workers=1)
 
@@ -354,195 +347,42 @@ class TestEvidencePassthroughFields:
             assert "insider_usd" in r,           "insider_usd missing"
             assert "momentum_spy_relative" in r, "momentum_spy_relative missing"
             assert "volume_spike" in r,          "volume_spike missing"
-            assert r["news_source"] == "finnhub"
+            assert r["news_source"] == "fmp"
             assert isinstance(r["insider_usd"], float)
             assert isinstance(r["momentum_spy_relative"], float)
             assert isinstance(r["volume_spike"], float)
             assert isinstance(r["quiver_evidence"], dict)
 
 
-class TestFetchQuiverInsiderAll:
-    """Unit tests for fetch_quiver_insider_all()."""
-
-    def _quiver_tx(
-        self,
-        tx_code="P",
-        ad_code="A",
-        is_officer=True,
-        is_director=False,
-        date="2026-04-01",
-        total_value=500_000.0,
-    ) -> dict:
-        return {
-            "TransactionCode":    tx_code,
-            "AcquiredDisposedCode": ad_code,
-            "isOfficer":          is_officer,
-            "isDirector":         is_director,
-            "Title":              "CEO",
-            "Date":               date,
-            "TotalValue":         total_value,
-            "Shares":             0,
-            "PricePerShare":      0,
-        }
+class TestFetchFMPInsiderAllSignals:
+    """Unit tests for fetch_fmp_insider_all() — FMP Form 4 insider pre-fetch."""
 
     def test_no_api_key_returns_empty(self, monkeypatch):
-        monkeypatch.delenv("QUIVER_API_KEY", raising=False)
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        result = fetch_quiver_insider_all(["AAPL"])
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        result = fetch_fmp_insider_all(["AAPL"])
         assert result == {}
 
     def test_purchase_counted(self, monkeypatch):
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        tx = self._quiver_tx(total_value=250_000.0, date="2026-04-15")
-        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
-            result = fetch_quiver_insider_all(["AAPL"])
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        from regime_trader.services.fmp_client import FMPClient
+        with patch.object(FMPClient, "get_insider_purchases", return_value=(250_000.0, 5)):
+            result = fetch_fmp_insider_all(["AAPL"])
         assert result["AAPL"][0] == pytest.approx(250_000.0)
         assert result["AAPL"][1] >= 0
 
-    def test_disposal_excluded(self, monkeypatch):
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        tx = self._quiver_tx(ad_code="D")  # disposal
-        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
-            result = fetch_quiver_insider_all(["AAPL"])
-        assert result["AAPL"][0] == pytest.approx(0.0)
-
-    def test_non_purchase_code_excluded(self, monkeypatch):
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        tx = self._quiver_tx(tx_code="A")  # award, not purchase
-        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
-            result = fetch_quiver_insider_all(["AAPL"])
-        assert result["AAPL"][0] == pytest.approx(0.0)
-
-    def test_non_key_insider_excluded(self, monkeypatch):
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        tx = self._quiver_tx(is_officer=False, is_director=False)
-        tx["Title"] = "EMPLOYEE"  # not in _KEY_ROLES
-        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
-            result = fetch_quiver_insider_all(["AAPL"])
-        assert result["AAPL"][0] == pytest.approx(0.0)
-
-    def test_stale_date_excluded(self, monkeypatch):
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        tx = self._quiver_tx(date="2020-01-01")  # well outside 180-day window
-        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
-            result = fetch_quiver_insider_all(["AAPL"])
-        assert result["AAPL"][0] == pytest.approx(0.0)
-
-    def test_fallback_to_shares_times_price(self, monkeypatch):
-        """When TotalValue is absent, Shares × PricePerShare is used."""
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        tx = self._quiver_tx(date="2026-04-01", total_value=None)
-        tx["Shares"] = 1000
-        tx["PricePerShare"] = 150.0
-        with patch("regime_trader.services.quiver_client.QuiverClient.get_insider_trades", return_value=[tx]):
-            result = fetch_quiver_insider_all(["AAPL"])
-        assert result["AAPL"][0] == pytest.approx(150_000.0)
+    def test_empty_input_returns_empty(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        assert fetch_fmp_insider_all([]) == {}
 
     def test_api_exception_returns_zero_not_crash(self, monkeypatch):
-        # Network error on every call → probe catches it, pool also catches it,
-        # ticker gets (0.0, 0) — no crash, result dict still contains the ticker.
-        monkeypatch.setenv("QUIVER_API_KEY", "test-key")
-        from scripts.run_pipeline import fetch_quiver_insider_all
-        with patch(
-            "regime_trader.services.quiver_client.QuiverClient.get_insider_trades",
-            side_effect=RuntimeError("network"),
-        ):
-            result = fetch_quiver_insider_all(["AAPL"])
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        from regime_trader.services.fmp_client import FMPClient
+        with patch.object(FMPClient, "get_insider_purchases", side_effect=RuntimeError("network")):
+            result = fetch_fmp_insider_all(["AAPL"])
         assert result["AAPL"] == (0.0, 0)
-
-
-class TestParseQuiverTrades:
-    """Unit tests for _parse_quiver_trades() — pure function, no I/O."""
-
-    def _tx(
-        self,
-        tx_code="P", ad_code="A",
-        is_officer=True, is_director=False,
-        title="CEO",
-        date="2026-04-01",
-        total_value=500_000.0,
-        shares=0, price=0.0,
-    ) -> dict:
-        return {
-            "TransactionCode":      tx_code,
-            "AcquiredDisposedCode": ad_code,
-            "isOfficer":            is_officer,
-            "isDirector":           is_director,
-            "Title":                title,
-            "Date":                 date,
-            "TotalValue":           total_value,
-            "Shares":               shares,
-            "PricePerShare":        price,
-        }
-
-    def _cutoff(self, days_ago: int = 180) -> str:
-        from datetime import datetime, timedelta, timezone
-        return (datetime.now(timezone.utc) - timedelta(days=days_ago)).date().isoformat()
-
-    def test_empty_list_returns_zeros(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        assert _parse_quiver_trades([], self._cutoff()) == (0.0, 0)
-
-    def test_valid_purchase_totalled(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(total_value=250_000.0, date="2026-04-15")
-        total, days = _parse_quiver_trades([tx], "2026-01-01")
-        assert total == pytest.approx(250_000.0)
-        assert days >= 0
-
-    def test_disposal_excluded(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(ad_code="D")
-        total, _ = _parse_quiver_trades([tx], "2026-01-01")
-        assert total == pytest.approx(0.0)
-
-    def test_non_purchase_transaction_code_excluded(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(tx_code="A")   # stock award, not purchase
-        total, _ = _parse_quiver_trades([tx], "2026-01-01")
-        assert total == pytest.approx(0.0)
-
-    def test_non_key_role_excluded(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(is_officer=False, is_director=False, title="EMPLOYEE")
-        total, _ = _parse_quiver_trades([tx], "2026-01-01")
-        assert total == pytest.approx(0.0)
-
-    def test_date_before_cutoff_excluded(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(date="2020-01-01")
-        total, _ = _parse_quiver_trades([tx], self._cutoff(days_ago=180))
-        assert total == pytest.approx(0.0)
-
-    def test_shares_times_price_fallback(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(total_value=None, shares=1000, price=200.0, date="2026-04-01")
-        total, _ = _parse_quiver_trades([tx], "2026-01-01")
-        assert total == pytest.approx(200_000.0)
-
-    def test_multiple_transactions_summed(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        txs = [
-            self._tx(total_value=100_000.0, date="2026-04-01"),
-            self._tx(total_value=200_000.0, date="2026-04-10"),
-        ]
-        total, _ = _parse_quiver_trades(txs, "2026-01-01")
-        assert total == pytest.approx(300_000.0)
-
-    def test_days_since_most_recent_is_nonnegative(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(date="2026-04-01")
-        _, days = _parse_quiver_trades([tx], "2026-01-01")
-        assert days >= 0
-
-    def test_director_qualifies_as_key_role(self):
-        from scripts.run_pipeline import _parse_quiver_trades
-        tx = self._tx(is_officer=False, is_director=True, title="DIRECTOR")
-        total, _ = _parse_quiver_trades([tx], "2026-01-01")
-        assert total == pytest.approx(500_000.0)

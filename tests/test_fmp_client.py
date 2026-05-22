@@ -279,3 +279,71 @@ class TestCIIsolation:
         monkeypatch.delenv("FMP_MAX_RPS", raising=False)
         c = FMPClient(api_key="k", cache_root=tmp_path / "fmp")
         assert c._min_delay == pytest.approx(1.0 / 20.0, abs=1e-6)
+
+
+# ── Pipeline wrappers ───────────────────────────────────────────────────────
+
+class TestFetchFMPInsiderAll:
+    """Tests for the fetch_fmp_insider_all() function in run_pipeline.py."""
+
+    def test_returns_dict_keyed_by_ticker(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        from regime_trader.services.fmp_client import FMPClient
+
+        with patch.object(FMPClient, "get_insider_purchases", return_value=(800_000.0, 5)):
+            result = fetch_fmp_insider_all(["NVDA", "AAPL"])
+        assert "NVDA" in result
+        assert result["NVDA"] == (800_000.0, 5)
+        assert "AAPL" in result
+
+    def test_returns_empty_when_no_api_key(self, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        result = fetch_fmp_insider_all(["NVDA"])
+        assert result == {}
+
+    def test_returns_empty_on_empty_input(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        from scripts.run_pipeline import fetch_fmp_insider_all
+        result = fetch_fmp_insider_all([])
+        assert result == {}
+
+
+class TestScoreNewsFMP:
+    """Tests for score_news_fmp() in run_pipeline.py."""
+
+    def test_scores_positive_articles_above_neutral(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        from scripts.run_pipeline import score_news_fmp
+        from regime_trader.services.fmp_client import FMPClient
+
+        articles = [{"sentiment": "Positive"}] * 40 + [{"sentiment": "Negative"}] * 10
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
+            score = score_news_fmp("NVDA")
+        assert score > 0.5
+
+    def test_falls_back_to_yfinance_on_empty_articles(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        from scripts.run_pipeline import score_news_fmp, _score_news_yfinance
+        from regime_trader.services.fmp_client import FMPClient
+
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=[]), \
+             patch("scripts.run_pipeline._score_news_yfinance", return_value=0.6) as mock_yf:
+            score = score_news_fmp("SAP.DE")
+        mock_yf.assert_called_once_with("SAP.DE")
+        assert score == pytest.approx(0.6)
+
+    def test_score_bounded_0_to_1(self, monkeypatch):
+        monkeypatch.setenv("FMP_API_KEY", "k")
+        monkeypatch.setenv("FMP_MAX_RPS", "1000")
+        from scripts.run_pipeline import score_news_fmp
+        from regime_trader.services.fmp_client import FMPClient
+
+        articles = [{"sentiment": "Positive"}] * 50
+        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
+            score = score_news_fmp("NVDA")
+        assert 0.0 <= score <= 1.0
