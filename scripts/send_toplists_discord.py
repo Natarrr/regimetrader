@@ -265,12 +265,11 @@ def _ticker_detail_field(
     buyback_conv: Optional[float] = None,
     mid_cap: bool = False,
 ) -> Dict[str, Any]:
-    """Unified 4-line ticker card — identical anatomy for Large Cap and Mid Cap.
+    """Director-grade 2-line ticker card — score+bar line1, factor matrix line2.
 
-    Line 1: {RANK} {TICKER} — {BADGE} — {SCORE} {BAR10}  [boosts]
-    Line 2: {SECTOR_EMOJI}{SECTOR} · {MARKET_CAP}
-    Line 3: ────────────────────
-    Line 4: 👤{v}  🏛{v}  🔄{v}  📰{v}  🌐{v}
+    Line 1: Score: {BAR10} **{score:.4f}** ({badge})  [boosts]
+    Line 2: [E: {edgar:.2f} | I: {insider:.2f} | C: {congress:.2f} | N: {news:.2f} | M: {macro:.2f}]
+    ────────────────────
 
     Args:
         mid_cap:     True → use `N` backtick rank; False → use 🥇🥈🥉 for 1–3.
@@ -279,15 +278,13 @@ def _ticker_detail_field(
     """
     ticker       = entry.get("ticker", "?")
     company_name = (entry.get("company_name") or "").strip()
-    display_name = f"{company_name} ({ticker})" if company_name else ticker
     score   = float(entry.get("final_score", 0))
     badge   = entry.get("badge", "WATCHLIST")
     factors = entry.get("factors") or {}
-    sector  = (entry.get("sector") or "").strip()
-    cap     = entry.get("market_cap", 0)
     boost   = float(entry.get("congress_boost", 0.0))
+    market  = entry.get("market", "USA")
 
-    # ── Line 1: rank token ────────────────────────────────────────────────
+    # ── Rank token ────────────────────────────────────────────────────────
     if mid_cap:
         rank_token = f"`{rank}`"
     else:
@@ -309,32 +306,31 @@ def _ticker_detail_field(
     flag_tag = "  ⚠️"    if anomaly_flags          else ""
 
     line1 = (
-        f"{rank_token} **{display_name}** — {badge} — `{score:.2f}` {bar_str}"
+        f"Score: {bar_str} **{score:.4f}** ({badge})"
         f"{boost_part}{buyback_part}{trend_part}{ceo_tag}{flag_tag}"
     )
 
-    # ── Line 2: sector · market cap ───────────────────────────────────────
-    sector_label = _SECTOR_SHORT.get(sector, _SECTOR_MISC) if sector else _SECTOR_MISC
-    cap_str      = f"  ·  {_fmt_cap(cap)}" if cap else ""
-    line2 = f"{sector_label}{cap_str}"
+    # ── Line 2: factor matrix — letter abbreviations, default 0.00 ───────
+    edgar    = float(factors.get("edgar",    0) or 0)
+    insider  = float(factors.get("insider",  0) or 0)
+    congress = float(factors.get("congress", 0) or 0)
+    news     = float(factors.get("news",     0) or 0)
+    macro    = float(factors.get("macro",    0) or 0)
+    line2 = (
+        f"[E: {edgar:.2f} | I: {insider:.2f} | C: {congress:.2f}"
+        f" | N: {news:.2f} | M: {macro:.2f}]"
+    )
 
-    # ── Line 3: visual separator ──────────────────────────────────────────
-    line3 = "────────────────────"
+    flag  = _MARKET_FLAGS.get(market, "🌐")
+    value = _truncate(f"{line1}\n{line2}\n────────────────────", 1020)
 
-    # ── Line 4: factor matrix — emoji + raw value ─────────────────────────
-    factor_parts = []
-    for key in ("edgar", "insider", "congress", "news", "macro"):
-        v = factors.get(key)
-        if v is not None:
-            factor_parts.append(f"{_FACTOR_EMOJI[key]}`{v:.2f}`")
-    if buyback_conv is not None:
-        factor_parts.append(f"🔄`{buyback_conv:.2f}`")
-    line4 = "  ".join(factor_parts) if factor_parts else "—"
+    if company_name:
+        name = f"#{rank} {flag} {ticker} | {company_name}"
+    else:
+        name = f"#{rank} {flag} {ticker}"
 
-    flag  = _MARKET_FLAGS.get(entry.get("market", "USA"), "🇺🇸")
-    value = _truncate("\n".join([line1, line2, line3, line4]), 1024)
     return {
-        "name":   f"#{rank} {flag} {display_name}",
+        "name":   name,
         "value":  value,
         "inline": False,
     }
@@ -795,20 +791,20 @@ def run_tests() -> int:
         val  = card["value"] if card else ""
         _check("card_has_separator",  "────────────────────" in val, f"val={val!r}")
         _check("card_has_score_bar",  "▓" in val or "░" in val,     f"val={val!r}")
-        _check("card_has_factor_emoji","👤" in val,                  f"val={val!r}")
+        _check("card_has_factor_matrix", "[E:" in val,               f"val={val!r}")
         lines = val.split("\n")
-        _check("card_four_lines", len(lines) == 4, f"lines={lines}")
+        _check("card_three_lines", len(lines) == 3, f"lines={lines}")
     except Exception:
         failures.append(f"FAIL [card_anatomy]: {traceback.format_exc()}")
 
-    # ── Test 9: mid_cap=True uses backtick rank, not medal ────────────────────
+    # ── Test 9: mid_cap=True — card renders without crash, name uses #rank ──────
     try:
         entry  = _entry("CRDO", score=0.74)
         field  = _ticker_detail_field(1, entry, mid_cap=True)
-        _check("midcap_rank_backtick", "`1`" in field["value"],
-               f"val={field['value']!r}")
-        _check("midcap_no_medal", "🥇" not in field["value"],
-               f"val={field['value']!r}")
+        _check("midcap_name_has_rank", "#1" in field["name"],
+               f"name={field['name']!r}")
+        _check("midcap_no_medal", "🥇" not in field["name"],
+               f"name={field['name']!r}")
     except Exception:
         failures.append(f"FAIL [midcap_rank]: {traceback.format_exc()}")
 
