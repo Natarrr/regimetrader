@@ -70,3 +70,35 @@ def test_edgar_fetcher_prepare_returns_list():
     f = EDGARFetcher()
     result = f.prepare([])
     assert isinstance(result, list)
+
+
+from unittest.mock import patch, MagicMock
+from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+
+
+def test_fmp_fetcher_market():
+    f = FMPFetcher(api_key="test")
+    assert f.market == MarketEnum.EUROPE
+
+
+def test_fmp_fetcher_source_reliability():
+    f = FMPFetcher(api_key="test")
+    assert f.source_reliability("SAP.DE") == 0.75
+
+
+def test_fmp_fetcher_prepare_empty_on_api_error():
+    f = FMPFetcher(api_key="test")
+    with patch.object(f, "_fetch_quote", side_effect=Exception("network")):
+        result = f.prepare(["SAP.DE"])
+    assert result == []
+
+
+def test_fmp_fetcher_prepare_normalizes_ticker():
+    f = FMPFetcher(api_key="test")
+    mock_quote = {"price": 120.0, "marketCap": 150e9, "eps": 5.0, "volume": 1e6, "avgVolume": 900000}
+    with patch.object(f, "_fetch_quote", return_value=mock_quote):
+        result = f.prepare(["SAP.DE"])
+    assert len(result) == 1
+    assert result[0].ticker == "SAP.DE"
+    assert result[0].market == MarketEnum.EUROPE
+    assert result[0].source_reliability == 0.75
