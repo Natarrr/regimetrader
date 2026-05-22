@@ -172,7 +172,7 @@ class TestShadowScore:
             },
             "weights": {
                 "edgar": 0.28, "insider": 0.23, "congress": 0.22,
-                "news": 0.15, "momentum": 0.12,
+                "news": 0.15, "macro": 0.12,
             },
             "results": results,
             "computed_at": "2026-05-21T12:00:00+00:00",

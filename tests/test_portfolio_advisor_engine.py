@@ -117,7 +117,7 @@ class TestFindSwapCandidate:
 # ── build_advice() weights and keys ───────────────────────────────────────────
 
 class TestBuildAdviceWeightsAndKeys:
-    """build_advice() must use 28/23/22/15/12 weights and 'momentum' key."""
+    """build_advice() must use 28/23/22/15/12 weights and 'macro' key."""
 
     def _make_status(self) -> dict:
         return {
@@ -156,7 +156,7 @@ class TestBuildAdviceWeightsAndKeys:
         # edgar_score=1.0, all others=0 → final_score should be 0.28 (not 0.30)
         assert adv.final_score == pytest.approx(0.28, abs=1e-4)
 
-    def test_factors_dict_has_momentum_not_macro(self):
+    def test_factors_dict_has_macro_not_momentum(self):
         from regime_trader.ui.portfolio_advisor_engine import build_advice
 
         status = self._make_status()
@@ -174,5 +174,5 @@ class TestBuildAdviceWeightsAndKeys:
                 )
 
         adv = result[0]
-        assert "momentum" in adv.factors,     "'momentum' key missing from factors"
-        assert "macro"    not in adv.factors, "'macro' key must not be in factors"
+        assert "macro"    in adv.factors,    "'macro' key missing from factors"
+        assert "momentum" not in adv.factors, "'momentum' key must not be in factors"

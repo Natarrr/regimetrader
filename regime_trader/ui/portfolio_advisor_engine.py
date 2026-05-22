@@ -194,7 +194,7 @@ def build_advice(
                 "insider":  round(float(row.get("insider_score", 0)), 4),
                 "congress": round(float(row.get("congress_score",0)), 4),
                 "news":     round(float(row.get("news_score",    0)), 4),
-                "momentum": round(float(row.get("momentum_score",0)), 4),
+                "macro":    round(float(row.get("momentum_score",0)), 4),
             },
             signal_age_days       = age_days,
             swap_candidate        = swap,

@@ -76,13 +76,12 @@ _FACTOR_LABEL = {
     "congress": "Congress",
     "news":     "News",
     "macro":    "Macro",
-    "momentum": "Momentum",
 }
 
 # ── Nominal factor weights (EDGAR-first baseline) ─────────────────────────────
 # Used to detect feed-down redistribution and identify lagging sources.
 _NOMINAL_WEIGHTS: Dict[str, float] = {
-    "edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12,
+    "edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "macro": 0.12,
 }
 
 # ── VIX regime thresholds ─────────────────────────────────────────────────────
@@ -120,7 +119,6 @@ _FACTOR_EMOJI: Dict[str, str] = {
     "congress": "🏛",
     "news":     "📰",
     "macro":    "🌐",
-    "momentum": "📈",
 }
 
 # Medal for top-5 ranks

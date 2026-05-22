@@ -51,7 +51,7 @@ WEIGHTS: Dict[str, float] = {
     "insider":  0.23,
     "congress": 0.22,
     "news":     0.15,
-    "momentum": 0.12,
+    "macro":    0.12,
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -60,7 +60,7 @@ FACTOR_FIELDS: Dict[str, str] = {
     "insider":  "insider_score",
     "congress": "congress_score",
     "news":     "news_score",
-    "momentum": "momentum_score",
+    "macro":    "momentum_score",  # pipeline writes momentum_score; exposed as macro
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
@@ -603,7 +603,7 @@ def generate(
                 "insider":  float(row.get("insider_score", 0.0)),
                 "congress": 0.0,
                 "news":     0.0,
-                "momentum": float(row.get("momentum_score", 0.0)),
+                "macro":    float(row.get("momentum_score", 0.0)),
             },
             "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
             "quiver_evidence":         {},
@@ -718,7 +718,7 @@ def generate(
         writer.writerow([
             "rank", "ticker", "sector", "cap_tier", "market_cap",
             "final_score", "badge", "ceo_buy", "form4_count",
-            "edgar", "insider", "congress", "news", "momentum",
+            "edgar", "insider", "congress", "news", "macro",
         ])
         for rank, entry in enumerate(top_buys, 1):
             f = entry["factors"]
@@ -732,7 +732,7 @@ def generate(
                 entry["badge"],
                 entry["ceo_buy"],
                 entry["form4_count"],
-                f["edgar"], f["insider"], f["congress"], f["news"], f["momentum"],
+                f["edgar"], f["insider"], f["congress"], f["news"], f["macro"],
             ])
     log.info("Wrote %s", out_csv)
 

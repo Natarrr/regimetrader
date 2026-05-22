@@ -7,7 +7,7 @@
     "insider": 0.23,
     "congress": 0.22,
     "news": 0.15,
-    "momentum": 0.12
+    "macro": 0.12
   },
   "vix": 18.43,
   "kill_switch": false,
@@ -28,7 +28,7 @@
         "insider": 1.0,
         "congress": 0.5,
         "news": 0.8061,
-        "momentum": 0.5
+        "macro": 0.5
       },
       "validation_metadata": {
         "is_complete": true,
@@ -55,7 +55,7 @@
         "insider": 0.9131,
         "congress": 0.5,
         "news": 0.8061,
-        "momentum": 0.5
+        "macro": 0.5
       },
       "validation_metadata": {
         "is_complete": true,
@@ -82,7 +82,7 @@
         "insider": 0.8212,
         "congress": 0.5,
         "news": 0.7041,
-        "momentum": 0.5
+        "macro": 0.5
       },
       "validation_metadata": {
         "is_complete": true,
@@ -109,7 +109,7 @@
         "insider": 0.0,
         "congress": 0.5,
         "news": 1.0,
-        "momentum": 0.5
+        "macro": 0.5
       },
       "validation_metadata": {
         "is_complete": true,
@@ -136,7 +136,7 @@
         "insider": 0.0,
         "congress": 0.5,
         "news": 1.0,
-        "momentum": 0.5
+        "macro": 0.5
       },
       "validation_metadata": {
         "is_complete": true,

@@ -99,14 +99,14 @@ class TestBuildPayloadWeights:
             "kill_switch":   False,
             "top_buys":      [{"ticker": "AAPL", "final_score": 0.70, "badge": "TACTICAL BUY",
                                "factors": {"edgar": 0.7, "insider": 0.6, "congress": 0.5,
-                                           "news": 0.6, "momentum": 0.5}, "ceo_buy": False}],
+                                           "news": 0.6, "macro": 0.5}, "ceo_buy": False}],
             "mid_caps":      [],
             "small_caps":    [],
         }
 
     def test_nominal_weights_no_redistribution_label(self):
         from scripts.send_toplists_discord import build_payload
-        weights = {"edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "momentum": 0.12}
+        weights = {"edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "macro": 0.12}
         payload = build_payload(self._make_top_lists(weights))
         desc = payload["embeds"][0]["description"]
         assert "feed down" not in desc, "nominal weights must not trigger redistribution warning"
@@ -115,7 +115,7 @@ class TestBuildPayloadWeights:
     def test_redistributed_weights_shows_warning(self):
         from scripts.send_toplists_discord import build_payload
         # Simulate insider feed dead — weight redistributed to other factors
-        weights = {"edgar": 0.359, "congress": 0.282, "news": 0.192, "momentum": 0.154}
+        weights = {"edgar": 0.359, "congress": 0.282, "news": 0.192, "macro": 0.154}
         payload = build_payload(self._make_top_lists(weights))
         desc = payload["embeds"][0]["description"]
         assert "feed down" in desc or "redistributed" in desc, (
