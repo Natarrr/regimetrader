@@ -396,6 +396,7 @@ def _apply_congress_boost(
             raw_final = entry["final_score"]
             boosted = round(raw_final * (1.0 + 0.10 * conviction), 4)
             entry["final_score"] = boosted
+            entry["badge"] = _badge(boosted)
             entry["congress_boost"] = round(0.10 * conviction, 4)
             log.debug(
                 "Congress boost applied: %s %.4f → %.4f (conv=%.2f)",

@@ -154,7 +154,14 @@ jobs:
             --verbose \
             $FORCE
 
-      # ── 6b. Gate — validate top_lists.json before Discord fires ─────────────
+      # ── 6b. Institutional audit — circuit-breaker before Discord delivery ──────
+      # Validates score range, badge/score consistency, sort order, geographic
+      # leakage, cross-contamination (EU/Asia congress ≠ 0), VIX coherence,
+      # and ticker format.  Exit 1 blocks the pipeline before Discord fires.
+      - name: Audit payload (RT-QA-2026-REV4)
+        run: python scripts/audit_payload.py --input logs/top_lists.json
+
+      # ── 6c. Gate — validate top_lists.json before Discord fires ─────────────
       - name: Validate top_lists.json
         run: |
           python3 - <<'EOF'
