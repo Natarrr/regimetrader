@@ -138,3 +138,47 @@ def test_asian_fetcher_prepare_returns_entry():
     assert len(result) == 1
     assert result[0].market == MarketEnum.ASIA
     assert result[0].source_reliability == 0.6
+
+
+from regime_trader.fetchers.orchestrator import Orchestrator
+from regime_trader.fetchers.base import TickerEntry
+
+
+def _make_entry(ticker: str, market: MarketEnum) -> TickerEntry:
+    return TickerEntry(ticker=ticker, market=market, sector="Tech",
+                       cap_tier="large", source_reliability=1.0, raw_factors={})
+
+
+def test_orchestrator_collects_all_results():
+    f1 = MagicMock()
+    f1.market = MarketEnum.USA
+    f1.prepare.return_value = [_make_entry("AAPL.US", MarketEnum.USA)]
+    f2 = MagicMock()
+    f2.market = MarketEnum.EUROPE
+    f2.prepare.return_value = [_make_entry("SAP.DE", MarketEnum.EUROPE)]
+    orch = Orchestrator([f1, f2])
+    results = orch.run({"USA": ["AAPL"], "EUROPE": ["SAP.DE"]})
+    tickers = [e.ticker for e in results]
+    assert "AAPL.US" in tickers
+    assert "SAP.DE" in tickers
+
+
+def test_orchestrator_non_blocking_on_fetcher_failure():
+    failing = MagicMock()
+    failing.market = MarketEnum.EUROPE
+    failing.prepare.side_effect = Exception("API down")
+    ok = MagicMock()
+    ok.market = MarketEnum.USA
+    ok.prepare.return_value = [_make_entry("AAPL.US", MarketEnum.USA)]
+    orch = Orchestrator([failing, ok])
+    results = orch.run({"USA": ["AAPL"], "EUROPE": ["SAP.DE"]})
+    assert any(e.ticker == "AAPL.US" for e in results)
+
+
+def test_orchestrator_empty_when_all_fail():
+    f = MagicMock()
+    f.market = MarketEnum.USA
+    f.prepare.side_effect = RuntimeError("dead")
+    orch = Orchestrator([f])
+    results = orch.run({"USA": ["AAPL"]})
+    assert results == []
