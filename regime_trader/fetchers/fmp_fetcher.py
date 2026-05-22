@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 _RELIABILITY = 0.75
 _RATE_LIMIT_DELAY = 0.25
-_DAILY_QUOTA = 200
+_DAILY_QUOTA = 250
 _USAGE_FILE = Path(__file__).resolve().parents[3] / "data" / "fmp_usage.json"
 
 
