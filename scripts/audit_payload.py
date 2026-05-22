@@ -81,10 +81,15 @@ def _expected_badge(score: float) -> str:
 
 
 def _iter_all_entries(data: dict):
-    """Yield every entry across top_buys, mid_caps, small_caps."""
-    for bucket in ("top_buys", "mid_caps", "small_caps"):
+    """Yield every entry across all score buckets (deduped by ticker)."""
+    seen: set = set()
+    for bucket in ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
+                   "mid_caps", "small_caps"):
         for entry in data.get(bucket, []):
-            yield entry
+            key = (bucket, entry.get("ticker", ""))
+            if key not in seen:
+                seen.add(key)
+                yield entry
 
 
 # ---------------------------------------------------------------------------
@@ -136,17 +141,18 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
             )
 
     # ------------------------------------------------------------------
-    # C. Sort order — top_buys must be descending by final_score
+    # C. Sort order — all top_buys lists must be descending by final_score
     # ------------------------------------------------------------------
-    top_buys = data.get("top_buys", [])
-    for i in range(len(top_buys) - 1):
-        a = top_buys[i]["final_score"]
-        b = top_buys[i + 1]["final_score"]
-        if a < b:
-            raise SortingError(
-                f"top_buys[{i}].final_score={a:.4f} < top_buys[{i+1}].final_score={b:.4f} "
-                f"— list is not sorted descending"
-            )
+    for list_key in ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia"):
+        bucket = data.get(list_key, [])
+        for i in range(len(bucket) - 1):
+            a = bucket[i]["final_score"]
+            b = bucket[i + 1]["final_score"]
+            if a < b:
+                raise SortingError(
+                    f"{list_key}[{i}].final_score={a:.4f} < {list_key}[{i+1}].final_score={b:.4f} "
+                    f"— list is not sorted descending"
+                )
 
     # ------------------------------------------------------------------
     # D. Geographic leakage — ticker suffix vs market field
@@ -193,13 +199,14 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
     # ------------------------------------------------------------------
     # G. Structural Discord limits — ticker format validation
     # ------------------------------------------------------------------
-    for entry in data.get("top_buys", []):
-        ticker = entry.get("ticker", "")
-        if not _TICKER_RE.match(ticker):
-            raise StructuralIntegrityError(
-                f"Ticker {ticker!r} does not match allowed format "
-                f"(e.g. 'MSFT', 'SAP.DE')"
-            )
+    for list_key in ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia"):
+        for entry in data.get(list_key, []):
+            ticker = entry.get("ticker", "")
+            if not _TICKER_RE.match(ticker):
+                raise StructuralIntegrityError(
+                    f"Ticker {ticker!r} does not match allowed format "
+                    f"(e.g. 'MSFT', 'SAP.DE')"
+                )
 
     return True
 

@@ -652,6 +652,22 @@ def generate(
     score_desc = lambda e: e["final_score"]  # noqa: E731
 
     top_buys = sorted(valid_entries, key=score_desc, reverse=True)[:5]
+
+    # Per-market top-5 lists — each market ranked independently so EU/Asia
+    # tickers are never crowded out by the deeper US signal universe.
+    top_buys_usa = sorted(
+        [e for e in valid_entries if e.get("market", "USA") == "USA"],
+        key=score_desc, reverse=True,
+    )[:5]
+    top_buys_europe = sorted(
+        [e for e in valid_entries if e.get("market") == "EUROPE"],
+        key=score_desc, reverse=True,
+    )[:5]
+    top_buys_asia = sorted(
+        [e for e in valid_entries if e.get("market") == "ASIA"],
+        key=score_desc, reverse=True,
+    )[:5]
+
     mid_caps = sorted(
         [e for e in valid_entries if e["cap_tier"] == "mid"],
         key=score_desc, reverse=True,
@@ -674,6 +690,9 @@ def generate(
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
         "top_buys":        top_buys,
+        "top_buys_usa":    top_buys_usa,
+        "top_buys_europe": top_buys_europe,
+        "top_buys_asia":   top_buys_asia,
         "shadow_top_buys": shadow_top_buys,
         "mid_caps":        mid_caps,
         "small_caps":      small_caps,

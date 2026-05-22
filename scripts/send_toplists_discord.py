@@ -564,25 +564,20 @@ def build_payload(
             added += 1
         return result
 
-    # ── Large Cap section ─────────────────────────────────────────────────
-    if top_buys:
-        fields.append({
-            "name":   "🏆 Top 5 — Large Caps",
-            "value":  "​",
-            "inline": False,
-        })
-        fields.extend(_ticker_fields(top_buys, max_n=5, budget=1900, is_mid_cap=False))
-
-    # ── Mid Cap section ───────────────────────────────────────────────────
-    mid_caps = top_lists.get("mid_caps") or []
-
-    if mid_caps:
-        fields.append({
-            "name":   "📈 Top 3 — Mid Caps ($2B–$10B)",
-            "value":  "​",
-            "inline": False,
-        })
-        fields.extend(_ticker_fields(mid_caps, max_n=3, budget=1900, is_mid_cap=True))
+    # ── Per-market sections: USA / Europe / Asia ──────────────────────────
+    # Each market is ranked independently — EU/Asia tickers are never crowded
+    # out by the deeper US signal universe.  Budget per section: 1800 chars
+    # (3 × 1800 = 5400, within the 6000-char embed total).
+    _MARKET_SECTIONS = [
+        ("🇺🇸 Top 5 — USA",    top_lists.get("top_buys_usa")    or top_buys),
+        ("🇪🇺 Top 5 — Europe", top_lists.get("top_buys_europe") or []),
+        ("🇯🇵 Top 5 — Asia",   top_lists.get("top_buys_asia")   or []),
+    ]
+    for section_name, section_entries in _MARKET_SECTIONS:
+        if not section_entries:
+            continue
+        fields.append({"name": section_name, "value": "​", "inline": False})
+        fields.extend(_ticker_fields(section_entries, max_n=5, budget=1800, is_mid_cap=False))
 
     # ── Satellite detail blocks (cyclicals + cannibals) ───────────────────
     try:
@@ -618,7 +613,11 @@ def build_payload(
         log.warning("satellite embed fields skipped: %s", exc)
 
     # ── Sector Exposure — structured chip grid ────────────────────────────
-    all_entries = list(top_buys[:5]) + list(mid_caps[:3])
+    all_entries = (
+        list(top_lists.get("top_buys_usa") or top_buys)[:5]
+        + list(top_lists.get("top_buys_europe") or [])[:5]
+        + list(top_lists.get("top_buys_asia") or [])[:5]
+    )
     structured  = _sector_heatmap_structured(all_entries)
     if structured:
         sorted_sectors = sorted(
