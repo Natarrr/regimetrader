@@ -709,6 +709,177 @@ def build_markdown_report(
     return "\n".join(lines)
 
 
+# ── Discord KPI notification ───────────────────────────────────────────────────
+
+def _score_bar(score: float, width: int = 8) -> str:
+    filled = min(width, max(0, round(score * width)))
+    return "▓" * filled + "░" * (width - filled)
+
+
+def _pct_short(v: float) -> str:
+    sign = "+" if v >= 0 else ""
+    return f"{sign}{v * 100:.1f}%"
+
+
+def build_backtest_discord_payload(
+    report_date:   date,
+    badge_stats:   Dict[str, List[HorizonStats]],
+    cap_stats:     Dict[str, HorizonStats],
+    worst:         List[SignalRecord],
+    total_signals: int,
+    records:       List[SignalRecord],
+) -> Dict[str, Any]:
+    """Build a Discord embed payload summarising backtest KPIs for BUY-tier signals."""
+
+    badge_order = ["HIGH BUY", "TACTICAL BUY"]
+    badge_emoji = {"HIGH BUY": "🟢", "TACTICAL BUY": "🟡"}
+
+    fields: List[Dict[str, Any]] = []
+
+    # ── Per-badge KPI block ────────────────────────────────────────────────────
+    for badge in badge_order:
+        stats_list = badge_stats.get(badge, [])
+        stats_by_h = {s.horizon: s for s in stats_list}
+        s5  = stats_by_h.get(5)
+        s10 = stats_by_h.get(10)
+        s20 = stats_by_h.get(20)
+        n   = s10.count if s10 else 0
+        emoji = badge_emoji.get(badge, "⚪")
+
+        if n == 0:
+            fields.append({
+                "name":   f"{emoji} {badge}",
+                "value":  "_No priced signals yet_",
+                "inline": True,
+            })
+            continue
+
+        wr  = f"{s10.win_rate * 100:.0f}%"  if s10 else "—"
+        r5  = _pct_short(s5.avg_return)     if s5  else "—"
+        r10 = _pct_short(s10.avg_return)    if s10 else "—"
+        r20 = _pct_short(s20.avg_return)    if s20 else "—"
+        alp = _pct_short(s10.avg_alpha)     if s10 else "—"
+        pf  = f"{s10.profit_factor:.2f}" if s10 and s10.profit_factor != float("inf") else "∞"
+
+        fields.append({
+            "name":  f"{emoji} {badge}  ({n} signals)",
+            "value": (
+                f"```\n"
+                f"Win rate  {wr:>8}\n"
+                f"T+5 avg   {r5:>8}\n"
+                f"T+10 avg  {r10:>8}\n"
+                f"T+20 avg  {r20:>8}\n"
+                f"α vs SPY  {alp:>8}\n"
+                f"Prof. fac {pf:>8}\n"
+                f"```"
+            ),
+            "inline": True,
+        })
+
+    # ── Spacer ─────────────────────────────────────────────────────────────────
+    fields.append({"name": "​", "value": "​", "inline": False})
+
+    # ── Cap-tier T+10 summary ─────────────────────────────────────────────────
+    tier_lines = []
+    for key, label in [("large", "Large"), ("mid", "Mid"), ("small", "Small")]:
+        s = cap_stats.get(key)
+        if s and s.count > 0:
+            tier_lines.append(
+                f"**{label}** ({s.count})  "
+                f"{_pct_short(s.avg_return)} avg · {s.win_rate*100:.0f}% win · α {_pct_short(s.avg_alpha)}"
+            )
+    if tier_lines:
+        fields.append({
+            "name":   "🔍 Cap Tier Breakdown (T+10)",
+            "value":  "\n".join(tier_lines),
+            "inline": False,
+        })
+
+    # ── Recent BUY signals with live KPI bar ──────────────────────────────────
+    buy_tiers = {"HIGH BUY", "TACTICAL BUY"}
+    recent = sorted(
+        [r for r in records if r.badge in buy_tiers and r.entry_price is not None],
+        key=lambda r: r.signal_date,
+        reverse=True,
+    )[:8]
+
+    if recent:
+        ticker_lines = []
+        for r in recent:
+            t10 = r.returns.get(10)
+            ret_str = _pct_short(t10) if t10 is not None else "pending"
+            bar     = _score_bar(r.final_score, 6)
+            alpha_str = _pct_short(r.alpha[10]) if r.alpha.get(10) is not None else "—"
+            ticker_lines.append(
+                f"`{r.ticker:<10}` {badge_emoji.get(r.badge,'⚪')} "
+                f"`{r.final_score:.2f}` {bar}  "
+                f"T+10: **{ret_str}**  α: {alpha_str}  _{r.signal_date.isoformat()}_"
+            )
+        fields.append({
+            "name":   "📋 Recent BUY Signals — T+10 Performance",
+            "value":  "\n".join(ticker_lines),
+            "inline": False,
+        })
+
+    # ── Worst detractors ──────────────────────────────────────────────────────
+    if worst:
+        det_lines = []
+        for r in worst:
+            t10 = r.returns.get(10)
+            ret_str = _pct_short(t10) if t10 is not None else "—"
+            pf_label = _primary_failure_factor(r)
+            det_lines.append(
+                f"`{r.ticker}` {ret_str} · drag: **{pf_label}** · _{r.signal_date.isoformat()}_"
+            )
+        fields.append({
+            "name":   "📉 Top Detractors",
+            "value":  "\n".join(det_lines),
+            "inline": False,
+        })
+
+    # ── Determine overall colour by HIGH BUY T+10 avg return ─────────────────
+    hb_stats = {s.horizon: s for s in badge_stats.get("HIGH BUY", [])}
+    hb_t10   = hb_stats.get(10)
+    if hb_t10 and hb_t10.avg_return > 0.01:
+        colour = 0x57F287   # green
+    elif hb_t10 and hb_t10.avg_return < -0.01:
+        colour = 0xED4245   # red
+    else:
+        colour = 0xFEE75C   # yellow
+
+    priced = sum(1 for r in records if r.entry_price is not None)
+    description = (
+        f"**{total_signals}** qualifying signals parsed · "
+        f"**{priced}** priced · "
+        f"horizons: T+5 / T+10 / T+20"
+    )
+
+    return {
+        "embeds": [{
+            "title":       "📊 Weekly Backtest — BUY Signal KPIs",
+            "description": description,
+            "color":       colour,
+            "fields":      fields,
+            "footer":      {"text": f"regime_trader · {report_date.isoformat()}"},
+        }]
+    }
+
+
+def send_backtest_to_discord(webhook: str, payload: Dict[str, Any]) -> bool:
+    """POST backtest payload to Discord webhook. Returns True on success."""
+    try:
+        import requests as _req
+        resp = _req.post(webhook, json=payload, timeout=15)
+        if resp.status_code in (200, 204):
+            log.info("Backtest KPI sent to Discord")
+            return True
+        log.warning("Discord webhook returned %d: %s", resp.status_code, resp.text[:200])
+        return False
+    except Exception as exc:
+        log.warning("Discord send failed: %s", exc)
+        return False
+
+
 # ── GitHub Actions summary helper ─────────────────────────────────────────────
 
 def write_github_step_summary(md_path: Path) -> None:
@@ -753,6 +924,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--dry-run", action="store_true",
         help="Parse logs and compute metrics but skip price download (returns will be empty)",
+    )
+    parser.add_argument(
+        "--discord-webhook", type=str,
+        default=os.environ.get("DISCORD_WEBHOOK_URL", ""),
+        help="Discord webhook URL for KPI notification (falls back to DISCORD_WEBHOOK_URL env var)",
     )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -840,6 +1016,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     sys.stdout.buffer.write((md + "\n").encode("utf-8", errors="replace"))
 
     write_github_step_summary(args.summary_md)
+
+    # ── 8. Discord KPI notification ────────────────────────────────────────────
+    webhook = args.discord_webhook
+    if webhook and not args.dry_run:
+        discord_payload = build_backtest_discord_payload(
+            report_date   = date.today(),
+            badge_stats   = badge_stats,
+            cap_stats     = cap_stats,
+            worst         = worst,
+            total_signals = len(records),
+            records       = records,
+        )
+        send_backtest_to_discord(webhook, discord_payload)
+    elif args.dry_run:
+        log.info("dry-run: skipping Discord notification")
+    else:
+        log.info("No DISCORD_WEBHOOK_URL set — skipping Discord notification")
 
     return 0
 
