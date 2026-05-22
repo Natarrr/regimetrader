@@ -253,9 +253,13 @@ def main() -> None:
 
     top_lists: dict = json.loads(top_lists_path.read_text(encoding="utf-8"))
 
-    # Collect unique tickers and market-cap map from all three universe tiers
+    # Collect unique tickers and market-cap map from all markets + all tiers.
+    # top_buys_usa/europe/asia are used instead of top_buys so that EU/Asia
+    # tickers are always included regardless of cross-market score ranking.
     all_entries: list[dict] = (
-        (top_lists.get("top_buys") or [])
+        (top_lists.get("top_buys_usa") or top_lists.get("top_buys") or [])
+        + (top_lists.get("top_buys_europe") or [])
+        + (top_lists.get("top_buys_asia") or [])
         + (top_lists.get("mid_caps") or [])
         + (top_lists.get("small_caps") or [])
     )

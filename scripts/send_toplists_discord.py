@@ -579,6 +579,12 @@ def build_payload(
         fields.append({"name": section_name, "value": "​", "inline": False})
         fields.extend(_ticker_fields(section_entries, max_n=5, budget=1800, is_mid_cap=False))
 
+    # ── Mid Cap — cross-market top 5 by final_score ───────────────────────
+    mid_caps = top_lists.get("mid_caps") or []
+    if mid_caps:
+        fields.append({"name": "📈 Mid Caps — Top 5 (All Markets)", "value": "​", "inline": False})
+        fields.extend(_ticker_fields(mid_caps, max_n=5, budget=1800, is_mid_cap=True))
+
     # ── Satellite detail blocks (cyclicals + cannibals) ───────────────────
     try:
         if satellite and isinstance(satellite, dict):
@@ -612,11 +618,12 @@ def build_payload(
     except Exception as exc:
         log.warning("satellite embed fields skipped: %s", exc)
 
-    # ── Sector Exposure — structured chip grid ────────────────────────────
+    # ── Sector Exposure — all markets + mid-caps ──────────────────────────
     all_entries = (
         list(top_lists.get("top_buys_usa") or top_buys)[:5]
         + list(top_lists.get("top_buys_europe") or [])[:5]
         + list(top_lists.get("top_buys_asia") or [])[:5]
+        + list(mid_caps)[:5]
     )
     structured  = _sector_heatmap_structured(all_entries)
     if structured:
