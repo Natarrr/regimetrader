@@ -102,3 +102,39 @@ def test_fmp_fetcher_prepare_normalizes_ticker():
     assert result[0].ticker == "SAP.DE"
     assert result[0].market == MarketEnum.EUROPE
     assert result[0].source_reliability == 0.75
+
+
+from regime_trader.fetchers.asian_fetcher import AsianMarketFetcher
+
+
+def test_asian_fetcher_market():
+    f = AsianMarketFetcher()
+    assert f.market == MarketEnum.ASIA
+
+
+def test_asian_fetcher_source_reliability():
+    f = AsianMarketFetcher()
+    assert f.source_reliability("7203.T") == 0.6
+
+
+def test_asian_fetcher_prepare_empty_on_error():
+    f = AsianMarketFetcher()
+    with patch("regime_trader.fetchers.asian_fetcher.yf.Ticker", side_effect=Exception("timeout")):
+        result = f.prepare(["7203.T"])
+    assert result == []
+
+
+def test_asian_fetcher_prepare_returns_entry():
+    f = AsianMarketFetcher()
+    mock_fi = MagicMock()
+    mock_fi.last_price = 2800.0
+    mock_fi.market_cap = 40e12
+    mock_fi.three_month_average_volume = 5e6
+    mock_ticker = MagicMock()
+    mock_ticker.fast_info = mock_fi
+    mock_ticker.info = {"regularMarketVolume": 6e6, "trailingEps": 200.0}
+    with patch("regime_trader.fetchers.asian_fetcher.yf.Ticker", return_value=mock_ticker):
+        result = f.prepare(["7203.T"])
+    assert len(result) == 1
+    assert result[0].market == MarketEnum.ASIA
+    assert result[0].source_reliability == 0.6
