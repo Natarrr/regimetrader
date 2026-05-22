@@ -540,15 +540,21 @@ def generate(
             _apply_vix_overlay(1.0, current_vix),
         )
 
+    # EU/Asia rows carry a pre-scored final_score and must NOT enter cross-sectional
+    # normalization — they have structural zeros in edgar/congress/news which would
+    # corrupt the US peer-group min/max and distort all US scores.
+    us_results  = [r for r in results if r.get("market", "USA") == "USA"]
+    intl_results = [r for r in results if r.get("market", "USA") != "USA"]
+
     # Schema gate: attach validation_metadata + circuit-breaker check.
     # Raises PipelineIntegrityError (before writing anything) if < 20% of the
     # universe has complete data.  Never removes rows — normalization needs the
     # full peer group.
-    _schema_gate(results, universe_size=len(results))
+    _schema_gate(us_results, universe_size=len(us_results))
 
-    norm_factor_list = _cross_sectional_normalize(results)
-    assert len(norm_factor_list) == len(results), (
-        f"_cross_sectional_normalize returned {len(norm_factor_list)} rows for {len(results)} results"
+    norm_factor_list = _cross_sectional_normalize(us_results)
+    assert len(norm_factor_list) == len(us_results), (
+        f"_cross_sectional_normalize returned {len(norm_factor_list)} rows for {len(us_results)} results"
     )
 
     # Redistribute weight from dead factors (all 0.0) to live ones
@@ -568,12 +574,46 @@ def generate(
     entries = [
         _to_entry(row, nf, vix=current_vix, weights=eff_weights,
                   quiver_evidence=row.get("quiver_evidence"))
-        for row, nf in zip(results, norm_factor_list)
+        for row, nf in zip(us_results, norm_factor_list)
     ]
     # Propagate Stage 1 validation flag from raw rows into entries
-    for entry, row in zip(entries, results):
+    for entry, row in zip(entries, us_results):
         if row.get("_validation_failed"):
             entry["_validation_failed"] = True
+
+    # Merge EU/Asia entries using their pre-scored final_score — bypass normalization
+    for row in intl_results:
+        if row.get("_validation_failed"):
+            continue
+        entries.append({
+            "ticker":          row["ticker"],
+            "sector":          row.get("sector", "Unknown"),
+            "cap_tier":        row.get("cap_tier", "large"),
+            "market_cap":      float(row.get("market_cap", 0.0)),
+            "raw_score":       float(row.get("final_score", 0.0)),
+            "final_score":     float(row.get("final_score", 0.0)),
+            "badge":           _badge(float(row.get("final_score", 0.0))),
+            "ceo_buy":         False,
+            "form4_count":     0,
+            "factors":         {
+                "edgar":    0.0,
+                "insider":  float(row.get("insider_score", 0.0)),
+                "congress": 0.0,
+                "news":     0.0,
+                "momentum": float(row.get("momentum_score", 0.0)),
+            },
+            "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
+            "quiver_evidence":         {},
+            "news_source":             "none",
+            "insider_usd":             0.0,
+            "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
+            "volume_spike":            float(row.get("volume_spike", 1.0)),
+            "source_reliability":      float(row.get("source_reliability", 1.0)),
+            "market":                  row.get("market", "USA"),
+        })
+    if intl_results:
+        log.info("Merged %d EU/Asia entries into ranked universe (pre-scored, bypass normalize)", len(intl_results))
+
     _assign_cap_tiers(entries)
 
     # source_reliability dampening — scale final_score by data-source confidence
