@@ -1216,6 +1216,12 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     congress_count = len(congress_data)
     duration      = round(time.time() - t0, 2)
 
+    # ── Cross-sectional neutralization ────────────────────────────────────────
+    # Grinold & Kahn ch. 7: remove sector × cap_tier bias before Stage 1 gate.
+    # Adds *_neutral columns to every result; originals are preserved unchanged.
+    from regime_trader.scoring.neutralization import neutralize_factors  # noqa: PLC0415
+    results = neutralize_factors(results)
+
     # ── Stage 1 gate: stamp computed_at + run validate_raw ────────────────────
     # Stamp a row-level timestamp on every result so validate_dates() has a
     # per-row anchor.  Rows already carrying computed_at are left unchanged.
