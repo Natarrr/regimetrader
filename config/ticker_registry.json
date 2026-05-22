@@ -1,0 +1,26 @@
+{
+  "europe": [
+    {"ticker": "SAP.DE",  "sector": "Information Technology", "cap_tier": "large", "exchange": "XETRA"},
+    {"ticker": "SIE.DE",  "sector": "Industrials",            "cap_tier": "large", "exchange": "XETRA"},
+    {"ticker": "ASML.AS", "sector": "Information Technology", "cap_tier": "large", "exchange": "AMS"},
+    {"ticker": "NESN.SW", "sector": "Consumer Staples",        "cap_tier": "large", "exchange": "SWX"},
+    {"ticker": "MC.PA",   "sector": "Consumer Discretionary",  "cap_tier": "large", "exchange": "EPA"},
+    {"ticker": "TTE.PA",  "sector": "Energy",                  "cap_tier": "large", "exchange": "EPA"},
+    {"ticker": "SHEL.L",  "sector": "Energy",                  "cap_tier": "large", "exchange": "LSE"},
+    {"ticker": "ULVR.L",  "sector": "Consumer Staples",        "cap_tier": "large", "exchange": "LSE"},
+    {"ticker": "AZN.L",   "sector": "Health Care",             "cap_tier": "large", "exchange": "LSE"},
+    {"ticker": "NOVN.SW", "sector": "Health Care",             "cap_tier": "large", "exchange": "SWX"}
+  ],
+  "asia": [
+    {"ticker": "7203.T",  "sector": "Consumer Discretionary",  "cap_tier": "large", "exchange": "TSE"},
+    {"ticker": "9984.T",  "sector": "Communication Services",  "cap_tier": "large", "exchange": "TSE"},
+    {"ticker": "6758.T",  "sector": "Information Technology",  "cap_tier": "large", "exchange": "TSE"},
+    {"ticker": "005930.KS","sector": "Information Technology", "cap_tier": "large", "exchange": "KRX"},
+    {"ticker": "700.HK",  "sector": "Communication Services",  "cap_tier": "large", "exchange": "HKEX"},
+    {"ticker": "9988.HK", "sector": "Consumer Discretionary",  "cap_tier": "large", "exchange": "HKEX"},
+    {"ticker": "601318.SS","sector": "Financials",             "cap_tier": "large", "exchange": "SSE"},
+    {"ticker": "2318.HK", "sector": "Financials",              "cap_tier": "large", "exchange": "HKEX"},
+    {"ticker": "TCS.NS",  "sector": "Information Technology",  "cap_tier": "large", "exchange": "NSE"},
+    {"ticker": "RIL.NS",  "sector": "Energy",                  "cap_tier": "large", "exchange": "NSE"}
+  ]
+}
