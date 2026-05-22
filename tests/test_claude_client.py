@@ -14,13 +14,10 @@ hallucinated data from reaching auto-execution.
 from __future__ import annotations
 
 import json
-import os
 import sys
-import time
-import tempfile
 from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import pytest
 

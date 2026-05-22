@@ -1,4 +1,3 @@
-from pathlib import Path
 from scripts.audit.audit_imports import (
     build_import_graph, find_orphans, find_broken_imports, discover_local_packages,
 )

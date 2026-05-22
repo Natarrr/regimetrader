@@ -8,7 +8,6 @@ no live yfinance calls in CI.
 from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
-from pathlib import Path
 
 import numpy as np
 import pandas as pd

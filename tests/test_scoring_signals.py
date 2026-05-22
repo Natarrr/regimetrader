@@ -6,7 +6,6 @@ the old code and PASS once Tasks 3–4 are complete.
 """
 from __future__ import annotations
 
-import math
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -268,7 +267,7 @@ class TestQuiverEvidenceInResults:
     def test_score_ticker_result_contains_quiver_evidence_key(self):
         """_score_ticker() result must include quiver_evidence dict."""
         from scripts.run_pipeline import run
-        import tempfile, csv, json
+        import tempfile, csv
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as td:
@@ -281,7 +280,6 @@ class TestQuiverEvidenceInResults:
                 w.writeheader()
                 w.writerow({"ticker": "AAPL", "sector": "Tech", "cap_tier": "large"})
 
-            import yfinance as yf
             import pandas as pd, numpy as np
             dates = pd.date_range("2026-04-01", periods=30, freq="B")
             fake_df = pd.DataFrame({

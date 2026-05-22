@@ -4,9 +4,7 @@ Tests for satellite integration in send_toplists_discord.py.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
 
 from scripts.send_toplists_discord import _load_satellite, build_payload
 

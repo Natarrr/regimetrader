@@ -7,9 +7,6 @@ no live network calls in CI.
 """
 from __future__ import annotations
 
-import json
-import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

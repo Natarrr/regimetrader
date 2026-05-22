@@ -12,7 +12,6 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 

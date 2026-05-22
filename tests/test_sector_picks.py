@@ -1,6 +1,5 @@
 """tests/test_sector_picks.py — unit tests for _sector_picks()"""
 from __future__ import annotations
-import pytest
 from backend.market_intel.generate_top_lists import _sector_picks
 
 _ENTRIES = [

@@ -12,7 +12,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 # ── Stub streamlit ─────────────────────────────────────────────────────────────
 def _cache_data_stub(*a, **kw):

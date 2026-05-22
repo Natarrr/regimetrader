@@ -6,13 +6,10 @@ cache-driven (offline-capable). All yfinance calls are mocked.
 """
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from regime_trader.tools.backtest import (

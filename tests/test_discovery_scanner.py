@@ -17,7 +17,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -346,7 +346,6 @@ class TestGetTopAlphaPicks:
 
     def test_cache_hit_skips_scan(self, tmp_cache):
         """Pre-populate a fresh cache; run_scan must not be called."""
-        import regime_trader.scanners.discovery_scanner as ds
         payload = {
             "results": [{"symbol": "CACHED"}],
             "cached": False,

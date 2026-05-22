@@ -7,7 +7,6 @@ tmp_path fixtures.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import patch

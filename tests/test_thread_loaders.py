@@ -212,7 +212,6 @@ class TestLoaderTimeoutHandling:
                     raise FTE()
                 yield f
 
-        import concurrent.futures as cf
 
         fast_data = {"price": 1900.0, "ret_1d": 0.0, "ret_5d": 0.0}
 

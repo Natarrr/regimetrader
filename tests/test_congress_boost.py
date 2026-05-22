@@ -12,7 +12,6 @@ Verifies _apply_congress_boost() and its interaction with generate():
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import patch

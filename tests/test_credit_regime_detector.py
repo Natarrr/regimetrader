@@ -687,7 +687,6 @@ class TestRegimeDetectorCreditIntegration:
 
     def test_w_credit_zero_ignores_credit_scores(self, ensemble):
         """When w_credit=0, passing credit_scores has no effect."""
-        from regime_trader.models.regime_detector import RegimeDetector
         det_no_credit, vix, ret, idx = ensemble
         credit_scores = pd.Series(np.ones(len(vix)) * 0.99, index=idx)
 

@@ -16,13 +16,11 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import patch
 
-import pytest
 
 ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:

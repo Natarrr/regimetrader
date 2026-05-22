@@ -369,23 +369,6 @@ def _conviction_field(entry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _cap_tier_field(name: str, entries: List[Dict]) -> Dict[str, Any]:
-    """Compact cap-tier opportunity list."""
-    if not entries:
-        return {"name": name, "value": "*No picks in this tier today.*", "inline": False}
-    lines = []
-    for i, e in enumerate(entries[:5], 1):
-        ticker = e.get("ticker", "?")
-        score  = float(e.get("final_score", 0))
-        bar    = _score_bar(score, width=6)
-        ceo    = " ⚡" if e.get("ceo_buy") else ""
-        lines.append(f"`{i}` **{ticker}**{ceo} {bar} `{score:.2f}`")
-    return {
-        "name":   name,
-        "value":  _truncate("\n".join(lines), 1020),
-        "inline": False,
-    }
-
 
 # ── I/O helpers ────────────────────────────────────────────────────────────────
 

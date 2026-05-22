@@ -1,4 +1,3 @@
-from pathlib import Path
 from scripts.audit.audit_docs import (
     collect_symbols, extract_doc_symbols, find_dead_docs, find_duplicate_docs, jaccard,
 )

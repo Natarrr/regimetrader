@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -12,7 +12,6 @@ from regime_trader.ui.portfolio_advisor_engine import (
     compute_signal,
     compute_health_score,
     find_swap_candidate,
-    PositionAdvice,
     _signal_age_days,
 )
 
