@@ -1,0 +1,103 @@
+{
+  "results": [
+    {
+      "symbol": "F",
+      "smart_money_score": 0.5244,
+      "insider_score": 0.0,
+      "institutional_score": 1.0,
+      "momentum_score": 0.872,
+      "insider_value_usd": 0.0,
+      "insider_value_pct_mcap": 0.0,
+      "key_insider_roles": [],
+      "institutional_net_shares": 3577232.0,
+      "institutional_pct_change": 0.23875,
+      "volume_spike": 3.976,
+      "price_change_pct": 20.3819,
+      "market_cap": 0.0,
+      "source_flags": [
+        "institutional_accumulating",
+        "screener"
+      ]
+    },
+    {
+      "symbol": "CSCO",
+      "smart_money_score": 0.5164,
+      "insider_score": 0.0,
+      "institutional_score": 1.0,
+      "momentum_score": 0.832,
+      "insider_value_usd": 0.0,
+      "insider_value_pct_mcap": 0.0,
+      "key_insider_roles": [],
+      "institutional_net_shares": 3971002.0,
+      "institutional_pct_change": 0.293,
+      "volume_spike": 3.656,
+      "price_change_pct": 25.3581,
+      "market_cap": 0.0,
+      "source_flags": [
+        "institutional_accumulating",
+        "screener"
+      ]
+    },
+    {
+      "symbol": "AMAT",
+      "smart_money_score": 0.4856,
+      "insider_score": 0.0,
+      "institutional_score": 1.0,
+      "momentum_score": 0.6779,
+      "insider_value_usd": 0.0,
+      "insider_value_pct_mcap": 0.0,
+      "key_insider_roles": [],
+      "institutional_net_shares": 506322.0,
+      "institutional_pct_change": 0.18393,
+      "volume_spike": 2.423,
+      "price_change_pct": 7.2862,
+      "market_cap": 0.0,
+      "source_flags": [
+        "institutional_accumulating",
+        "screener"
+      ]
+    },
+    {
+      "symbol": "NVDA",
+      "smart_money_score": 0.4552,
+      "insider_score": 0.0,
+      "institutional_score": 1.0,
+      "momentum_score": 0.5262,
+      "insider_value_usd": 0.0,
+      "insider_value_pct_mcap": 0.0,
+      "key_insider_roles": [],
+      "institutional_net_shares": 15206652.0,
+      "institutional_pct_change": 0.19193,
+      "volume_spike": 1.21,
+      "price_change_pct": 11.461,
+      "market_cap": 0.0,
+      "source_flags": [
+        "institutional_accumulating",
+        "screener"
+      ]
+    },
+    {
+      "symbol": "FCX",
+      "smart_money_score": 0.45,
+      "insider_score": 0.0,
+      "institutional_score": 1.0,
+      "momentum_score": 0.5,
+      "insider_value_usd": 0.0,
+      "insider_value_pct_mcap": 0.0,
+      "key_insider_roles": [],
+      "institutional_net_shares": 691966.0,
+      "institutional_pct_change": 0.12447,
+      "volume_spike": 0.796,
+      "price_change_pct": 9.1239,
+      "market_cap": 0.0,
+      "source_flags": [
+        "institutional_accumulating",
+        "screener"
+      ]
+    }
+  ],
+  "cached": false,
+  "computed_at": "2026-05-15T13:26:29.839395+00:00",
+  "cache_expires_at": "2026-05-15T19:26:29.839395+00:00",
+  "_expires_at": 1778873189.839395
+}
