@@ -617,20 +617,20 @@ def generate(
     _assign_cap_tiers(entries)
 
     # source_reliability dampening — scale final_score by data-source confidence
+    # Recompute badge after dampening so it stays consistent with final_score.
     for _e in entries:
         _rel = float(_e.get("source_reliability", 1.0))
         _e["final_score"] = round(_e["final_score"] * _rel, 4)
+        _e["badge"] = _badge(_e["final_score"])
 
     # Exclude tickers that failed Stage 1 validation before slicing to top-N
     valid_entries = [e for e in entries if not e.get("_validation_failed")]
 
     # Stage 2: anomaly circuit breakers on scored universe.
-    # Runs on the raw results rows (carry volume_spike, insider_usd, market_cap,
-    # cap_tier, news_score, _stale_data) — writes anomaly_report_latest.json when
-    # anomalies are found (including CONGRESS_CLUSTER conviction scores), writes
-    # nothing when the universe is clean.
+    # Runs on US raw rows only — EU/Asia rows lack the fields (news_score,
+    # volume_spike) that detect_anomalies expects and would cause false positives.
     try:
-        detect_anomalies(results, run_id=run_id, log_dir=log_dir)
+        detect_anomalies(us_results, run_id=run_id, log_dir=log_dir)
     except Exception as exc:
         log.warning("Stage 2 anomaly detection failed (non-fatal): %s", exc)
 

@@ -58,6 +58,23 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      # ── 2b. Restore congress/CIK cache across intraday runs ──────────────────
+      # congress_cache.json has a 24h TTL in run_pipeline.py.  Without persisting
+      # it, each CI run fetches Quiver fresh — intraday data changes cause
+      # cross-sectional congress scores to reshuffle and rankings to flip.
+      # Key resets daily so stale data never survives past midnight UTC.
+      - name: Get cache date
+        id: cache_date
+        run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore pipeline data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/
+          key: pipeline-cache-${{ runner.os }}-${{ steps.cache_date.outputs.date }}
+          restore-keys: |
+            pipeline-cache-${{ runner.os }}-
+
       # ── 3. Install dependencies ──────────────────────────────────────────────
       - name: Install CI deps
         run: |
