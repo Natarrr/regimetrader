@@ -1070,6 +1070,89 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
     return form4_count, total_purchases_usd, ceo_buy, days_since_most_recent
 
 
+# ── Multi-market helpers ───────────────────────────────────────────────────────
+
+def _load_registry_tickers() -> Dict[str, List[str]]:
+    """Load EU/Asia ticker lists from config/ticker_registry.json."""
+    reg_path = ROOT / "config" / "ticker_registry.json"
+    try:
+        data = json.loads(reg_path.read_text(encoding="utf-8"))
+        return {
+            "EUROPE": [e["ticker"] for e in data.get("europe", [])],
+            "ASIA":   [e["ticker"] for e in data.get("asia", [])],
+        }
+    except Exception as exc:
+        log.warning("ticker_registry load failed: %s — EU/Asia skipped", exc)
+        return {"EUROPE": [], "ASIA": []}
+
+
+def _registry_meta() -> Dict[str, Dict[str, Any]]:
+    """Return {ticker: {sector, cap_tier}} from ticker_registry.json."""
+    reg_path = ROOT / "config" / "ticker_registry.json"
+    try:
+        data = json.loads(reg_path.read_text(encoding="utf-8"))
+        meta: Dict[str, Dict[str, Any]] = {}
+        for e in data.get("europe", []) + data.get("asia", []):
+            meta[e["ticker"]] = {"sector": e["sector"], "cap_tier": e["cap_tier"]}
+        return meta
+    except Exception:
+        return {}
+
+
+def _badge_from_score(score: float) -> str:
+    if score >= 0.65:
+        return "HIGH BUY"
+    if score >= 0.45:
+        return "TACTICAL BUY"
+    return "WATCHLIST"
+
+
+def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
+    """Score a European ticker from FMPFetcher raw_factors."""
+    try:
+        rf = entry.raw_factors
+        momentum = float(rf.get("momentum", 0))
+        eps = float(rf.get("eps", 0))
+        score = round((momentum * 0.5 + min(eps / 100.0, 1.0) * 0.5) *
+                      entry.source_reliability, 4)
+        return {
+            "ticker": entry.ticker,
+            "final_score": score,
+            "badge": _badge_from_score(score),
+            "factors": {"momentum": momentum, "eps_proxy": eps},
+            "sector": entry.sector,
+            "cap_tier": entry.cap_tier,
+            "source_reliability": entry.source_reliability,
+            "market": "EUROPE",
+        }
+    except Exception as exc:
+        log.debug("_score_ticker_eu skip %s: %s", entry.ticker, exc)
+        return None
+
+
+def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
+    """Score an Asian ticker from AsianMarketFetcher raw_factors."""
+    try:
+        rf = entry.raw_factors
+        momentum = float(rf.get("momentum", 0))
+        eps = float(rf.get("eps", 0))
+        score = round((momentum * 0.5 + min(eps / 1000.0, 1.0) * 0.5) *
+                      entry.source_reliability, 4)
+        return {
+            "ticker": entry.ticker,
+            "final_score": score,
+            "badge": _badge_from_score(score),
+            "factors": {"momentum": momentum, "eps_proxy": eps},
+            "sector": entry.sector,
+            "cap_tier": entry.cap_tier,
+            "source_reliability": entry.source_reliability,
+            "market": "ASIA",
+        }
+    except Exception as exc:
+        log.debug("_score_ticker_asia skip %s: %s", entry.ticker, exc)
+        return None
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, Any]:
@@ -1272,6 +1355,41 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             if r.get("_scoring_error", False):
                 errors += 1
             results.append(r)
+
+    # ── EU / Asia scoring ─────────────────────────────────────────────────────
+    registry_tickers = _load_registry_tickers()
+    _meta = _registry_meta()
+    if any(registry_tickers.values()):
+        from regime_trader.fetchers import Orchestrator  # noqa: PLC0415
+        from regime_trader.fetchers.fmp_fetcher import FMPFetcher  # noqa: PLC0415
+        from regime_trader.fetchers.asian_fetcher import AsianMarketFetcher  # noqa: PLC0415
+
+        fmp_key = os.environ.get("FMP_API_KEY", "")
+        eu_asia_fetchers = []
+        if fmp_key and registry_tickers.get("EUROPE"):
+            eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key))
+        if registry_tickers.get("ASIA"):
+            eu_asia_fetchers.append(AsianMarketFetcher())
+
+        if eu_asia_fetchers:
+            orch = Orchestrator(eu_asia_fetchers)
+            raw_entries = orch.run(registry_tickers)
+            for e in raw_entries:
+                m = _meta.get(e.ticker, {})
+                e.sector = m.get("sector", "Unknown")
+                e.cap_tier = m.get("cap_tier", "large")
+
+            scorer_map = {"EUROPE": _score_ticker_eu, "ASIA": _score_ticker_asia}
+            with ThreadPoolExecutor(max_workers=4) as eu_pool:
+                eu_futures = {
+                    eu_pool.submit(scorer_map[e.market.value], e): e.ticker
+                    for e in raw_entries
+                    if e.market.value in scorer_map
+                }
+                for fut in as_completed(eu_futures):
+                    scored = fut.result()
+                    if scored:
+                        results.append(scored)
 
     # edgar_count = tickers where EDGAR was reachable (even if 0 filings returned).
     edgar_count   = sum(1 for r in results if r.get("_edgar_ok", False))
