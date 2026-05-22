@@ -762,21 +762,40 @@ def _truncate_field(text: str, limit: int = 1024) -> str:
 
 
 def build_backtest_discord_payload(
-    report_date:   date,
-    badge_stats:   Dict[str, List[HorizonStats]],
-    cap_stats:     Dict[str, HorizonStats],
-    worst:         List[SignalRecord],
+    report_date:   "date",
+    badge_stats:   "Dict[str, List[HorizonStats]]",
+    cap_stats:     "Dict[str, HorizonStats]",
+    worst:         "List[SignalRecord]",
     total_signals: int,
-    records:       List[SignalRecord],
-) -> Dict[str, Any]:
-    """Build a Discord embed payload summarising backtest KPIs for BUY-tier signals."""
+    records:       "List[SignalRecord]",
+) -> "Dict[str, Any]":
+    """Hedge-fund-grade Discord embed: N visibility, alpha decay, capacity tiers."""
 
     badge_order = ["HIGH BUY", "TACTICAL BUY"]
     badge_emoji = {"HIGH BUY": "🟢", "TACTICAL BUY": "🟡"}
 
-    fields: List[Dict[str, Any]] = []
+    # Colour: based on HIGH BUY overall win-rate at T+10
+    hb_list  = badge_stats.get("HIGH BUY", [])
+    hb_by_h  = {s.horizon: s for s in hb_list}
+    hb_t10   = hb_by_h.get(10)
+    overall_wr = hb_t10.win_rate if hb_t10 and hb_t10.count > 0 else 0.0
+    if overall_wr >= 0.55:
+        colour = 0x00FF00
+    elif overall_wr >= 0.45:
+        colour = 0xFFA500
+    else:
+        colour = 0xFF0000
 
-    # ── Per-badge KPI block ────────────────────────────────────────────────────
+    priced = sum(1 for r in records if r.entry_price is not None)
+    description = (
+        f"**Dataset: N={total_signals} signals** | "
+        f"{priced} priced · Forward-Walk Validation Ledger\n"
+        f"────────────────────"
+    )
+
+    fields: list[dict] = []
+
+    # Section 1: Badge KPI table (inline, side-by-side)
     for badge in badge_order:
         stats_list = badge_stats.get(badge, [])
         stats_by_h = {s.horizon: s for s in stats_list}
@@ -787,120 +806,119 @@ def build_backtest_discord_payload(
         emoji = badge_emoji.get(badge, "⚪")
 
         if n == 0:
-            fields.append({
-                "name":   f"{emoji} {badge}",
-                "value":  "_No priced signals yet_",
-                "inline": True,
-            })
+            fields.append({"name": f"{emoji} {badge}", "value": "_No priced signals yet_", "inline": True})
             continue
 
-        wr  = f"{s10.win_rate * 100:.0f}%"  if s10 else "—"
-        r5  = _pct_short(s5.avg_return)     if s5  else "—"
-        r10 = _pct_short(s10.avg_return)    if s10 else "—"
-        r20 = _pct_short(s20.avg_return)    if s20 else "—"
-        alp = _pct_short(s10.avg_alpha)     if s10 else "—"
-        pf  = f"{s10.profit_factor:.2f}" if s10 and s10.profit_factor != float("inf") else "∞"
+        wins = round(s10.win_rate * n) if s10 else 0
+        wr   = f"{s10.win_rate * 100:.1f}% ({wins}/{n})" if s10 else "—"
+        pf   = f"{s10.profit_factor:.2f}" if s10 and s10.profit_factor != float("inf") else "∞"
+        r5   = _pct_short(s5.avg_return)  if s5  else "—"
+        r10v = _pct_short(s10.avg_return) if s10 else "—"
+        r20v = s20.avg_return if s20 else 0.0
+        r20s = _pct_short(r20v) if s20 else "—"
 
-        fields.append({
-            "name":  f"{emoji} {badge}  ({n} signals)",
-            "value": (
-                f"```\n"
-                f"Win rate  {wr:>8}\n"
-                f"T+5 avg   {r5:>8}\n"
-                f"T+10 avg  {r10:>8}\n"
-                f"T+20 avg  {r20:>8}\n"
-                f"α vs SPY  {alp:>8}\n"
-                f"Prof. fac {pf:>8}\n"
-                f"```"
-            ),
-            "inline": True,
-        })
+        # Alpha decay detection across T+10 → T+20
+        decay_tag = ""
+        if s10 and s20:
+            decay_tag = _alpha_decay_tag(s10.avg_return, s20.avg_return)
 
-    # ── Spacer ─────────────────────────────────────────────────────────────────
-    fields.append({"name": "​", "value": "​", "inline": False})
+        alp = _pct_short(s10.avg_alpha) if s10 else "—"
 
-    # ── Cap-tier T+10 summary ─────────────────────────────────────────────────
-    tier_lines = []
-    for key, label in [("large", "Large"), ("mid", "Mid"), ("small", "Small")]:
+        value = _truncate_field(
+            f"```\n"
+            f"Metrics   | Value\n"
+            f"----------|----------------\n"
+            f"WR        | {wr}\n"
+            f"PF        | {pf}\n"
+            f"T+5 Avg   | {r5}\n"
+            f"T+10 Avg  | {r10v}\n"
+            f"T+20 Avg  | {r20s}{decay_tag}\n"
+            f"α vs SPY  | {alp} (T+10)\n"
+            f"```"
+        )
+        fields.append({"name": f"{emoji} {badge}  (N={n})", "value": value, "inline": True})
+
+    # Section 2: Capacity & Liquidity Tiers
+    tier_lines = ["────────────────────"]
+    for key, label, flag in [
+        ("large", "Large Caps", "🔵"),
+        ("mid",   "Mid Caps",   "🟡"),
+        ("small", "Small Caps", "🔴"),
+    ]:
         s = cap_stats.get(key)
         if s and s.count > 0:
+            wins_cap = round(s.win_rate * s.count)
             tier_lines.append(
-                f"**{label}** ({s.count})  "
-                f"{_pct_short(s.avg_return)} avg · {s.win_rate*100:.0f}% win · α {_pct_short(s.avg_alpha)}"
+                f"{flag} **{label}:** {_pct_short(s.avg_return)} avg "
+                f"({wins_cap}/{s.count} WR {s.win_rate * 100:.1f}%) "
+                f"| α {_pct_short(s.avg_alpha)}"
             )
-    if tier_lines:
-        fields.append({
-            "name":   "🔍 Cap Tier Breakdown (T+10)",
-            "value":  "\n".join(tier_lines),
-            "inline": False,
-        })
+        else:
+            tier_lines.append(f"{flag} **{label}:** No data")
+    fields.append({
+        "name":   "📊 Capacity & Liquidity Tiers (T+10)",
+        "value":  _truncate_field("\n".join(tier_lines)),
+        "inline": False,
+    })
 
-    # ── Recent BUY signals with live KPI bar ──────────────────────────────────
-    buy_tiers = {"HIGH BUY", "TACTICAL BUY"}
+    # Section 3: Edge Trajectory — recent BUY signals
+    buy_badges = {"HIGH BUY", "TACTICAL BUY"}
     recent = sorted(
-        [r for r in records if r.badge in buy_tiers and r.entry_price is not None],
+        [r for r in records if r.badge in buy_badges and r.entry_price is not None],
         key=lambda r: r.signal_date,
         reverse=True,
     )[:8]
-
     if recent:
-        ticker_lines = []
+        traj_lines = ["────────────────────"]
         for r in recent:
-            t10 = r.returns.get(10)
-            ret_str = _pct_short(t10) if t10 is not None else "pending"
-            bar     = _score_bar(r.final_score, 6)
-            alpha_str = _pct_short(r.alpha[10]) if r.alpha.get(10) is not None else "—"
-            ticker_lines.append(
-                f"`{r.ticker:<10}` {badge_emoji.get(r.badge,'⚪')} "
-                f"`{r.final_score:.2f}` {bar}  "
-                f"T+10: **{ret_str}**  α: {alpha_str}  _{r.signal_date.isoformat()}_"
+            mflag     = _market_flag(r.market)
+            bar       = _score_bar(r.final_score, 10)
+            t10_ret   = r.returns.get(10)
+            alpha10   = r.alpha.get(10)
+            ret_str   = _pct_short(t10_ret)   if t10_ret   is not None else "pending"
+            alpha_str = _pct_short(alpha10)    if alpha10   is not None else "—"
+            name_part = f"{r.company_name} ({r.ticker})" if r.company_name else r.ticker
+            traj_lines.append(
+                f"{mflag} `{name_part}` ({bar}) → T+10: **{ret_str}** | α: {alpha_str}"
             )
         fields.append({
-            "name":   "📋 Recent BUY Signals — T+10 Performance",
-            "value":  "\n".join(ticker_lines),
+            "name":   "⏱ Edge Trajectory — Recent BUY Signals",
+            "value":  _truncate_field("\n".join(traj_lines)),
             "inline": False,
         })
 
-    # ── Worst detractors ──────────────────────────────────────────────────────
+    # Section 4: Risk Attribution — Top 3 Detractors
     if worst:
-        det_lines = []
+        risk_lines = ["────────────────────"]
         for r in worst:
-            t10 = r.returns.get(10)
-            ret_str = _pct_short(t10) if t10 is not None else "—"
-            pf_label = _primary_failure_factor(r)
-            det_lines.append(
-                f"`{r.ticker}` {ret_str} · drag: **{pf_label}** · _{r.signal_date.isoformat()}_"
+            t10_ret   = r.returns.get(10)
+            ret_str   = _pct_short(t10_ret) if t10_ret is not None else "—"
+            fail_label = _failure_label(t10_ret) if t10_ret is not None else "—"
+            pf_factor  = _primary_failure_factor(r)
+            pf_score   = r.factors.get(pf_factor, 0.0)
+            pf_weight  = r.weights.get(pf_factor, 0.0)
+            mflag      = _market_flag(r.market)
+            risk_lines.append(
+                f"{mflag} `{r.ticker}` (T+10: {ret_str}) "
+                f"· **{fail_label}** "
+                f"· drag: {pf_factor} "
+                f"(score={pf_score:.2f}, w={pf_weight:.0%})"
             )
         fields.append({
-            "name":   "📉 Top Detractors",
-            "value":  "\n".join(det_lines),
+            "name":   "🚨 Risk Attribution — Top 3 Detractors",
+            "value":  _truncate_field("\n".join(risk_lines)),
             "inline": False,
         })
-
-    # ── Determine overall colour by HIGH BUY T+10 avg return ─────────────────
-    hb_stats = {s.horizon: s for s in badge_stats.get("HIGH BUY", [])}
-    hb_t10   = hb_stats.get(10)
-    if hb_t10 and hb_t10.avg_return > 0.01:
-        colour = 0x57F287   # green
-    elif hb_t10 and hb_t10.avg_return < -0.01:
-        colour = 0xED4245   # red
-    else:
-        colour = 0xFEE75C   # yellow
-
-    priced = sum(1 for r in records if r.entry_price is not None)
-    description = (
-        f"**{total_signals}** qualifying signals parsed · "
-        f"**{priced}** priced · "
-        f"horizons: T+5 / T+10 / T+20"
-    )
 
     return {
         "embeds": [{
-            "title":       "📊 Weekly Backtest — BUY Signal KPIs",
+            "title":       "📊 STRATEGY PERFORMANCE LOG — ACTIVE EDGE TRACKING",
             "description": description,
             "color":       colour,
             "fields":      fields,
-            "footer":      {"text": f"regime_trader · {report_date.isoformat()}"},
+            "footer":      {
+                "text": f"regime_trader · {report_date.isoformat()} · horizons: T+5 / T+10 / T+20"
+            },
         }]
     }
 
