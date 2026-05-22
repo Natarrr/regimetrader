@@ -133,11 +133,10 @@ class FMPClient:
     # ── Congress ───────────────────────────────────────────────────────────────
 
     def get_congress_trades(self, ticker: str, lookback_days: int = 180) -> Dict:
-        """Aggregate congressional trades into {purchases, sales, total, recency_days}.
+        """Aggregate senate + house trades into {purchases, sales, total, recency_days}.
 
-        Queries /api/v4/senate-trading (senate + house members both appear here on
-        FMP Ultimate). Uses disclosureDate (not transactionDate) for recency_days —
-        alpha decay starts when information is public, not when the trade occurred.
+        Uses disclosureDate (not transactionDate) for recency_days — alpha decay
+        starts when information is public, not when the secret trade occurred.
         Returns {} when no data or API key absent.
         """
         if not self._api_key:
@@ -151,26 +150,27 @@ class FMPClient:
         recency_days = 9999
         now_date = datetime.now(timezone.utc).date()
 
-        data = self._get("/api/v4/senate-trading", {"symbol": ticker}) or []
-        for rec in data:
-            disclosure = rec.get("disclosureDate", "")
-            if not disclosure or disclosure < cutoff:
-                continue
-            tx_type = (rec.get("type") or "").lower()
-            is_purchase = "purchase" in tx_type
-            is_sale = "sale" in tx_type or "sold" in tx_type
-            if is_purchase:
-                purchases += 1
-            elif is_sale:
-                sales += 1
-            else:
-                continue
-            total += 1
-            try:
-                d = datetime.fromisoformat(disclosure).date()
-                recency_days = min(recency_days, (now_date - d).days)
-            except Exception:
-                pass
+        for path in ("/api/v4/senate-trading", "/api/v4/house-trades"):
+            data = self._get(path, {"symbol": ticker}) or []
+            for rec in data:
+                disclosure = rec.get("disclosureDate", "")
+                if not disclosure or disclosure < cutoff:
+                    continue
+                tx_type = (rec.get("type") or "").lower()
+                is_purchase = "purchase" in tx_type
+                is_sale = "sale" in tx_type or "sold" in tx_type
+                if is_purchase:
+                    purchases += 1
+                elif is_sale:
+                    sales += 1
+                else:
+                    continue
+                total += 1
+                try:
+                    d = datetime.fromisoformat(disclosure).date()
+                    recency_days = min(recency_days, (now_date - d).days)
+                except Exception:
+                    pass
 
         if total == 0:
             self._cache_write("congress", ticker, {})

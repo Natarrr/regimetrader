@@ -107,8 +107,9 @@ class TestFMPClientCongress:
     def test_caches_result_on_second_call(self, client):
         with patch.object(client._session, "get", return_value=_ok_resp([SENATE_RECORD])) as mock_get:
             client.get_congress_trades("NVDA", lookback_days=180)
+            first_count = mock_get.call_count  # senate + house = 2 calls
             client.get_congress_trades("NVDA", lookback_days=180)
-            assert mock_get.call_count == 1
+            assert mock_get.call_count == first_count  # no new calls — served from cache
 
 
 # ── Insider factor ──────────────────────────────────────────────────────────
