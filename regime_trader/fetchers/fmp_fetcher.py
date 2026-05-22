@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
+from datetime import date
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -13,6 +16,26 @@ logger = logging.getLogger(__name__)
 _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 _RELIABILITY = 0.75
 _RATE_LIMIT_DELAY = 0.25
+_DAILY_QUOTA = 200
+_USAGE_FILE = Path(__file__).resolve().parents[3] / "data" / "fmp_usage.json"
+
+
+def _load_usage() -> dict[str, Any]:
+    try:
+        data = json.loads(_USAGE_FILE.read_text(encoding="utf-8"))
+        if data.get("date") == str(date.today()):
+            return data
+    except Exception:
+        pass
+    return {"date": str(date.today()), "count": 0}
+
+
+def _save_usage(usage: dict[str, Any]) -> None:
+    try:
+        _USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _USAGE_FILE.write_text(json.dumps(usage), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("FMP usage persist failed: %s", exc)
 
 
 class FMPFetcher(BaseMarketFetcher):
@@ -38,10 +61,19 @@ class FMPFetcher(BaseMarketFetcher):
         return data[0]
 
     def prepare(self, tickers: list[str]) -> list[TickerEntry]:
+        usage = _load_usage()
         entries: list[TickerEntry] = []
         for ticker in tickers:
+            if usage["count"] >= _DAILY_QUOTA:
+                logger.warning(
+                    "FMP daily quota reached (%d/%d) — skipping remaining EU tickers",
+                    usage["count"], _DAILY_QUOTA,
+                )
+                break
             try:
                 quote = self._fetch_quote(ticker)
+                usage["count"] += 1
+                _save_usage(usage)
                 price = float(quote.get("price") or 0)
                 mktcap = float(quote.get("marketCap") or 0)
                 momentum = (float(quote.get("volume") or 0) /

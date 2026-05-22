@@ -96,12 +96,45 @@ def test_fmp_fetcher_prepare_empty_on_api_error():
 def test_fmp_fetcher_prepare_normalizes_ticker():
     f = FMPFetcher(api_key="test")
     mock_quote = {"price": 120.0, "marketCap": 150e9, "eps": 5.0, "volume": 1e6, "avgVolume": 900000}
-    with patch.object(f, "_fetch_quote", return_value=mock_quote):
+    today = __import__("datetime").date.today().isoformat()
+    fake_usage = {"date": today, "count": 0}
+    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=fake_usage), \
+         patch("regime_trader.fetchers.fmp_fetcher._save_usage"), \
+         patch.object(f, "_fetch_quote", return_value=mock_quote):
         result = f.prepare(["SAP.DE"])
     assert len(result) == 1
     assert result[0].ticker == "SAP.DE"
     assert result[0].market == MarketEnum.EUROPE
     assert result[0].source_reliability == 0.75
+
+
+def test_fmp_fetcher_quota_blocks_requests():
+    """When daily count >= 200, prepare() returns empty without calling _fetch_quote."""
+    f = FMPFetcher(api_key="test")
+    today = __import__("datetime").date.today().isoformat()
+    full_usage = {"date": today, "count": 200}
+    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=full_usage), \
+         patch("regime_trader.fetchers.fmp_fetcher._save_usage"), \
+         patch.object(f, "_fetch_quote") as mock_fetch:
+        result = f.prepare(["SAP.DE", "ASML.AS"])
+    assert result == []
+    mock_fetch.assert_not_called()
+
+
+def test_fmp_fetcher_quota_increments_on_success():
+    """Each successful fetch increments the usage counter."""
+    f = FMPFetcher(api_key="test")
+    today = __import__("datetime").date.today().isoformat()
+    usage = {"date": today, "count": 198}
+    mock_quote = {"price": 100.0, "marketCap": 1e11, "eps": 2.0, "volume": 1e6, "avgVolume": 1e6}
+    saved = []
+    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=usage), \
+         patch("regime_trader.fetchers.fmp_fetcher._save_usage", side_effect=saved.append), \
+         patch.object(f, "_fetch_quote", return_value=mock_quote):
+        result = f.prepare(["SAP.DE", "SIE.DE", "ASML.AS"])
+    # Only 2 fetches allowed (198 → 199 → 200, then quota hit)
+    assert len(result) == 2
+    assert saved[-1]["count"] == 200
 
 
 from regime_trader.fetchers.asian_fetcher import AsianMarketFetcher
