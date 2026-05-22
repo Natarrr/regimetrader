@@ -318,6 +318,7 @@ def _to_entry(
         "insider_usd":             float(row.get("insider_usd", 0.0)),
         "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
         "volume_spike":            float(row.get("volume_spike", 1.0)),
+        "market":                  row.get("market", "USA"),
     }
 
 

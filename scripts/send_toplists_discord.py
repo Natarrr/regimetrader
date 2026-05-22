@@ -125,6 +125,7 @@ _FACTOR_EMOJI: Dict[str, str] = {
 
 # Medal for top-5 ranks
 _MEDAL = {1: "🥇", 2: "🥈", 3: "🥉"}
+_MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
 
 # Badge labels with emoji (used by _conviction_field — kept for test compat)
 _BADGE_EMOJI = {
@@ -330,9 +331,10 @@ def _ticker_detail_field(
         factor_parts.append(f"🔄`{buyback_conv:.2f}`")
     line4 = "  ".join(factor_parts) if factor_parts else "—"
 
+    flag  = _MARKET_FLAGS.get(entry.get("market", "USA"), "🇺🇸")
     value = _truncate("\n".join([line1, line2, line3, line4]), 1024)
     return {
-        "name":   f"#{rank}  {ticker}",
+        "name":   f"#{rank} {flag} {ticker}",
         "value":  value,
         "inline": False,
     }
@@ -912,8 +914,28 @@ def run_tests() -> int:
     except Exception:
         failures.append(f"FAIL [truncation_format]: {traceback.format_exc()}")
 
+    # ── Test 16: market flag in field name ───────────────────────────────────
+    try:
+        usa_entry  = _entry("PLTR", market="USA")
+        eu_entry   = _entry("SAP.DE", market="EUROPE")
+        asia_entry = _entry("7203.T", market="ASIA")
+        no_market  = _entry("AAPL")  # no market key → fallback 🇺🇸
+
+        f_usa  = _ticker_detail_field(1, usa_entry)
+        f_eu   = _ticker_detail_field(2, eu_entry)
+        f_asia = _ticker_detail_field(3, asia_entry)
+        f_none = _ticker_detail_field(4, no_market)
+
+        _check("flag_usa",     "🇺🇸" in f_usa["name"],  f"name={f_usa['name']!r}")
+        _check("flag_eu",      "🇪🇺" in f_eu["name"],   f"name={f_eu['name']!r}")
+        _check("flag_asia",    "🇯🇵" in f_asia["name"], f"name={f_asia['name']!r}")
+        _check("flag_fallback","🇺🇸" in f_none["name"], f"name={f_none['name']!r}")
+        _check("flag_name_format", f_usa["name"].startswith("#1"), f"name={f_usa['name']!r}")
+    except Exception:
+        failures.append(f"FAIL [market_flag]: {traceback.format_exc()}")
+
     # ── Report ────────────────────────────────────────────────────────────
-    total_tests = 30   # approximate assertion count above
+    total_tests = 35   # approximate assertion count above
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
