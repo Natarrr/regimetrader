@@ -7,7 +7,14 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.backtest_signals import SignalRecord, _parse_snapshot
+from scripts.backtest_signals import (
+    SignalRecord,
+    _parse_snapshot,
+    _market_flag,
+    _failure_label,
+    _alpha_decay_tag,
+    _truncate_field,
+)
 
 
 def _snapshot_data_with_market():
@@ -63,3 +70,65 @@ def test_parse_snapshot_captures_market_and_company_name():
         assert r.company_name == "Sony", f"Expected company_name='Sony', got '{r.company_name}'"
     finally:
         Path(temp_path).unlink()
+
+
+def test_market_flag_usa():
+    assert _market_flag("USA") == "🇺🇸"
+
+
+def test_market_flag_europe():
+    assert _market_flag("EUROPE") == "🇪🇺"
+
+
+def test_market_flag_asia():
+    assert _market_flag("ASIA") == "🇯🇵"
+
+
+def test_market_flag_unknown():
+    assert _market_flag("OTHER") == "🌐"
+
+
+def test_failure_label_stopped_out():
+    # Returns STOPPED OUT when T+5 return <= -0.05
+    assert _failure_label(-0.06) == "STOPPED OUT"
+
+
+def test_failure_label_mean_reverted():
+    # Returns MEAN REVERTED when return is between -0.05 and -0.015
+    assert _failure_label(-0.03) == "MEAN REVERTED"
+
+
+def test_failure_label_noise():
+    # Returns NOISE when return is between -0.015 and 0
+    assert _failure_label(-0.01) == "NOISE"
+
+
+def test_failure_label_winner():
+    # Returns empty string for positive returns (not a failure)
+    assert _failure_label(0.02) == ""
+
+
+def test_alpha_decay_tag_decaying():
+    # Alpha is decaying when T+20 < T+10 * 0.5
+    assert _alpha_decay_tag(0.04, 0.01) == "⚠ ALPHA DECAY"
+
+
+def test_alpha_decay_tag_negative():
+    # Alpha is decaying when T+20 goes negative
+    assert _alpha_decay_tag(0.04, -0.01) == "⚠ ALPHA DECAY"
+
+
+def test_alpha_decay_tag_healthy():
+    # No decay when T+20 >= T+10 * 0.5 and T+20 >= 0
+    assert _alpha_decay_tag(0.04, 0.03) == ""
+
+
+def test_truncate_field_within_limit():
+    assert _truncate_field("hello", 1024) == "hello"
+
+
+def test_truncate_field_over_limit():
+    long_str = "x" * 1100
+    result = _truncate_field(long_str, 1024)
+    assert len(result) <= 1024
+    assert result.endswith("…")

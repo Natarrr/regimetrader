@@ -725,6 +725,42 @@ def _pct_short(v: float) -> str:
     return f"{sign}{v * 100:.1f}%"
 
 
+_MARKET_FLAGS: dict[str, str] = {
+    "USA": "🇺🇸",
+    "EUROPE": "🇪🇺",
+    "ASIA": "🇯🇵",
+}
+
+
+def _market_flag(market: str) -> str:
+    return _MARKET_FLAGS.get(market, "🌐")
+
+
+def _failure_label(ret: float) -> str:
+    """Classify a negative return into a failure type."""
+    if ret <= -0.05:
+        return "STOPPED OUT"
+    if ret <= -0.015:
+        return "MEAN REVERTED"
+    if ret < 0:
+        return "NOISE"
+    return ""
+
+
+def _alpha_decay_tag(t10_avg: float, t20_avg: float) -> str:
+    """Return decay warning if T+20 < T+10*0.5 or T+20 is negative."""
+    if t20_avg < 0 or t20_avg < t10_avg * 0.5:
+        return "⚠ ALPHA DECAY"
+    return ""
+
+
+def _truncate_field(text: str, limit: int = 1024) -> str:
+    """Truncate a Discord embed field to stay within the character limit."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
 def build_backtest_discord_payload(
     report_date:   date,
     badge_stats:   Dict[str, List[HorizonStats]],
