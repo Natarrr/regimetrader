@@ -1,0 +1,1102 @@
+{
+  "generated_at": "2026-05-22T03:41:55.206425+00:00",
+  "source_run_id": "26266987159",
+  "ticker_count": 160,
+  "weights": {
+    "edgar": 0.28,
+    "insider": 0.23,
+    "congress": 0.22,
+    "news": 0.15,
+    "momentum": 0.12
+  },
+  "vix": 16.760000228881836,
+  "kill_switch": false,
+  "vix_multiplier": 1.0,
+  "top_buys": [
+    {
+      "ticker": "MSFT",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 3113182822400.0,
+      "raw_score": 0.7848,
+      "final_score": 0.8633,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 60,
+      "factors": {
+        "edgar": 0.7201,
+        "insider": 0.9002,
+        "congress": 0.8458,
+        "news": 0.8,
+        "momentum": 0.5835
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 5,
+          "sales": 2,
+          "net": 3,
+          "recency_days": 35,
+          "representatives": [
+            "John Mcguire",
+            "Maria Elvira Salazar",
+            "Gilbert Cisneros",
+            "Elizabeth Fletcher",
+            "Richard Dean Dr Mccormick"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 1986750.0,
+      "momentum_spy_relative": -0.0013360000000000039,
+      "volume_spike": 1.023,
+      "congress_boost": 0.1
+    },
+    {
+      "ticker": "CRM",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 144231055360.0,
+      "raw_score": 0.7635,
+      "final_score": 0.7635,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 58,
+      "factors": {
+        "edgar": 0.703,
+        "insider": 1.0,
+        "congress": 0.9153,
+        "news": 0.6,
+        "momentum": 0.3777
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 1,
+          "sales": 0,
+          "net": 1,
+          "recency_days": 46,
+          "representatives": [
+            "Maria Elvira Salazar"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 26516846.61,
+      "momentum_spy_relative": -0.099291,
+      "volume_spike": 0.9728,
+      "congress_boost": 0.0
+    },
+    {
+      "ticker": "CARR",
+      "sector": "Industrials",
+      "cap_tier": "large",
+      "market_cap": 51645489152.0,
+      "raw_score": 0.7477,
+      "final_score": 0.7477,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 30,
+      "factors": {
+        "edgar": 0.3726,
+        "insider": 1.0,
+        "congress": 1.0,
+        "news": 1.0,
+        "momentum": 0.3611
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 3,
+          "sales": 0,
+          "net": 3,
+          "recency_days": 21,
+          "representatives": [
+            "Maria Elvira Salazar",
+            "Rick Larsen"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 1015571.79,
+      "momentum_spy_relative": -0.108062,
+      "volume_spike": 1.0083,
+      "congress_boost": 0.0
+    },
+    {
+      "ticker": "CAT",
+      "sector": "Industrials",
+      "cap_tier": "large",
+      "market_cap": 398849605632.0,
+      "raw_score": 0.735,
+      "final_score": 0.735,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 78,
+      "factors": {
+        "edgar": 0.8527,
+        "insider": 0.8306,
+        "congress": 0.322,
+        "news": 1.0,
+        "momentum": 0.7027
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 1,
+          "net": -1,
+          "recency_days": 52,
+          "representatives": [
+            "Jared Moskowitz"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 219210.0,
+      "momentum_spy_relative": 0.055522,
+      "volume_spike": 1.0361,
+      "congress_boost": 0.0
+    },
+    {
+      "ticker": "ADM",
+      "sector": "Consumer Staples",
+      "cap_tier": "large",
+      "market_cap": 37168487362.0,
+      "raw_score": 0.7239,
+      "final_score": 0.7239,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 73,
+      "factors": {
+        "edgar": 0.8192,
+        "insider": 0.9502,
+        "congress": 0.3288,
+        "news": 0.8,
+        "momentum": 0.6967
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 1,
+          "net": -1,
+          "recency_days": 63,
+          "representatives": [
+            "Gilbert Cisneros"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 486720.0,
+      "momentum_spy_relative": 0.055441000000000004,
+      "volume_spike": 0.965,
+      "congress_boost": 0.0
+    }
+  ],
+  "shadow_top_buys": [
+    {
+      "ticker": "MSFT",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 3113182822400.0,
+      "raw_score": 0.7848,
+      "final_score": 0.7848,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 60,
+      "factors": {
+        "edgar": 0.7201,
+        "insider": 0.9002,
+        "congress": 0.8458,
+        "news": 0.8,
+        "momentum": 0.5835
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 5,
+          "sales": 2,
+          "net": 3,
+          "recency_days": 35,
+          "representatives": [
+            "John Mcguire",
+            "Maria Elvira Salazar",
+            "Gilbert Cisneros",
+            "Elizabeth Fletcher",
+            "Richard Dean Dr Mccormick"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 1986750.0,
+      "momentum_spy_relative": -0.0013360000000000039,
+      "volume_spike": 1.023
+    },
+    {
+      "ticker": "CRM",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 144231055360.0,
+      "raw_score": 0.7635,
+      "final_score": 0.7635,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 58,
+      "factors": {
+        "edgar": 0.703,
+        "insider": 1.0,
+        "congress": 0.9153,
+        "news": 0.6,
+        "momentum": 0.3777
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 1,
+          "sales": 0,
+          "net": 1,
+          "recency_days": 46,
+          "representatives": [
+            "Maria Elvira Salazar"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 26516846.61,
+      "momentum_spy_relative": -0.099291,
+      "volume_spike": 0.9728
+    },
+    {
+      "ticker": "CARR",
+      "sector": "Industrials",
+      "cap_tier": "large",
+      "market_cap": 51645489152.0,
+      "raw_score": 0.7477,
+      "final_score": 0.7477,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 30,
+      "factors": {
+        "edgar": 0.3726,
+        "insider": 1.0,
+        "congress": 1.0,
+        "news": 1.0,
+        "momentum": 0.3611
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 3,
+          "sales": 0,
+          "net": 3,
+          "recency_days": 21,
+          "representatives": [
+            "Maria Elvira Salazar",
+            "Rick Larsen"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 1015571.79,
+      "momentum_spy_relative": -0.108062,
+      "volume_spike": 1.0083
+    },
+    {
+      "ticker": "CAT",
+      "sector": "Industrials",
+      "cap_tier": "large",
+      "market_cap": 398849605632.0,
+      "raw_score": 0.735,
+      "final_score": 0.735,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 78,
+      "factors": {
+        "edgar": 0.8527,
+        "insider": 0.8306,
+        "congress": 0.322,
+        "news": 1.0,
+        "momentum": 0.7027
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 1,
+          "net": -1,
+          "recency_days": 52,
+          "representatives": [
+            "Jared Moskowitz"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 219210.0,
+      "momentum_spy_relative": 0.055522,
+      "volume_spike": 1.0361
+    },
+    {
+      "ticker": "ADM",
+      "sector": "Consumer Staples",
+      "cap_tier": "large",
+      "market_cap": 37168487362.0,
+      "raw_score": 0.7239,
+      "final_score": 0.7239,
+      "badge": "TACTICAL BUY",
+      "ceo_buy": true,
+      "form4_count": 73,
+      "factors": {
+        "edgar": 0.8192,
+        "insider": 0.9502,
+        "congress": 0.3288,
+        "news": 0.8,
+        "momentum": 0.6967
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": []
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 1,
+          "net": -1,
+          "recency_days": 63,
+          "representatives": [
+            "Gilbert Cisneros"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "quiver"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 486720.0,
+      "momentum_spy_relative": 0.055441000000000004,
+      "volume_spike": 0.965
+    }
+  ],
+  "mid_caps": [
+    {
+      "ticker": "MOS",
+      "sector": "Materials",
+      "cap_tier": "mid",
+      "market_cap": 6973555712.0,
+      "raw_score": 0.0989,
+      "final_score": 0.0989,
+      "badge": "WATCHLIST",
+      "ceo_buy": false,
+      "form4_count": 14,
+      "factors": {
+        "edgar": 0.0,
+        "insider": 0.0,
+        "congress": 0.3133,
+        "news": 0.2,
+        "momentum": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "insider",
+          "momentum"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 1,
+          "net": -1,
+          "recency_days": 38,
+          "representatives": [
+            "Gilbert Cisneros"
+          ]
+        },
+        "source": "quiver",
+        "insider_source": "none"
+      },
+      "news_source": "finnhub",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": -0.321281,
+      "volume_spike": 0.7929,
+      "congress_boost": 0.0
+    }
+  ],
+  "small_caps": [],
+  "sector_picks": {
+    "Energy": [
+      {
+        "ticker": "PSX",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 69782740231.0,
+        "raw_score": 0.5284,
+        "final_score": 0.5284,
+        "badge": "WATCHLIST",
+        "ceo_buy": true,
+        "form4_count": 47,
+        "factors": {
+          "edgar": 0.5971,
+          "insider": 0.8317,
+          "congress": 0.0,
+          "news": 0.6,
+          "momentum": 0.6662
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 60606.88,
+        "momentum_spy_relative": 0.040768999999999986,
+        "volume_spike": 0.744,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "OXY",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 58514359460.0,
+        "raw_score": 0.4834,
+        "final_score": 0.4834,
+        "badge": "WATCHLIST",
+        "ceo_buy": true,
+        "form4_count": 27,
+        "factors": {
+          "edgar": 0.3203,
+          "insider": 0.9779,
+          "congress": 0.0,
+          "news": 0.6,
+          "momentum": 0.6565
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 194900.0,
+        "momentum_spy_relative": 0.036013,
+        "volume_spike": 0.8118,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "EOG",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 74557407420.0,
+        "raw_score": 0.365,
+        "final_score": 0.365,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 36,
+        "factors": {
+          "edgar": 0.4635,
+          "insider": 0.0,
+          "congress": 0.0,
+          "news": 1.0,
+          "momentum": 0.71
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "insider",
+            "congress"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "none"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.061972999999999986,
+        "volume_spike": 0.6409,
+        "congress_boost": 0.0
+      }
+    ],
+    "Materials": [
+      {
+        "ticker": "LIN",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 237882310656.0,
+        "raw_score": 0.7232,
+        "final_score": 0.7232,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": true,
+        "form4_count": 27,
+        "factors": {
+          "edgar": 0.3203,
+          "insider": 0.9886,
+          "congress": 0.9085,
+          "news": 1.0,
+          "momentum": 0.4688
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 1,
+            "sales": 0,
+            "net": 1,
+            "recency_days": 57,
+            "representatives": [
+              "Thomas H. Kean Jr"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 999633.6,
+        "momentum_spy_relative": -0.055154,
+        "volume_spike": 0.8403,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "ECL",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 70410035200.0,
+        "raw_score": 0.5564,
+        "final_score": 0.5564,
+        "badge": "WATCHLIST",
+        "ceo_buy": true,
+        "form4_count": 74,
+        "factors": {
+          "edgar": 0.826,
+          "insider": 0.8605,
+          "congress": 0.0,
+          "news": 0.8,
+          "momentum": 0.0601
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 649377.35,
+        "momentum_spy_relative": -0.270724,
+        "volume_spike": 1.2141,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "IFF",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 19211585536.0,
+        "raw_score": 0.4543,
+        "final_score": 0.4543,
+        "badge": "WATCHLIST",
+        "ceo_buy": true,
+        "form4_count": 46,
+        "factors": {
+          "edgar": 0.5862,
+          "insider": 1.0,
+          "congress": 0.0,
+          "news": 0.2,
+          "momentum": 0.251
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 12156088.16,
+        "momentum_spy_relative": -0.17097299999999999,
+        "volume_spike": 1.1268,
+        "congress_boost": 0.0
+      }
+    ],
+    "Communication Services": [
+      {
+        "ticker": "NFLX",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 376024440000.0,
+        "raw_score": 0.7101,
+        "final_score": 0.7101,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": false,
+        "form4_count": 104,
+        "factors": {
+          "edgar": 0.9988,
+          "insider": 0.0,
+          "congress": 1.0,
+          "news": 0.8,
+          "momentum": 0.7539
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "insider"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 2,
+            "sales": 0,
+            "net": 2,
+            "recency_days": 63,
+            "representatives": [
+              "Byron Donalds"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "none"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.08330900000000001,
+        "volume_spike": 0.6983,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "CHTR",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 18312466500.0,
+        "raw_score": 0.5224,
+        "final_score": 0.5224,
+        "badge": "WATCHLIST",
+        "ceo_buy": true,
+        "form4_count": 34,
+        "factors": {
+          "edgar": 0.4349,
+          "insider": 1.0,
+          "congress": 0.6168,
+          "news": 0.2,
+          "momentum": 0.0409
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 1,
+            "sales": 1,
+            "net": 0,
+            "recency_days": 38,
+            "representatives": [
+              "Gilbert Cisneros"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 3764457.3,
+        "momentum_spy_relative": -0.43693400000000004,
+        "volume_spike": 1.4607,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "VZ",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 201554281200.0,
+        "raw_score": 0.4857,
+        "final_score": 0.5148,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 144,
+        "factors": {
+          "edgar": 1.0,
+          "insider": 0.0,
+          "congress": 0.4626,
+          "news": 0.4,
+          "momentum": 0.3657
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "insider"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 1,
+            "sales": 2,
+            "net": -1,
+            "recency_days": 29,
+            "representatives": [
+              "Gilbert Cisneros",
+              "Lloyd K. Smucker",
+              "Jennifer Mcclellan"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "none"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": -0.10515000000000001,
+        "volume_spike": 0.843,
+        "congress_boost": 0.06
+      }
+    ],
+    "Healthcare": [
+      {
+        "ticker": "ABT",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 152878923776.0,
+        "raw_score": 0.7005,
+        "final_score": 0.7005,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": true,
+        "form4_count": 48,
+        "factors": {
+          "edgar": 0.6075,
+          "insider": 0.9165,
+          "congress": 0.9073,
+          "news": 0.8,
+          "momentum": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "momentum"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 1,
+            "sales": 0,
+            "net": 1,
+            "recency_days": 59,
+            "representatives": [
+              "Laura Friedman",
+              "Richard Dean Dr Mccormick"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 4229135.32,
+        "momentum_spy_relative": -0.325308,
+        "volume_spike": 0.8777,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "UNH",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 347347071642.0,
+        "raw_score": 0.5872,
+        "final_score": 0.6224,
+        "badge": "WATCHLIST",
+        "ceo_buy": false,
+        "form4_count": 67,
+        "factors": {
+          "edgar": 0.7756,
+          "insider": 0.0,
+          "congress": 1.0,
+          "news": 0.2,
+          "momentum": 1.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "insider"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 5,
+            "sales": 0,
+            "net": 5,
+            "recency_days": 30,
+            "representatives": [
+              "Maria Elvira Salazar",
+              "Gilbert Cisneros",
+              "Richard Dean Dr Mccormick"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "none"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.273829,
+        "volume_spike": 0.8459,
+        "congress_boost": 0.06
+      },
+      {
+        "ticker": "JNJ",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 557825090600.0,
+        "raw_score": 0.5977,
+        "final_score": 0.5977,
+        "badge": "WATCHLIST",
+        "ceo_buy": true,
+        "form4_count": 49,
+        "factors": {
+          "edgar": 0.6181,
+          "insider": 0.9922,
+          "congress": 0.1791,
+          "news": 0.8,
+          "momentum": 0.3087
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 3,
+            "net": -3,
+            "recency_days": 57,
+            "representatives": [
+              "Thomas H. Kean Jr",
+              "Richard Dean Dr Mccormick"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 257687.5,
+        "momentum_spy_relative": -0.143766,
+        "volume_spike": 1.1358,
+        "congress_boost": 0.0
+      }
+    ],
+    "Information Technology": [
+      {
+        "ticker": "MSFT",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 3113182822400.0,
+        "raw_score": 0.7848,
+        "final_score": 0.8633,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": true,
+        "form4_count": 60,
+        "factors": {
+          "edgar": 0.7201,
+          "insider": 0.9002,
+          "congress": 0.8458,
+          "news": 0.8,
+          "momentum": 0.5835
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 5,
+            "sales": 2,
+            "net": 3,
+            "recency_days": 35,
+            "representatives": [
+              "John Mcguire",
+              "Maria Elvira Salazar",
+              "Gilbert Cisneros",
+              "Elizabeth Fletcher",
+              "Richard Dean Dr Mccormick"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 1986750.0,
+        "momentum_spy_relative": -0.0013360000000000039,
+        "volume_spike": 1.023,
+        "congress_boost": 0.1
+      },
+      {
+        "ticker": "CRM",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 144231055360.0,
+        "raw_score": 0.7635,
+        "final_score": 0.7635,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": true,
+        "form4_count": 58,
+        "factors": {
+          "edgar": 0.703,
+          "insider": 1.0,
+          "congress": 0.9153,
+          "news": 0.6,
+          "momentum": 0.3777
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 1,
+            "sales": 0,
+            "net": 1,
+            "recency_days": 46,
+            "representatives": [
+              "Maria Elvira Salazar"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 26516846.61,
+        "momentum_spy_relative": -0.099291,
+        "volume_spike": 0.9728,
+        "congress_boost": 0.0
+      },
+      {
+        "ticker": "IBM",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 237762789376.0,
+        "raw_score": 0.6184,
+        "final_score": 0.6184,
+        "badge": "TACTICAL BUY",
+        "ceo_buy": true,
+        "form4_count": 55,
+        "factors": {
+          "edgar": 0.676,
+          "insider": 0.8961,
+          "congress": 0.4626,
+          "news": 0.2,
+          "momentum": 0.7604
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": []
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 1,
+            "sales": 2,
+            "net": -1,
+            "recency_days": 28,
+            "representatives": [
+              "Josh Gottheimer",
+              "Gilbert Cisneros"
+            ]
+          },
+          "source": "quiver",
+          "insider_source": "quiver"
+        },
+        "news_source": "finnhub",
+        "insider_usd": 417154.99,
+        "momentum_spy_relative": 0.04957099999999999,
+        "volume_spike": 1.4554,
+        "congress_boost": 0.0
+      }
+    ]
+  }
+}
