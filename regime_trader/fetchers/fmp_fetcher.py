@@ -41,14 +41,19 @@ def _save_usage(usage: dict[str, Any]) -> None:
 
 
 class FMPFetcher(BaseMarketFetcher):
-    """European equities via Financial Modeling Prep API."""
+    """Market-agnostic FMP equities fetcher for USA, EUROPE, and ASIA.
 
-    def __init__(self, api_key: str) -> None:
+    FMP Ultimate accepts international suffixes natively (SAP.DE, 7203.T).
+    No suffix translation needed — pass tickers as-is from ticker_registry.json.
+    """
+
+    def __init__(self, api_key: str, market: MarketEnum) -> None:
         self._api_key = api_key
+        self._market = market
 
     @property
     def market(self) -> MarketEnum:
-        return MarketEnum.EUROPE
+        return self._market
 
     def source_reliability(self, ticker: str) -> float:
         return _RELIABILITY
@@ -75,8 +80,8 @@ class FMPFetcher(BaseMarketFetcher):
         for ticker in tickers:
             if usage["count"] >= _DAILY_QUOTA:
                 logger.warning(
-                    "FMP daily quota reached (%d/%d) — skipping remaining EU tickers",
-                    usage["count"], _DAILY_QUOTA,
+                    "FMP daily quota reached (%d/%d) — skipping remaining %s tickers",
+                    usage["count"], _DAILY_QUOTA, self._market.value,
                 )
                 break
             try:
@@ -89,7 +94,7 @@ class FMPFetcher(BaseMarketFetcher):
                             max(float(quote.get("avgVolume") or 1), 1)) - 1.0
                 entries.append(TickerEntry(
                     ticker=ticker,
-                    market=MarketEnum.EUROPE,
+                    market=self._market,
                     sector="",
                     cap_tier="",
                     source_reliability=_RELIABILITY,

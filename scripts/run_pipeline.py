@@ -1363,18 +1363,20 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     if any(registry_tickers.values()):
         from regime_trader.fetchers import Orchestrator  # noqa: PLC0415
         from regime_trader.fetchers.fmp_fetcher import FMPFetcher  # noqa: PLC0415
-        from regime_trader.fetchers.asian_fetcher import AsianMarketFetcher  # noqa: PLC0415
+        from regime_trader.fetchers.base import MarketEnum  # noqa: PLC0415
 
         fmp_key = os.environ.get("FMP_API_KEY", "")
         eu_asia_fetchers = []
         if fmp_key and registry_tickers.get("EUROPE"):
-            eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key))
+            eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key, market=MarketEnum.EUROPE))
             log.info("FMPFetcher added for EUROPE (%d tickers)", len(registry_tickers["EUROPE"]))
         elif not fmp_key:
-            log.warning("FMP_API_KEY absent — EUROPE section will be empty in Discord")
-        if registry_tickers.get("ASIA"):
-            eu_asia_fetchers.append(AsianMarketFetcher())
-            log.info("AsianMarketFetcher added for ASIA (%d tickers)", len(registry_tickers["ASIA"]))
+            log.warning("FMP_API_KEY absent -- EUROPE section will be empty in Discord")
+        if fmp_key and registry_tickers.get("ASIA"):
+            eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key, market=MarketEnum.ASIA))
+            log.info("FMPFetcher added for ASIA (%d tickers)", len(registry_tickers["ASIA"]))
+        elif registry_tickers.get("ASIA") and not fmp_key:
+            log.warning("FMP_API_KEY absent -- ASIA section will be empty in Discord")
 
         if eu_asia_fetchers:
             orch = Orchestrator(eu_asia_fetchers)
