@@ -144,8 +144,9 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
     consuming the 250 calls/day FMP budget on repeated pipeline runs.
 
     Strategy: FMP for up to 80 tickers (half of 160), yfinance for the rest.
-    This caps FMP usage at ~240 calls/day across 3 daily runs while keeping
-    market cap data complete.
+    This caps FMP usage at ≤160 calls/day for US market caps, leaving headroom
+    for the EU fetcher's 10 calls.  The shared .cache/fmp_usage.json counter
+    is persisted by the actions/cache step so EU FMPFetcher sees the real budget.
     """
     result: Dict[str, float] = {}
     api_key = os.getenv("FMP_API_KEY", "")
@@ -158,11 +159,28 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
             from requests.adapters import HTTPAdapter
             from urllib3.util.retry import Retry
 
+            # Load the shared daily quota counter (same file used by FMPFetcher EU path)
+            _usage_path = ROOT / ".cache" / "fmp_usage.json"
+            try:
+                _u = json.loads(_usage_path.read_text(encoding="utf-8"))
+                _quota_used = _u["count"] if _u.get("date") == str(datetime.now(timezone.utc).date()) else 0
+            except Exception:
+                _quota_used = 0
+
+            remaining = max(0, 250 - _quota_used)
+            effective_cap = min(fmp_cap, remaining)
+            if effective_cap < fmp_cap:
+                log.warning(
+                    "FMP quota: %d/%d used today — capping US profile fetch at %d (not %d)",
+                    _quota_used, 250, effective_cap, fmp_cap,
+                )
+
             s = _req.Session()
             retry_cfg = Retry(total=2, backoff_factor=0.5, status_forcelist=[500, 502, 503])
             s.mount("https://", HTTPAdapter(max_retries=retry_cfg))
 
-            for i, ticker in enumerate(tickers[:fmp_cap]):
+            _fetched = 0
+            for i, ticker in enumerate(tickers[:effective_cap]):
                 try:
                     url = (
                         f"https://financialmodelingprep.com/stable/profile"
@@ -175,13 +193,27 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
                         row = data[0]
                         cap = float(row.get("marketCap") or row.get("mktCap") or 0)
                         result[ticker] = cap
+                    _fetched += 1
                 except Exception as exc:
                     log.debug("FMP profile failed for %s: %s", ticker, exc)
-                if i < fmp_cap - 1:
+                if i < effective_cap - 1:
                     time.sleep(0.15)   # ~6.5 req/s — safe for free tier
 
+            # Write back updated quota so EU FMPFetcher sees the true remaining budget
+            try:
+                _usage_path.parent.mkdir(parents=True, exist_ok=True)
+                _usage_path.write_text(
+                    json.dumps({"date": str(datetime.now(timezone.utc).date()), "count": _quota_used + _fetched}),
+                    encoding="utf-8",
+                )
+            except Exception as exc:
+                log.warning("FMP usage persist failed: %s", exc)
+
             fmp_hits = sum(1 for v in result.values() if v > 0)
-            log.info("FMP profiles: %d/%d tickers with market cap", fmp_hits, min(len(tickers), fmp_cap))
+            log.info(
+                "FMP profiles: %d/%d tickers with market cap (quota used today: %d/250)",
+                fmp_hits, min(len(tickers), effective_cap), _quota_used + _fetched,
+            )
         except Exception as exc:
             log.warning("FMP profile fetch failed: %s", exc)
     else:
@@ -1383,6 +1415,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     # ── EU / Asia scoring ─────────────────────────────────────────────────────
     registry_tickers = _load_registry_tickers()
     _meta = _registry_meta()
+    log.info(
+        "Multi-market registry: %d EU tickers, %d Asia tickers",
+        len(registry_tickers.get("EUROPE", [])),
+        len(registry_tickers.get("ASIA", [])),
+    )
     if any(registry_tickers.values()):
         from regime_trader.fetchers import Orchestrator  # noqa: PLC0415
         from regime_trader.fetchers.fmp_fetcher import FMPFetcher  # noqa: PLC0415
@@ -1392,12 +1429,19 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         eu_asia_fetchers = []
         if fmp_key and registry_tickers.get("EUROPE"):
             eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key))
+            log.info("FMPFetcher added for EUROPE (%d tickers)", len(registry_tickers["EUROPE"]))
+        elif not fmp_key:
+            log.warning("FMP_API_KEY absent — EUROPE section will be empty in Discord")
         if registry_tickers.get("ASIA"):
             eu_asia_fetchers.append(AsianMarketFetcher())
+            log.info("AsianMarketFetcher added for ASIA (%d tickers)", len(registry_tickers["ASIA"]))
 
         if eu_asia_fetchers:
             orch = Orchestrator(eu_asia_fetchers)
             raw_entries = orch.run(registry_tickers)
+            eu_raw = [e for e in raw_entries if e.market.value == "EUROPE"]
+            asia_raw = [e for e in raw_entries if e.market.value == "ASIA"]
+            log.info("Orchestrator raw entries: %d EU, %d Asia", len(eu_raw), len(asia_raw))
             for e in raw_entries:
                 m = _meta.get(e.ticker, {})
                 e.sector = m.get("sector", "Unknown")
@@ -1410,10 +1454,18 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                     for e in raw_entries
                     if e.market.value in scorer_map
                 }
+                eu_scored = asia_scored = 0
                 for fut in as_completed(eu_futures):
                     scored = fut.result()
                     if scored:
                         results.append(scored)
+                        if scored.get("market") == "EUROPE":
+                            eu_scored += 1
+                        elif scored.get("market") == "ASIA":
+                            asia_scored += 1
+            log.info("Scored: %d EU entries, %d Asia entries added to results", eu_scored, asia_scored)
+        else:
+            log.warning("No EU/Asia fetchers active — both sections will be empty in Discord")
 
     # edgar_count = tickers where EDGAR was reachable (even if 0 filings returned).
     edgar_count   = sum(1 for r in results if r.get("_edgar_ok", False))

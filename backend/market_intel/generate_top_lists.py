@@ -582,7 +582,9 @@ def generate(
         if row.get("_validation_failed"):
             entry["_validation_failed"] = True
 
-    # Merge EU/Asia entries using their pre-scored final_score — bypass normalization
+    # Merge EU/Asia entries using their pre-scored final_score — bypass normalization.
+    # source_reliability dampening is already baked into final_score by _score_ticker_eu/asia,
+    # so we set source_reliability=1.0 here to prevent double-application in the dampening loop.
     for row in intl_results:
         if row.get("_validation_failed"):
             continue
@@ -609,7 +611,8 @@ def generate(
             "insider_usd":             0.0,
             "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
             "volume_spike":            float(row.get("volume_spike", 1.0)),
-            "source_reliability":      float(row.get("source_reliability", 1.0)),
+            "source_reliability":      1.0,   # dampening pre-applied by scorer; avoid double-penalty
+            "data_source_reliability": float(row.get("source_reliability", 1.0)),  # audit field
             "market":                  row.get("market", "USA"),
         })
     if intl_results:

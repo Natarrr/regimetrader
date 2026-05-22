@@ -17,7 +17,9 @@ _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 _RELIABILITY = 0.75
 _RATE_LIMIT_DELAY = 0.25
 _DAILY_QUOTA = 250
-_USAGE_FILE = Path(__file__).resolve().parents[3] / "data" / "fmp_usage.json"
+# .cache/ is persisted by the actions/cache step keyed on UTC date, so the
+# counter survives across the 3 intraday CI runs and prevents quota overrun.
+_USAGE_FILE = Path(__file__).resolve().parents[3] / ".cache" / "fmp_usage.json"
 
 
 def _load_usage() -> dict[str, Any]:
