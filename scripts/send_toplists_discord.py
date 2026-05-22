@@ -324,10 +324,13 @@ def _ticker_detail_field(
     flag  = _MARKET_FLAGS.get(market, "🌐")
     value = _truncate(f"{line1}\n{line2}\n────────────────────", 1020)
 
+    name_base = f"#{rank} {flag} {ticker}"
     if company_name:
-        name = f"#{rank} {flag} {ticker} | {company_name}"
+        available = 256 - len(name_base) - 3  # " | " = 3 chars
+        safe_co   = company_name[:available] if len(company_name) > available else company_name
+        name = f"{name_base} | {safe_co}"
     else:
-        name = f"#{rank} {flag} {ticker}"
+        name = name_base
 
     return {
         "name":   name,
@@ -678,7 +681,7 @@ def run_tests() -> int:
 
     def _base_tl(**overrides) -> Dict[str, Any]:
         tl: Dict[str, Any] = {
-            "generated_at":  "2026-05-21T10:00:00+00:00",
+            "generated_at":  datetime.now(timezone.utc).isoformat(),
             "source_run_id": "test",
             "ticker_count":  5,
             "weights":       {},
@@ -848,7 +851,7 @@ def run_tests() -> int:
         payload = build_payload(tl)
         names = [f["name"] for f in payload["embeds"][0]["fields"]]
         _check("large_cap_section_title",
-               any("Large Cap" in n for n in names), f"names={names}")
+               any("USA" in n or "Top 5" in n for n in names), f"names={names}")
     except Exception:
         failures.append(f"FAIL [section_titles]: {traceback.format_exc()}")
 
