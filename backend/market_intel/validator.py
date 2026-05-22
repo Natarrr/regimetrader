@@ -107,7 +107,7 @@ class Normalizer:
 
 # ── Validation data structures ────────────────────────────────────────────────
 
-_TICKER_RE = _re.compile(r"^[A-Z]{1,5}$")
+_TICKER_RE = _re.compile(r"^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$")
 
 
 class ValidationIssue:
@@ -126,7 +126,7 @@ class ValidationIssue:
 # ── validate_tickers ──────────────────────────────────────────────────────────
 
 def validate_tickers(rows: List[Dict[str, Any]]) -> Tuple[bool, List[ValidationIssue]]:
-    """Check each ticker matches ^[A-Z]{1,5}$.
+    """Check each ticker matches ^[A-Z0-9]{1,6}(\\.[A-Z]{1,2})?$.
 
     Mutates rows in-place: sets _validation_failed=True on bad rows.
     Never raises.
