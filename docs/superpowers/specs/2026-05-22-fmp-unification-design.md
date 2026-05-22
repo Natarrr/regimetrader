@@ -81,6 +81,7 @@ class FMPClient:
     def get_insider_purchases(self, ticker: str, lookback_days: int = 180) -> tuple[float, int]
     # Returns: (total_purchases_usd, days_since_most_recent)
     # Filters acquistionOrDisposition == "A" only.
+    # Uses limit=500 to cover 180-day lookback for mega-caps with frequent option grants.
     # total_purchases_usd = sum(securitiesTransacted * price) for each qualifying record.
     # Returns (0.0, 0) on empty or non-US ticker.
 
@@ -126,12 +127,15 @@ FMP exposes both `transactionDate` (the actual trade date, non-public at the tim
 
 ```python
 total_purchases_usd = sum(
-    float(r["securitiesTransacted"]) * float(r["price"])
+    float(r.get("securitiesTransacted") or 0) * float(r.get("price") or 0)
     for r in records
     if r.get("acquistionOrDisposition") == "A"
     and float(r.get("price") or 0) > 0
+    and float(r.get("securitiesTransacted") or 0) > 0
 )
 ```
+
+Both `securitiesTransacted` and `price` use `.get(...) or 0` to handle `None` and empty strings from FMP without raising `ValueError`. The positivity guards on both fields ensure zero-share or zero-price records are silently skipped.
 
 This produces the same `(total_purchases_usd, days_since_most_recent)` tuple that `score_insider_value()` already consumes — no scorer changes needed.
 
