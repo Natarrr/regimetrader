@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 _RELIABILITY = 0.75
-_RATE_LIMIT_DELAY = 0.25
+_RATE_LIMIT_DELAY = 1.0   # 1 req/s — within FMP free tier (5 req/min)
 _DAILY_QUOTA = 250
 # .cache/ is persisted by the actions/cache step keyed on UTC date, so the
 # counter survives across the 3 intraday CI runs and prevents quota overrun.
@@ -55,12 +55,19 @@ class FMPFetcher(BaseMarketFetcher):
 
     def _fetch_quote(self, ticker: str) -> dict[str, Any]:
         url = f"{_FMP_BASE}/quote/{ticker}"
-        resp = requests.get(url, params={"apikey": self._api_key}, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        if not data:
-            raise ValueError(f"Empty FMP response for {ticker}")
-        return data[0]
+        for attempt in range(3):
+            resp = requests.get(url, params={"apikey": self._api_key}, timeout=10)
+            if resp.status_code == 429:
+                wait = float(resp.headers.get("Retry-After", 12.0 * (2 ** attempt)))
+                logger.warning("FMP 429 for %s (attempt %d/3) — sleeping %.1fs", ticker, attempt + 1, wait)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if not data:
+                raise ValueError(f"Empty FMP response for {ticker}")
+            return data[0]
+        raise RuntimeError(f"FMP rate-limited after 3 attempts for {ticker}")
 
     def prepare(self, tickers: list[str]) -> list[TickerEntry]:
         usage = _load_usage()

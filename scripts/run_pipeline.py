@@ -176,7 +176,7 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
                 )
 
             s = _req.Session()
-            retry_cfg = Retry(total=2, backoff_factor=0.5, status_forcelist=[500, 502, 503])
+            retry_cfg = Retry(total=3, backoff_factor=2.0, status_forcelist=[429, 500, 502, 503])
             s.mount("https://", HTTPAdapter(max_retries=retry_cfg))
 
             _fetched = 0
@@ -197,7 +197,7 @@ def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
                 except Exception as exc:
                     log.debug("FMP profile failed for %s: %s", ticker, exc)
                 if i < effective_cap - 1:
-                    time.sleep(0.15)   # ~6.5 req/s — safe for free tier
+                    time.sleep(1.0)   # 1 req/s — within FMP free tier (5 req/min)
 
             # Write back updated quota so EU FMPFetcher sees the true remaining budget
             try:
