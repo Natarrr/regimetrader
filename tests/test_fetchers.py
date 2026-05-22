@@ -49,3 +49,24 @@ def test_registry_ticker_format():
     pattern = re.compile(r"^[A-Z0-9]{1,6}\.[A-Z]{1,2}$")
     for entry in data["europe"] + data["asia"]:
         assert pattern.match(entry["ticker"]), f"Bad ticker format: {entry['ticker']}"
+
+
+from unittest.mock import MagicMock, patch
+from regime_trader.fetchers.edgar_fetcher import EDGARFetcher
+from regime_trader.fetchers.base import MarketEnum
+
+
+def test_edgar_fetcher_market():
+    f = EDGARFetcher()
+    assert f.market == MarketEnum.USA
+
+
+def test_edgar_fetcher_source_reliability():
+    f = EDGARFetcher()
+    assert f.source_reliability("AAPL") == 1.0
+
+
+def test_edgar_fetcher_prepare_returns_list():
+    f = EDGARFetcher()
+    result = f.prepare([])
+    assert isinstance(result, list)
