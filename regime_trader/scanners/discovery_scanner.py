@@ -848,37 +848,9 @@ def save_disc_cache(payload: Dict[str, Any]) -> None:
 
 
 def _enrich_with_quiver(result_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Attach Quiver data to each result dict as payload["quiver"].
-
-    Gracefully degrades: if QUIVER_API_KEY is absent or any per-ticker call
-    fails, quiver key is set to {} rather than crashing the scan.
-    """
-    from regime_trader.services.quiver_client import QuiverClient
-    client = QuiverClient()
-    if not client._api_key:
-        for r in result_dicts:
-            r.setdefault("quiver", {})
-        return result_dicts
-
-    try:
-        congress_map = client.congress_by_ticker(lookback_days=180)
-    except Exception as exc:
-        log.warning("quiver congress_by_ticker failed: %s", exc)
-        congress_map = {}
-
+    """Quiver deprecated — returns empty quiver payload for UI backward compatibility."""
     for r in result_dicts:
-        ticker = r.get("symbol", "").upper()
-        quiver: Dict[str, Any] = {}
-        try:
-            quiver["congress"]      = congress_map.get(ticker, {})
-            quiver["insider"]       = client.get_insider_trades(ticker)
-            quiver["f13"]           = client.get_13f_summary(ticker)
-            quiver["lobbying"]      = client.get_lobbying(ticker)
-            quiver["gov_contracts"] = client.get_gov_contracts(ticker)
-        except Exception as exc:
-            log.warning("quiver enrichment failed for %s: %s", ticker, exc)
-        r["quiver"] = quiver
-
+        r.setdefault("quiver", {})
     return result_dicts
 
 
