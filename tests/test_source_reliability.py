@@ -41,7 +41,7 @@ def test_dampening_zero_reliability_zeroes_score():
 
 # ── Validator regex tests ──────────────────────────────────────────────────────
 
-_TICKER_RE_NEW = re.compile(r"^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$")
+_TICKER_RE_NEW = re.compile(r"^([A-Z]{1,5}|[A-Z0-9]{1,6}\.[A-Z]{1,2})$")
 _TICKER_RE_OLD = re.compile(r"^[A-Z]{1,5}$")
 
 

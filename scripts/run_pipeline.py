@@ -1113,6 +1113,7 @@ def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
         rf = entry.raw_factors
         momentum = float(rf.get("momentum", 0))
         eps = float(rf.get("eps", 0))
+        mktcap = float(rf.get("market_cap", 0)) or 1.0
         score = round((momentum * 0.5 + min(eps / 100.0, 1.0) * 0.5) *
                       entry.source_reliability, 4)
         return {
@@ -1124,6 +1125,8 @@ def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
             "cap_tier": entry.cap_tier,
             "source_reliability": entry.source_reliability,
             "market": "EUROPE",
+            "market_cap": mktcap,
+            "insider_usd": 0.0,
         }
     except Exception as exc:
         log.debug("_score_ticker_eu skip %s: %s", entry.ticker, exc)
@@ -1136,6 +1139,7 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
         rf = entry.raw_factors
         momentum = float(rf.get("momentum", 0))
         eps = float(rf.get("eps", 0))
+        mktcap = float(rf.get("market_cap", 0)) or 1.0
         score = round((momentum * 0.5 + min(eps / 1000.0, 1.0) * 0.5) *
                       entry.source_reliability, 4)
         return {
@@ -1147,6 +1151,8 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
             "cap_tier": entry.cap_tier,
             "source_reliability": entry.source_reliability,
             "market": "ASIA",
+            "market_cap": mktcap,
+            "insider_usd": 0.0,
         }
     except Exception as exc:
         log.debug("_score_ticker_asia skip %s: %s", entry.ticker, exc)
