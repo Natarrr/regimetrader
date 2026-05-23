@@ -1524,6 +1524,16 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "Done in %.1fs -- tickers=%d edgar=%d fmp_calls=%d congress=%d errors=%d -> %s",
         duration, len(tickers), edgar_count, fmp_count, congress_count, errors, out,
     )
+
+    # ── Auto-archive: copy today's snapshot to logs/historical/YYYY-MM-DD/ ───
+    try:
+        from regime_trader.research.historical_loader import archive_current_run
+        archived = archive_current_run(log_dir)
+        if archived:
+            log.info("Snapshot archived → %s", archived)
+    except Exception as _arc_exc:
+        log.warning("Auto-archive failed (non-fatal): %s", _arc_exc)
+
     return status
 
 
