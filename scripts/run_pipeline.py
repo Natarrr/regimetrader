@@ -1043,79 +1043,104 @@ def _badge_from_score(score: float) -> str:
     return "WATCHLIST"
 
 
-def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
-    """Score a European ticker from FMPFetcher raw_factors.
+def _score_ticker_international(
+    entry: Any,
+    spy_return_baseline: float = 0.0,
+) -> Optional[Dict[str, Any]]:
+    """Unified scorer for EUROPE and ASIA entries using the same factor formulas as US.
 
-    Returns a pre-scored dict that bypasses cross-sectional normalization in
-    generate_top_lists.  final_score is set here; generate() merges it directly
-    into valid_entries without touching the US peer-group normalizer.
+    Replaces _score_ticker_eu and _score_ticker_asia (Fix #5).
+
+    Fix #5 diagnostic (2026-05-23): FMP Ultimate returns 403 Forbidden for all
+    non-US symbols. yfinance provides price+volume universally. Therefore:
+
+      Available factors:  momentum_long_score, volume_attention_score
+      Structurally absent: insider_conviction_score, insider_breadth_score,
+                           congress_score, news_sentiment_score, news_buzz_score
+
+    Factor output semantics:
+      - None  → structurally absent: factor was never computable for this market.
+                 Weight excluded from renormalization denominator.
+      - 0.0   → dead signal: factor is available for this market but returned no data
+                 for this ticker (e.g. momentum_long=0.0 for a <252-bar ticker).
+                 Weight is included but ticker is penalized in cross-sectional normalizer.
+
+    final_score is NOT set here — it is computed downstream after cross-sectional
+    neutralization with group_by=("market", "sector", "cap_tier"), then weights
+    are renormalized via renormalize_weights_for_market(WEIGHTS, market).
+
+    source_reliability is preserved as metadata; it is NOT a score multiplier (Fix #5).
     """
+    from regime_trader.scoring.momentum_signals import score_momentum_long, score_volume_attention  # noqa: PLC0415
+
+    market_str = entry.market.value  # "EUROPE" or "ASIA"
+    rf = entry.raw_factors
+
     try:
-        rf = entry.raw_factors
-        momentum = float(rf.get("momentum", 0))
-        eps = float(rf.get("eps", 0))
-        mktcap = float(rf.get("market_cap", 0)) or 1.0
-        momentum_score = max(0.0, min(1.0, (momentum + 1.0) / 2.0))  # [-1,1] → [0,1]
-        # TODO(fix #5): insider_score here is eps proxy, not real insider signal.
-        # Replace with FMP insider endpoint once EU Form 4 equivalents are mapped.
-        insider_score  = max(0.0, min(1.0, eps / 100.0))             # eps proxy
-        score = round((momentum_score * 0.5 + insider_score * 0.5) *
-                      entry.source_reliability, 4)
+        # ── momentum_long_score (Jegadeesh-Titman 1993) ───────────────────────
+        return_12_1m = rf.get("return_12_1m")  # float | None from FMPFetcher
+        if return_12_1m is not None:
+            momentum_long_score = score_momentum_long(
+                float(return_12_1m),
+                spy_return_12_1m=spy_return_baseline,
+            )
+        else:
+            momentum_long_score = 0.0  # dead signal — insufficient history
+
+        # ── volume_attention_score (Barber-Odean 2008) ────────────────────────
+        volume_spike = float(rf.get("volume_spike", 0.0) or 0.0)
+        volume_attention_score = score_volume_attention(volume_spike)
+
+        # ── structurally absent factors → None ───────────────────────────────
+        # congress, insider, news: no data source for non-US markets as of Fix #5.
+        # None signals "weight excluded" in renormalize_weights_for_market.
         return {
-            "ticker":               entry.ticker,
-            "company_name":         entry.raw_factors.get("company_name", ""),
-            "final_score":          score,
-            "momentum_score":       momentum_score,
-            "insider_score":        insider_score,
-            "sector":               entry.sector,
-            "cap_tier":             entry.cap_tier,
-            "source_reliability":   entry.source_reliability,
-            "market":               "EUROPE",
-            "market_cap":           mktcap,
-            "insider_usd":          0.0,
-            "news_source":          "none",
-            "volume_spike":         1.0,
-            "momentum_spy_relative": momentum,
+            "ticker":                    entry.ticker,
+            "company_name":              rf.get("company_name", ""),
+            "sector":                    entry.sector,
+            "cap_tier":                  entry.cap_tier,
+            "market":                    market_str,
+            "source_reliability":        entry.source_reliability,
+            # Available factor scores
+            "momentum_long_score":       momentum_long_score,
+            "volume_attention_score":    volume_attention_score,
+            # Structurally absent — None (not 0.0)
+            "insider_conviction_score":  None,
+            "insider_breadth_score":     None,
+            "congress_score":            None,
+            "news_sentiment_score":      None,
+            "news_buzz_score":           None,
+            # Raw inputs (diagnostic)
+            "return_12_1m":              return_12_1m,
+            "volume_spike":              volume_spike,
+            "news_sentiment_source":     "none",
+            "news_buzz_source":          "none",
+            # Validator-required fields: present but structurally zero for non-US
+            # validate_amounts() checks market_cap > 0 and insider_usd is finite.
+            # Use 1.0 as market_cap sentinel (avoids log-scale math errors) and
+            # 0.0 for insider_usd (valid "no purchases" value per validator spec).
+            "market_cap":                1.0,
+            "insider_usd":               0.0,
+            # final_score computed downstream after cross-sectional neutralization
         }
+
     except Exception as exc:
-        log.debug("_score_ticker_eu skip %s: %s", entry.ticker, exc)
+        log.debug("_score_ticker_international skip %s: %s", entry.ticker, exc)
         return None
+
+
+# Deprecated aliases — kept so any external code referencing them by name gets a
+# clear log message instead of an AttributeError.
+def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
+    """DEPRECATED — use _score_ticker_international (Fix #5)."""
+    log.warning("_score_ticker_eu is deprecated; routing to _score_ticker_international")
+    return _score_ticker_international(entry)
 
 
 def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
-    """Score an Asian ticker from AsianMarketFetcher raw_factors.
-
-    Same bypass pattern as _score_ticker_eu — pre-scored, not normalized.
-    """
-    try:
-        rf = entry.raw_factors
-        momentum = float(rf.get("momentum", 0))
-        eps = float(rf.get("eps", 0))
-        mktcap = float(rf.get("market_cap", 0)) or 1.0
-        momentum_score = max(0.0, min(1.0, (momentum + 1.0) / 2.0))  # [-1,1] → [0,1]
-        # TODO(fix #5): insider_score here is eps proxy, not real insider signal (JPY-scale).
-        insider_score  = max(0.0, min(1.0, eps / 1000.0))            # eps proxy (JPY-scale)
-        score = round((momentum_score * 0.5 + insider_score * 0.5) *
-                      entry.source_reliability, 4)
-        return {
-            "ticker":               entry.ticker,
-            "company_name":         entry.raw_factors.get("company_name", ""),
-            "final_score":          score,
-            "momentum_score":       momentum_score,
-            "insider_score":        insider_score,
-            "sector":               entry.sector,
-            "cap_tier":             entry.cap_tier,
-            "source_reliability":   entry.source_reliability,
-            "market":               "ASIA",
-            "market_cap":           mktcap,
-            "insider_usd":          0.0,
-            "news_source":          "none",
-            "volume_spike":         1.0,
-            "momentum_spy_relative": momentum,
-        }
-    except Exception as exc:
-        log.debug("_score_ticker_asia skip %s: %s", entry.ticker, exc)
-        return None
+    """DEPRECATED — use _score_ticker_international (Fix #5)."""
+    log.warning("_score_ticker_asia is deprecated; routing to _score_ticker_international")
+    return _score_ticker_international(entry)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -1384,12 +1409,17 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 e.cap_tier = m.get("cap_tier", "large")
                 e.raw_factors["company_name"] = m.get("company_name", "")
 
-            scorer_map = {"EUROPE": _score_ticker_eu, "ASIA": _score_ticker_asia}
+            # Fix #5: unified scorer with same formulas as US, no source_reliability multiplier
+            log.info(
+                "Fix #5: _score_ticker_international routes EU/Asia entries. "
+                "momentum_long + volume_attention only (yfinance). "
+                "insider/news/congress=None (structurally absent — FMP 403 for non-US)."
+            )
             with ThreadPoolExecutor(max_workers=4) as eu_pool:
                 eu_futures = {
-                    eu_pool.submit(scorer_map[e.market.value], e): e.ticker
+                    eu_pool.submit(_score_ticker_international, e, spy_return_baseline): e.ticker
                     for e in raw_entries
-                    if e.market.value in scorer_map
+                    if e.market.value in ("EUROPE", "ASIA")
                 }
                 eu_scored = asia_scored = 0
                 for fut in as_completed(eu_futures):
@@ -1462,11 +1492,83 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "momentum_long,momentum_legacy", 0.2,
     )
 
-    # ── Cross-sectional neutralization ────────────────────────────────────────
+    # ── Fix #5: source_reliability migration notice ───────────────────────────
+    log.warning(
+        "Fix #5 migration: source_reliability is no longer a score multiplier. "
+        "Preserved as diagnostic metadata. Re-introduce empirically via Fix #4 IC backtest "
+        "if EU/Asia source quality correlates empirically with IC."
+    )
+
+    # ── Cross-sectional neutralization — Fix #5: group by market × sector × cap_tier ──
     # Grinold & Kahn ch. 7: remove sector × cap_tier bias before Stage 1 gate.
+    # Fix #5: group_by now includes "market" so EU/Asia tickers are normalized
+    # within their own peer group, not mixed with US (market was already in the
+    # bucket key in neutralization.py; making it explicit in group_by ensures
+    # sector × cap_tier buckets are market-specific).
     # Adds *_neutral columns to every result; originals are preserved unchanged.
     from regime_trader.scoring.neutralization import neutralize_factors  # noqa: PLC0415
-    results = neutralize_factors(results)
+    from regime_trader.scoring.market_config import (  # noqa: PLC0415
+        Market, PIPELINE_MARKET_MAP, renormalize_weights_for_market, LOW_COVERAGE_THRESHOLD,
+    )
+
+    _v2_factors = tuple(f"{k}_score" for k in WEIGHTS)
+    results = neutralize_factors(
+        results,
+        factors=_v2_factors,
+        group_by=("market", "sector", "cap_tier"),
+        min_bucket_size=5,
+        fallback_group_by=("market", "cap_tier"),
+    )
+
+    # ── Fix #5: compute final_score with market-renormalized weights ──────────
+    # For each ticker, use only the factors available for its market.
+    # None factor → excluded from weight denominator (structurally absent).
+    # 0.0 factor → included with weight but penalized by cross-sectional normalizer.
+    _renorm_cache: dict[Market, dict] = {}
+
+    for r in results:
+        market_raw = r.get("market", "USA")
+        market = PIPELINE_MARKET_MAP.get(market_raw, Market.US)
+
+        if market not in _renorm_cache:
+            _renorm_cache[market] = renormalize_weights_for_market(WEIGHTS, market)
+        market_weights = _renorm_cache[market]
+
+        final_score = 0.0
+        weight_sum_applied = 0.0
+        for factor_short, w in market_weights.items():
+            if w == 0.0:
+                continue  # structurally absent for this market
+            factor_neutral = f"{factor_short}_score_neutral"
+            score_val = r.get(factor_neutral)
+            if score_val is None:
+                # Factor available for this market but missing on this specific ticker
+                # (e.g. momentum_long=None for a recent IPO). Pro-rata redistribute.
+                continue
+            final_score += w * float(score_val)
+            weight_sum_applied += w
+
+        # Renormalize if some available factors were still missing on this ticker
+        if weight_sum_applied > 0:
+            final_score = final_score / weight_sum_applied
+        else:
+            final_score = 0.0
+
+        r["final_score"]     = round(final_score, 4)
+        r["weight_coverage"] = round(weight_sum_applied, 4)
+        r["_low_coverage"]   = weight_sum_applied < LOW_COVERAGE_THRESHOLD
+
+    # Diagnostic: weight_coverage distribution by market
+    for mkt_str in ("USA", "EUROPE", "ASIA"):
+        mkt_rows = [r for r in results if r.get("market", "USA") == mkt_str]
+        if mkt_rows:
+            wc_vals = [r.get("weight_coverage", 0.0) for r in mkt_rows]
+            low_cov = sum(1 for r in mkt_rows if r.get("_low_coverage", False))
+            log.info(
+                "Fix #5 weight_coverage [%s]: n=%d, mean=%.3f, min=%.3f, max=%.3f, low_cov=%d",
+                mkt_str, len(mkt_rows),
+                sum(wc_vals) / len(wc_vals), min(wc_vals), max(wc_vals), low_cov,
+            )
 
     # ── Stage 1 gate: stamp computed_at + run validate_raw ────────────────────
     # Stamp a row-level timestamp on every result so validate_dates() has a
@@ -1501,6 +1603,28 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         log.error("Stage 1 gate FAILED: %s", exc)
         raise
 
+    # ── Fix #5: top_by_market — separate Top-20 per market ───────────────────
+    # Excludes _low_coverage tickers (weight_coverage < LOW_COVERAGE_THRESHOLD).
+    # Consumers (Discord report, dashboard) use these lists for per-market sections.
+    def _top_n(mkt: str, n: int = 20) -> list[dict]:
+        eligible = [
+            r for r in results
+            if r.get("market", "USA") == mkt and not r.get("_low_coverage", False)
+        ]
+        return sorted(eligible, key=lambda r: r.get("final_score", 0.0), reverse=True)[:n]
+
+    top_by_market = {
+        "US":     _top_n("USA"),
+        "EUROPE": _top_n("EUROPE"),
+        "ASIA":   _top_n("ASIA"),
+    }
+    log.info(
+        "top_by_market: US=%d, EUROPE=%d, ASIA=%d (low_cov excluded)",
+        len(top_by_market["US"]),
+        len(top_by_market["EUROPE"]),
+        len(top_by_market["ASIA"]),
+    )
+
     status = {
         "_edgar_meta": {
             "last_run":             pipeline_run_ts,
@@ -1515,6 +1639,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "source_meta":   source_meta,
         "weights":       WEIGHTS,
         "results":       results,   # all rows (clean + quarantined with _validation_failed flag)
+        "top_by_market": top_by_market,  # Fix #5: per-market Top-20, low_coverage excluded
         "computed_at":   pipeline_run_ts,
     }
 

@@ -87,73 +87,101 @@ def test_fmp_fetcher_market_asia():
 
 
 def test_fmp_fetcher_source_reliability():
+    # Fix #5: FMPFetcher now uses yfinance (FMP 403 for non-US). Reliability=0.60.
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    assert f.source_reliability("SAP.DE") == 0.75
+    assert f.source_reliability("SAP.DE") == 0.60
 
 
-def test_fmp_fetcher_prepare_empty_on_api_error():
+def test_fmp_fetcher_prepare_empty_on_yfinance_error():
+    # Fix #5: FMPFetcher uses yfinance.download — test that exceptions are caught.
+    import pandas as pd
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    with patch.object(f, "_fetch_quote", side_effect=Exception("network")):
+    with patch("yfinance.download", side_effect=Exception("network")):
         result = f.prepare(["SAP.DE"])
     assert result == []
 
 
-def test_fmp_fetcher_prepare_normalizes_ticker():
+def test_fmp_fetcher_prepare_empty_on_empty_dataframe():
+    import pandas as pd
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    mock_quote = {"price": 120.0, "marketCap": 150e9, "eps": 5.0, "volume": 1e6, "avgVolume": 900000}
-    today = __import__("datetime").date.today().isoformat()
-    fake_usage = {"date": today, "count": 0}
-    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=fake_usage), \
-         patch("regime_trader.fetchers.fmp_fetcher._save_usage"), \
-         patch.object(f, "_fetch_quote", return_value=mock_quote):
+    with patch("yfinance.download", return_value=pd.DataFrame()):
+        result = f.prepare(["SAP.DE"])
+    assert result == []
+
+
+def test_fmp_fetcher_prepare_returns_entry_with_yfinance_data():
+    import numpy as np
+    import pandas as pd
+    f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
+    # 275 bars — enough for 12-1m return
+    n = 275
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    prices = np.linspace(100.0, 115.0, n)
+    vols = np.full(n, 2_000_000)
+    vols[-1] = 4_000_000  # last day spike
+    fake_df = pd.DataFrame({("Close", "SAP.DE"): prices, ("Volume", "SAP.DE"): vols}, index=idx)
+    fake_df.columns = pd.MultiIndex.from_tuples(fake_df.columns)
+    with patch("yfinance.download", return_value=fake_df):
         result = f.prepare(["SAP.DE"])
     assert len(result) == 1
     assert result[0].ticker == "SAP.DE"
     assert result[0].market == MarketEnum.EUROPE
-    assert result[0].source_reliability == 0.75
+    assert result[0].source_reliability == 0.60
+    assert result[0].raw_factors["return_12_1m"] is not None
+    assert result[0].raw_factors["volume_spike"] > 0
 
 
 def test_fmp_fetcher_prepare_asia_market():
+    # Fix #5: FMPFetcher now uses yfinance for all markets.
+    import numpy as np
+    import pandas as pd
     f = FMPFetcher(api_key="test", market=MarketEnum.ASIA)
-    mock_quote = {"price": 2800.0, "marketCap": 40e12, "eps": 200.0, "volume": 6e6, "avgVolume": 5e6}
-    today = __import__("datetime").date.today().isoformat()
-    fake_usage = {"date": today, "count": 0}
-    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=fake_usage), \
-         patch("regime_trader.fetchers.fmp_fetcher._save_usage"), \
-         patch.object(f, "_fetch_quote", return_value=mock_quote):
+    n = 275
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    prices = np.linspace(2800.0, 3100.0, n)
+    vols = np.full(n, 16_000_000)
+    fake_df = pd.DataFrame({("Close", "7203.T"): prices, ("Volume", "7203.T"): vols}, index=idx)
+    fake_df.columns = pd.MultiIndex.from_tuples(fake_df.columns)
+    with patch("yfinance.download", return_value=fake_df):
         result = f.prepare(["7203.T"])
     assert len(result) == 1
     assert result[0].market == MarketEnum.ASIA
-    assert result[0].source_reliability == 0.75
+    assert result[0].source_reliability == 0.60
 
 
-def test_fmp_fetcher_quota_blocks_requests():
-    """When daily count >= 250, prepare() returns empty without calling _fetch_quote."""
+def test_fmp_fetcher_no_quota_logic():
+    """Fix #5: FMPFetcher uses yfinance — no daily quota enforcement."""
+    import pandas as pd
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    today = __import__("datetime").date.today().isoformat()
-    full_usage = {"date": today, "count": 250}
-    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=full_usage), \
-         patch("regime_trader.fetchers.fmp_fetcher._save_usage"), \
-         patch.object(f, "_fetch_quote") as mock_fetch:
+    # Empty DataFrame → skipped, but no quota check
+    with patch("yfinance.download", return_value=pd.DataFrame()):
         result = f.prepare(["SAP.DE", "ASML.AS"])
     assert result == []
-    mock_fetch.assert_not_called()
 
 
-def test_fmp_fetcher_quota_increments_on_success():
-    """Each successful fetch increments the usage counter."""
+def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
+    """Fix #5: Each ticker with valid yfinance data produces one TickerEntry."""
+    import numpy as np
+    import pandas as pd
+    n = 275
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    prices = np.linspace(100.0, 115.0, n)
+    vols = np.full(n, 1_000_000)
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    today = __import__("datetime").date.today().isoformat()
-    usage = {"date": today, "count": 248}
-    mock_quote = {"price": 100.0, "marketCap": 1e11, "eps": 2.0, "volume": 1e6, "avgVolume": 1e6}
-    saved = []
-    with patch("regime_trader.fetchers.fmp_fetcher._load_usage", return_value=usage), \
-         patch("regime_trader.fetchers.fmp_fetcher._save_usage", side_effect=saved.append), \
-         patch.object(f, "_fetch_quote", return_value=mock_quote):
-        result = f.prepare(["SAP.DE", "SIE.DE", "ASML.AS"])
-    # Only 2 fetches allowed (248 → 249 → 250, then quota hit)
+
+    call_count = [0]
+    def fake_download(ticker, **kwargs):
+        call_count[0] += 1
+        fake = pd.DataFrame(
+            {("Close", ticker): prices, ("Volume", ticker): vols}, index=idx
+        )
+        fake.columns = pd.MultiIndex.from_tuples(fake.columns)
+        return fake
+
+    with patch("yfinance.download", side_effect=fake_download):
+        result = f.prepare(["SAP.DE", "SIE.DE"])
     assert len(result) == 2
-    assert saved[-1]["count"] == 250
+    assert call_count[0] == 2
 
 
 from regime_trader.fetchers.orchestrator import Orchestrator
