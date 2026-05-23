@@ -40,13 +40,24 @@ from backend.market_intel.validator import validate_raw  # noqa: E402
 log = logging.getLogger("run_pipeline")
 
 # ── Weights (must sum to 1.0) ──────────────────────────────────────────────────
+# Fix #2/8 — orthogonal insider decomposition (Cohen, Malloy & Pomorski 2012).
+# edgar(0.28) + insider(0.23) shared ~50% but measured correlated quantities.
+# Split into conviction (dollar magnitude + CEO premium) and breadth (consensus).
+# Freed 0.06 allocated to momentum (0.12 → 0.18) — price/volume is genuinely
+# independent of information-event timing.
 WEIGHTS = {
-    "edgar":    0.28,
-    "insider":  0.23,
-    "congress": 0.22,
-    "news":     0.15,
-    "momentum": 0.12,
+    "insider_conviction": 0.30,
+    "insider_breadth":    0.15,
+    "congress":           0.22,
+    "news":               0.15,
+    "momentum":           0.18,
 }
+assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1, got {sum(WEIGHTS.values())}"
+_WEIGHTS_MIGRATION_NOTE = (
+    "WEIGHTS migration (Fix #2): edgar(0.28)+insider(0.23)=0.51 split into "
+    "conviction(0.30)+breadth(0.15)=0.45; momentum bumped 0.12→0.18. "
+    "Legacy keys edgar_score_legacy and insider_score_legacy preserved in output."
+)
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
 CONGRESS_CACHE_PATH = ROOT / ".cache" / "congress_cache.json"
@@ -715,10 +726,13 @@ def score_insider_value(
 def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
     """Fetch and parse a Form 4 XML filing from EDGAR Archives.
 
-    Returns list of dicts: {code, value, title}.
-      code:  P=open-market purchase, S=sale, A=award, F=tax withholding, etc.
-      value: shares × price (USD, approximate)
-      title: officer/director title of the reporting owner
+    Returns list of dicts: {code, value, title, insider_id, date, is_ceo}.
+      code:       P=open-market purchase, S=sale, A=award, F=tax withholding, etc.
+      value:      shares × price (USD, approximate)
+      title:      officer/director title of the reporting owner
+      insider_id: rptOwnerCik — stable per-person identifier for deduplication
+      date:       transactionDate/value ISO string (YYYY-MM-DD)
+      is_ceo:     True when officerTitle contains CEO/CFO/COO/CTO/PRESIDENT/CHAIRMAN
 
     Returns [] on any failure (network, non-XML .htm filing, parse error).
     HTTP call goes through the shared _sec_get() rate limiter.
@@ -755,7 +769,7 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
         if "}" in el.tag:
             el.tag = el.tag.split("}", 1)[1]
 
-    # Reporting owner's title (first occurrence)
+    # Reporting owner — title and stable CIK identifier for breadth deduplication
     officer_title = ""
     title_el = root.find(".//officerTitle")
     if title_el is not None and title_el.text:
@@ -764,6 +778,15 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
         is_dir_el = root.find(".//isDirector")
         if is_dir_el is not None and is_dir_el.text == "1":
             officer_title = "Director"
+
+    insider_id = ""
+    cik_el = root.find(".//rptOwnerCik")
+    if cik_el is not None and cik_el.text:
+        insider_id = cik_el.text.strip()
+
+    _CEO_TITLES = frozenset(["CEO", "CFO", "COO", "CTO", "PRESIDENT", "CHAIRMAN", "FOUNDER",
+                              "CHIEF EXECUTIVE", "CHIEF FINANCIAL", "CHIEF OPERATING"])
+    is_ceo = any(t in officer_title.upper() for t in _CEO_TITLES)
 
     transactions: List[Dict] = []
     for tx in root.findall(".//nonDerivativeTransaction"):
@@ -774,6 +797,7 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
 
         shares_el = tx.find(".//transactionShares/value")
         price_el  = tx.find(".//transactionPricePerShare/value")
+        date_el   = tx.find(".//transactionDate/value")
         try:
             shares = float(shares_el.text) if shares_el is not None else 0.0
         except (TypeError, ValueError):
@@ -782,25 +806,39 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
             price = float(price_el.text) if price_el is not None else 0.0
         except (TypeError, ValueError):
             price = 0.0
+        tx_date = (date_el.text.strip()[:10] if date_el is not None and date_el.text else "")
 
-        transactions.append({"code": code, "value": shares * price, "title": officer_title})
+        transactions.append({
+            "code":       code,
+            "value":      shares * price,
+            "title":      officer_title,
+            "insider_id": insider_id,
+            "date":       tx_date,
+            "is_ceo":     is_ceo,
+        })
 
     return transactions
 
 
-def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float, bool, int]:
-    """Fetch Form 4 count and insider score from the SEC submissions API.
+def fetch_edgar_data(
+    ticker: str,
+    lookback_days: int = 180,
+    max_filings: int = 10,
+) -> Tuple[int, float, bool, int, float, List[Dict], List[Dict]]:
+    """Fetch Form 4 count and insider transactions from the SEC submissions API.
 
     Stiglitz (2001 Nobel) / Akerlof (2001 Nobel) — replaces both the legacy
     CGI browse endpoint (EdgarService.list_filings) and the yfinance insider
     path, both of which fail silently in GitHub Actions CI environments.
 
     Uses data.sec.gov/submissions/CIK{cik}.json (official programmatic API)
-    for EDGAR count, then optionally fetches up to 3 Form 4 XML documents for
-    insider buy/sell classification.
+    for EDGAR count, then fetches up to max_filings Form 4 XML documents.
+    Parses P-code (open-market purchase) and S-code (sale) transactions,
+    enriched with insider_id, date, and is_ceo for orthogonal decomposition.
 
     Returns:
-        (form4_count, total_purchases_usd, ceo_buy_flag, days_since_most_recent)
+        (form4_count, total_purchases_usd, ceo_buy_flag, days_since_most_recent,
+         ceo_purchase_usd, p_transactions, s_transactions)
 
     Raises on network failure so the caller can set _edgar_ok=False.
     """
@@ -808,7 +846,7 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
     cik = cik_map.get(ticker.upper())
     if not cik:
         log.debug("No SEC CIK for %s", ticker)
-        return 0, 0.0, False, 0
+        return 0, 0.0, False, 0, 0.0, [], []
 
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     resp = _sec_get(url)   # raises on failure → caller sets _edgar_ok=False
@@ -834,27 +872,30 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
     form4_count = len(form4_filings)
     log.debug("EDGAR %s: CIK=%s form4=%d (last %dd)", ticker, cik, form4_count, lookback_days)
 
-    # Parse up to 3 most-recent Form 4 XMLs to determine open-market purchases
-    key_purchases: List[float] = []   # USD values of purchases by key officers
-    for filing in form4_filings[:3]:
+    # Parse up to max_filings most-recent Form 4 XMLs — collect P and S transactions
+    p_transactions: List[Dict] = []  # open-market purchases by key officers
+    s_transactions: List[Dict] = []  # sales by key officers
+    for filing in form4_filings[:max_filings]:
         if not filing["accession"] or not filing["doc"]:
             continue
         txs = _parse_form4_xml(cik, filing["accession"], filing["doc"])
         for tx in txs:
-            if tx["code"] != "P":
+            if not any(role in tx["title"].upper() for role in _KEY_ROLES):
                 continue
-            if any(role in tx["title"].upper() for role in _KEY_ROLES):
-                key_purchases.append(tx["value"])
+            if tx["code"] == "P":
+                p_transactions.append({**tx, "date": tx.get("date") or filing["date"]})
+            elif tx["code"] == "S":
+                s_transactions.append({**tx, "date": tx.get("date") or filing["date"]})
 
-    total_purchases_usd = 0.0
-    ceo_buy = False
+    total_purchases_usd = sum(tx["value"] for tx in p_transactions)
+    ceo_purchase_usd    = sum(tx["value"] for tx in p_transactions if tx.get("is_ceo"))
+    ceo_buy             = total_purchases_usd > 25_000
+
     days_since_most_recent = 0
-    if key_purchases:
-        total_purchases_usd = sum(key_purchases)
-        ceo_buy = total_purchases_usd > 25_000
+    if p_transactions:
         log.debug(
-            "INSIDER %s: %d key purchases $%.0f ceo_buy=%s",
-            ticker, len(key_purchases), total_purchases_usd, ceo_buy,
+            "INSIDER %s: %d P-txs $%.0f ceo_buy=%s ceo_usd=%.0f",
+            ticker, len(p_transactions), total_purchases_usd, ceo_buy, ceo_purchase_usd,
         )
         if form4_filings:
             most_recent_date_str = form4_filings[0]["date"]
@@ -868,7 +909,10 @@ def fetch_edgar_data(ticker: str, lookback_days: int = 180) -> Tuple[int, float,
             except Exception:
                 days_since_most_recent = 0
 
-    return form4_count, total_purchases_usd, ceo_buy, days_since_most_recent
+    return (
+        form4_count, total_purchases_usd, ceo_buy, days_since_most_recent,
+        ceo_purchase_usd, p_transactions, s_transactions,
+    )
 
 
 # ── Multi-market helpers ───────────────────────────────────────────────────────
@@ -925,6 +969,8 @@ def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
         eps = float(rf.get("eps", 0))
         mktcap = float(rf.get("market_cap", 0)) or 1.0
         momentum_score = max(0.0, min(1.0, (momentum + 1.0) / 2.0))  # [-1,1] → [0,1]
+        # TODO(fix #5): insider_score here is eps proxy, not real insider signal.
+        # Replace with FMP insider endpoint once EU Form 4 equivalents are mapped.
         insider_score  = max(0.0, min(1.0, eps / 100.0))             # eps proxy
         score = round((momentum_score * 0.5 + insider_score * 0.5) *
                       entry.source_reliability, 4)
@@ -960,6 +1006,7 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
         eps = float(rf.get("eps", 0))
         mktcap = float(rf.get("market_cap", 0)) or 1.0
         momentum_score = max(0.0, min(1.0, (momentum + 1.0) / 2.0))  # [-1,1] → [0,1]
+        # TODO(fix #5): insider_score here is eps proxy, not real insider signal (JPY-scale).
         insider_score  = max(0.0, min(1.0, eps / 1000.0))            # eps proxy (JPY-scale)
         score = round((momentum_score * 0.5 + insider_score * 0.5) *
                       entry.source_reliability, 4)
@@ -1039,14 +1086,25 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     errors  = 0
 
     def _score_ticker(row: Dict[str, str]) -> Dict[str, Any]:
+        from regime_trader.scoring.insider_signals import (  # noqa: PLC0415
+            score_insider_conviction,
+            score_insider_breadth,
+        )
+
         ticker = row["ticker"]
         edgar_ok    = False
         form4_count = 0
         total_purchases_usd = 0.0
         ceo_buy     = False
         days_since_most_recent = 0
+        ceo_purchase_usd = 0.0
+        p_transactions: List[Dict] = []
+        s_transactions: List[Dict] = []
         try:
-            form4_count, total_purchases_usd, ceo_buy, days_since_most_recent = fetch_edgar_data(ticker)
+            (
+                form4_count, total_purchases_usd, ceo_buy, days_since_most_recent,
+                ceo_purchase_usd, p_transactions, s_transactions,
+            ) = fetch_edgar_data(ticker)
             edgar_ok = True
         except Exception as exc:
             log.warning("EDGAR unreachable for %s: %s", ticker, exc)
@@ -1056,15 +1114,33 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
         try:
             # Insider purchases: FMP Form 4 (primary) → EDGAR XML (fallback).
-            if ticker in fmp_insider_cache:
-                fmp_usd, fmp_days = fmp_insider_cache[ticker]
-                if fmp_usd > 0:
-                    total_purchases_usd    = fmp_usd
-                    days_since_most_recent = fmp_days
-                    ceo_buy = total_purchases_usd > 25_000
+            # FMP gives aggregate USD + days; EDGAR gives full transaction lists.
+            # When FMP has data we use its aggregate for conviction but keep EDGAR
+            # p_transactions/s_transactions for breadth (FMP doesn't expose per-person lists).
+            _fmp_usd, _fmp_days = fmp_insider_cache.get(ticker, (0.0, 0))
+            if _fmp_usd > 0:
+                total_purchases_usd    = _fmp_usd
+                days_since_most_recent = _fmp_days
+                ceo_buy = total_purchases_usd > 25_000
+                insider_source = "fmp"
+            elif total_purchases_usd > 0:
+                insider_source = "edgar"
+            else:
+                insider_source = "none"
 
-            e_score = score_edgar(form4_count)
-            i_score = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
+            # ── Fix #2/8: orthogonal insider signals ─────────────────────────
+            conviction_score = score_insider_conviction(
+                key_purchases_usd=total_purchases_usd,
+                market_cap=mktcap,
+                days_since_most_recent=days_since_most_recent,
+                ceo_purchase_usd=ceo_purchase_usd,
+            )
+            breadth_score = score_insider_breadth(p_transactions, s_transactions)
+
+            # Legacy scalars preserved for downstream diagnostics / continuity
+            e_score_legacy = score_edgar(form4_count)
+            i_score_legacy = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
+
             c_score = score_congress(congress_raw)
             n_score = score_news_fmp(ticker)
             price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
@@ -1073,15 +1149,6 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 price_data["spy_return_20d"],
                 price_data["volume_spike"],
             )
-
-            # Determine which insider source actually provided data
-            _fmp_usd = fmp_insider_cache.get(ticker, (0.0, 0))[0]
-            if _fmp_usd > 0:
-                insider_source = "fmp"
-            elif total_purchases_usd > 0:
-                insider_source = "edgar"
-            else:
-                insider_source = "none"
 
             quiver_evidence = {
                 "congress": {
@@ -1103,46 +1170,54 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             news_source = "fmp" if n_score > 0.0 else "none"
 
             return {
-                "ticker":          ticker,
-                "sector":          sector.get(ticker, "Unknown"),
-                "cap_tier":        cap_tier.get(ticker, "large"),
-                "market_cap":      mktcap,
-                "edgar_score":     e_score,
-                "insider_score":   i_score,
-                "congress_score":  c_score,
-                "news_score":      n_score,
-                "momentum_score":  m_score,
-                "ceo_buy":         ceo_buy,
-                "form4_count":     form4_count,
-                "quiver_evidence": quiver_evidence,
+                "ticker":                  ticker,
+                "sector":                  sector.get(ticker, "Unknown"),
+                "cap_tier":                cap_tier.get(ticker, "large"),
+                "market_cap":              mktcap,
+                # ── Fix #2 orthogonal factors (used by WEIGHTS) ────────────
+                "insider_conviction_score": conviction_score,
+                "insider_breadth_score":    breadth_score,
+                # ── Remaining Markowitz factors ────────────────────────────
+                "congress_score":           c_score,
+                "news_score":               n_score,
+                "momentum_score":           m_score,
+                # ── Legacy scalars (diagnostic only — not in WEIGHTS) ──────
+                "edgar_score_legacy":       e_score_legacy,
+                "insider_score_legacy":     i_score_legacy,
+                # ── Metadata ───────────────────────────────────────────────
+                "ceo_buy":                 ceo_buy,
+                "form4_count":             form4_count,
+                "quiver_evidence":         quiver_evidence,
                 "news_source":             news_source,
                 "insider_usd":             float(total_purchases_usd),
                 "momentum_spy_relative":   float(price_data["return_20d"] - price_data["spy_return_20d"]),
                 "volume_spike":            float(price_data["volume_spike"]),
-                "_edgar_ok":       edgar_ok,
-                "_scoring_error":  False,
+                "_edgar_ok":               edgar_ok,
+                "_scoring_error":          False,
             }
         except Exception as exc:
             log.warning("Scoring failed for %s: %s", ticker, exc)
             return {
-                "ticker":          ticker,
-                "sector":          sector.get(ticker, "Unknown"),
-                "cap_tier":        cap_tier.get(ticker, "large"),
-                "market_cap":      mktcap,
-                "edgar_score":     0.0,
-                "insider_score":   0.0,
-                "congress_score":  0.0,
-                "news_score":      0.0,
-                "momentum_score":  0.0,
-                "ceo_buy":         ceo_buy,
-                "form4_count":     form4_count,
-                "quiver_evidence": {},
+                "ticker":                  ticker,
+                "sector":                  sector.get(ticker, "Unknown"),
+                "cap_tier":                cap_tier.get(ticker, "large"),
+                "market_cap":              mktcap,
+                "insider_conviction_score": 0.0,
+                "insider_breadth_score":    0.0,
+                "congress_score":           0.0,
+                "news_score":               0.0,
+                "momentum_score":           0.0,
+                "edgar_score_legacy":       0.0,
+                "insider_score_legacy":     0.0,
+                "ceo_buy":                 ceo_buy,
+                "form4_count":             form4_count,
+                "quiver_evidence":         {},
                 "news_source":             "none",
                 "insider_usd":             float(total_purchases_usd),
                 "momentum_spy_relative":   0.0,
                 "volume_spike":            1.0,
-                "_edgar_ok":       edgar_ok,
-                "_scoring_error":  True,
+                "_edgar_ok":               edgar_ok,
+                "_scoring_error":          True,
             }
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -1215,6 +1290,21 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     edgar_count   = sum(1 for r in results if r.get("_edgar_ok", False))
     congress_count = len(congress_data)
     duration      = round(time.time() - t0, 2)
+
+    # ── Orthogonality diagnostic (Fix #2) ─────────────────────────────────────
+    # Cohen, Malloy & Pomorski (2012): conviction and breadth must have Pearson r < 0.4.
+    # Log ERROR if they've drifted correlated so ops can investigate.
+    log.info(_WEIGHTS_MIGRATION_NOTE)
+    from regime_trader.scoring.insider_signals import log_conviction_breadth_correlation  # noqa: PLC0415
+    _conviction_breadth_results = [
+        {
+            "insider_conviction_score": r.get("insider_conviction_score", 0.0),
+            "insider_breadth_score":    r.get("insider_breadth_score", 0.0),
+        }
+        for r in results
+        if r.get("market", "USA") == "USA"
+    ]
+    log_conviction_breadth_correlation(_conviction_breadth_results)
 
     # ── Cross-sectional neutralization ────────────────────────────────────────
     # Grinold & Kahn ch. 7: remove sector × cap_tier bias before Stage 1 gate.
