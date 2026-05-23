@@ -40,23 +40,25 @@ from backend.market_intel.validator import validate_raw  # noqa: E402
 log = logging.getLogger("run_pipeline")
 
 # ── Weights (must sum to 1.0) ──────────────────────────────────────────────────
-# Fix #2/8 — orthogonal insider decomposition (Cohen, Malloy & Pomorski 2012).
-# edgar(0.28) + insider(0.23) shared ~50% but measured correlated quantities.
-# Split into conviction (dollar magnitude + CEO premium) and breadth (consensus).
-# Freed 0.06 allocated to momentum (0.12 → 0.18) — price/volume is genuinely
-# independent of information-event timing.
+# Fix #3/8 — Jegadeesh-Titman momentum + orthogonal news split.
+# momentum 20d (anti-alpha short-term reversal) → 12-1m Jegadeesh (Tetlock 2007).
+# news(0.15) split into directional sentiment(0.10) + attention buzz(0.05).
+# volume extracted from momentum into its own attention tilt (0.03).
 WEIGHTS = {
-    "insider_conviction": 0.30,
-    "insider_breadth":    0.15,
-    "congress":           0.22,
-    "news":               0.15,
-    "momentum":           0.18,
+    "insider_conviction":  0.30,   # Fix #2 — dollar magnitude + CEO premium
+    "insider_breadth":     0.15,   # Fix #2 — consensus among distinct insiders
+    "congress":            0.22,   # unchanged
+    "news_sentiment":      0.10,   # Fix #3 — directional, recency-decayed (Tetlock 2007)
+    "news_buzz":           0.05,   # Fix #3 — attention/coverage volume (Barber-Odean 2008)
+    "momentum_long":       0.15,   # Fix #3 — 12-1m skip-month (Jegadeesh-Titman 1993)
+    "volume_attention":    0.03,   # Fix #3 — volume spike tilt (Barber-Odean 2008)
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1, got {sum(WEIGHTS.values())}"
 _WEIGHTS_MIGRATION_NOTE = (
-    "WEIGHTS migration (Fix #2): edgar(0.28)+insider(0.23)=0.51 split into "
-    "conviction(0.30)+breadth(0.15)=0.45; momentum bumped 0.12→0.18. "
-    "Legacy keys edgar_score_legacy and insider_score_legacy preserved in output."
+    "WEIGHTS migration #3: momentum 20d (anti-alpha short-reversal) → "
+    "momentum 12-1m (Jegadeesh). News 0.15 split into sentiment(0.10) + buzz(0.05). "
+    "Volume extracted from momentum into volume_attention(0.03). "
+    "Legacy scores preserved as news_score_legacy / momentum_score_legacy."
 )
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
@@ -419,65 +421,97 @@ def score_congress(data: Optional[Dict]) -> float:
 
 
 def _fetch_spy_return() -> float:
-    """Fetch SPY 3-month return once before the thread pool starts.
+    """Fetch SPY 12-1 month return (Jegadeesh-Titman period) once before thread pool.
 
     Called once in run() and passed as a closure to _score_ticker() so all
-    160 worker threads share the same SPY baseline instead of each downloading
-    it separately (which causes yfinance cache collisions under concurrency).
-    Returns 0.0 on any failure so momentum still scores relative to flat market.
+    worker threads share the same SPY baseline. Returns 0.0 on any failure so
+    momentum still scores relative to flat market (symmetrical with ticker fallback).
+
+    Reference: Jegadeesh & Titman (1993), Journal of Finance 48(1).
     """
     try:
         import yfinance as yf
-        spy_df = yf.download("SPY", period="3mo", interval="1d",
+        spy_df = yf.download("SPY", period="13mo", interval="1d",
                               progress=False, auto_adjust=True)
-        if spy_df is None or spy_df.empty or len(spy_df) < 2:
+        if spy_df is None or spy_df.empty or len(spy_df) < 22:
             return 0.0
         spy_close = spy_df["Close"].squeeze().dropna()
-        return float((spy_close.iloc[-1] - spy_close.iloc[0]) / spy_close.iloc[0])
+        if len(spy_close) < 22:
+            return 0.0
+        # 12-1m: price at t-252 to price at t-21 (skip-month avoids reversal)
+        idx_far  = max(0, len(spy_close) - 252)
+        idx_near = max(1, len(spy_close) - 21)
+        return float(
+            (spy_close.iloc[idx_near] - spy_close.iloc[idx_far]) / spy_close.iloc[idx_far]
+        )
     except Exception as exc:
-        log.warning("SPY baseline fetch failed: %s — momentum will use 0.0 baseline", exc)
+        log.warning("SPY 12-1m baseline fetch failed: %s — momentum will use 0.0", exc)
         return 0.0
 
 
-def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, float]:
-    """Thaler (2017 Nobel) — 20-day SPY-relative return + volume spike.
+def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
+    """Jegadeesh-Titman (1993) — 12-1 month SPY-relative return + volume spike.
 
-    `spy_return` should be pre-fetched via _fetch_spy_return() before the thread
-    pool starts so all workers share a consistent SPY baseline.
-    Volume spike = 5-day avg volume / full-window avg volume.
+    Replaces the former 20-day return, which was short-term reversal (anti-alpha).
+    period="13mo" gives ~273 trading days: 252 for signal + 21 skip-month buffer.
 
-    Returns {"return_20d": float, "spy_return_20d": float, "volume_spike": float}.
-    Returns {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0} on any error.
+    Volume spike uses a 90-bar baseline excluding the 5 recent bars (no leakage).
+    volume_spike hard-capped at 20.0 to prevent diagnostic outliers for thinly
+    traded stocks with occasional massive spikes.
+
+    Returns:
+        return_12_1m:     None  if < 252 bars (recent IPO — dead signal, not 0.0)
+        spy_return_12_1m: passed-in SPY 12-1m baseline
+        volume_spike:     5d avg / 90d avg, capped at 20.0
+
+    On any error returns the default dict with return_12_1m=None (not 0.0, so the
+    caller can distinguish "no data" from "genuinely flat" in the scorer).
+
+    Reference: Jegadeesh & Titman (1993), Journal of Finance 48(1).
     """
-    _default = {"return_20d": 0.0, "spy_return_20d": spy_return, "volume_spike": 1.0}
+    _default: Dict[str, Any] = {
+        "return_12_1m":     None,
+        "spy_return_12_1m": spy_return,
+        "volume_spike":     1.0,
+    }
     try:
         import yfinance as yf
 
-        df = yf.download(ticker, period="3mo", interval="1d",
+        df = yf.download(ticker, period="13mo", interval="1d",
                          progress=False, auto_adjust=True)
         if df is None or df.empty or len(df) < 5:
             return _default
 
         close = df["Close"].squeeze().dropna()
-        if len(close) < 2:
+        if len(close) < 22:
             return _default
-        ret = float((close.iloc[-1] - close.iloc[0]) / close.iloc[0])
 
+        if len(close) < 252:
+            log.info(
+                "fetch_price_data %s: %d bars < 252 — return_12_1m=None (recent IPO)",
+                ticker, len(close),
+            )
+            ret_12_1m = None
+        else:
+            idx_far  = max(0, len(close) - 252)
+            idx_near = max(1, len(close) - 21)
+            ret_12_1m = float(
+                (close.iloc[idx_near] - close.iloc[idx_far]) / close.iloc[idx_far]
+            )
+
+        volume_spike = 1.0
         if "Volume" in df.columns:
             vol = df["Volume"].squeeze().dropna()
-            if len(vol) >= 10:
-                recent_avg = float(vol.iloc[-5:].mean())
-                full_avg   = float(vol.mean())
-                volume_spike = round(recent_avg / full_avg, 4) if full_avg > 0 else 1.0
-            else:
-                volume_spike = 1.0
-        else:
-            volume_spike = 1.0
+            if len(vol) >= 95:   # need 90-bar baseline + 5 recent bars
+                recent_avg   = float(vol.iloc[-5:].mean())
+                baseline_avg = float(vol.iloc[-95:-5].mean())  # 90 bars, no leakage
+                if baseline_avg > 0:
+                    volume_spike = round(min(20.0, recent_avg / baseline_avg), 4)
 
         return {
-            "return_20d":     round(ret, 6),
-            "spy_return_20d": round(spy_return, 6),
-            "volume_spike":   volume_spike,
+            "return_12_1m":     round(ret_12_1m, 6) if ret_12_1m is not None else None,
+            "spy_return_12_1m": round(spy_return, 6),
+            "volume_spike":     volume_spike,
         }
     except Exception as exc:
         log.debug("fetch_price_data %s failed: %s", ticker, exc)
@@ -489,14 +523,10 @@ def score_momentum(
     spy_return_20d: float = 0.0,
     volume_spike: float = 1.0,
 ) -> float:
-    """Thaler (2017 Nobel) — SPY-relative momentum + volume confirmation in [0, 1].
-
-    relative_return = ticker_return_20d - spy_return_20d, clipped to +-30%.
-    return_score maps (-0.30, +0.30) linearly to (0, 1).
-    vol_score maps volume_spike (ratio of recent 5d avg to 90d avg) to (0, 1):
-      1.0x (flat) -> 0.0, 5.0x spike -> 1.0.
-
-    Combined: 0.65 x return_score + 0.35 x vol_score
+    """DEPRECATED (Fix #3): 20-day SPY-relative momentum was short-term reversal,
+    not Jegadeesh momentum. Replaced by score_momentum_long() in
+    regime_trader/scoring/momentum_signals.py. Kept for git blame and legacy
+    score computation; remove in Fix #5+.
     """
     r = max(-0.30, min(0.30, ticker_return_20d - spy_return_20d))
     return_score = round((r + 0.30) / 0.60, 4)
@@ -572,8 +602,11 @@ def _load_cik_map() -> Dict[str, str]:
 
 # ── yfinance scorers ───────────────────────────────────────────────────────────
 
-def _score_news_yfinance(ticker: str) -> float:
-    """yfinance headline word-count fallback. Returns 0.0 (not 0.5) on any failure."""
+def _score_news_sentiment_yfinance(ticker: str) -> float:
+    """Fallback directional sentiment from yfinance headlines (bull/bear word-count).
+
+    Returns 0.0 if no headlines or both bull and bear counts are zero for all items.
+    """
     try:
         import yfinance as yf
         news = yf.Ticker(ticker).news or []
@@ -600,27 +633,81 @@ def _score_news_yfinance(ticker: str) -> float:
         return 0.0
 
 
+def _score_news_buzz_yfinance(ticker: str) -> float:
+    """Fallback buzz signal: count of yfinance recent headlines (no sentiment).
+
+    Returns 0.0 if no headlines returned.
+    """
+    try:
+        import yfinance as yf
+        news = yf.Ticker(ticker).news or []
+        n = len(news[:50])  # cap at 50 to mirror log1p(50) saturation
+        if n == 0:
+            return 0.0
+        return round(min(1.0, math.log1p(n) / math.log1p(50)), 4)
+    except Exception:
+        return 0.0
+
+
+def _score_news_yfinance(ticker: str) -> float:
+    """DEPRECATED (Fix #3): combined sentiment+buzz. Replaced by
+    _score_news_sentiment_yfinance / _score_news_buzz_yfinance.
+    Kept for git blame; remove in Fix #5+.
+    """
+    return _score_news_sentiment_yfinance(ticker)
+
+
 def score_news_fmp(ticker: str) -> float:
-    """Engle (2003 Nobel) — FMP news sentiment score in [0, 1].
-
-    Formula: 0.60 * (positive_count / total) + 0.40 * min(1.0, total / 50)
-
-    Falls back to _score_news_yfinance() immediately when:
-      - FMP returns [] (EU/Asia tickers with thin coverage on calm days)
-      - total == 0 (zero articles indexed)
-
-    Returns 0.0 (not 0.5) if both sources fail — dead feed is penalised.
+    """DEPRECATED (Fix #3): combined FMP sentiment+buzz (0.60/0.40 formula).
+    Replaced by score_news_sentiment_combined / score_news_buzz_combined in
+    regime_trader/scoring/news_signals.py. Kept for legacy score computation;
+    remove in Fix #5+.
     """
     client = _FMPClient()
     articles = client.get_news_raw_articles(ticker)
     if not articles:
-        return _score_news_yfinance(ticker)
+        return _score_news_sentiment_yfinance(ticker)
     positive = sum(1 for a in articles if a.get("sentiment") == "Positive")
     total = len(articles)
     if total == 0:
-        return _score_news_yfinance(ticker)
+        return _score_news_sentiment_yfinance(ticker)
     buzz_norm = min(1.0, total / 50.0)
     return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
+
+
+def score_news_sentiment_combined(ticker: str) -> tuple[float, str]:
+    """Recency-weighted directional sentiment (Tetlock 2007).
+
+    Returns (score, source) where source ∈ {"fmp", "yfinance", "none"}.
+    FMP articles first; falls back to yfinance headline word-count.
+    """
+    from regime_trader.scoring.news_signals import score_news_sentiment  # noqa: PLC0415
+
+    client = _FMPClient()
+    articles = client.get_news_raw_articles(ticker)
+    if articles:
+        s = score_news_sentiment(articles)
+        if s > 0.0:
+            return s, "fmp"
+    s = _score_news_sentiment_yfinance(ticker)
+    return (s, "yfinance" if s > 0.0 else "none")
+
+
+def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
+    """Attention/buzz signal — volume of recent coverage (Barber-Odean 2008).
+
+    Returns (score, source) where source ∈ {"fmp", "yfinance", "none"}.
+    """
+    from regime_trader.scoring.news_signals import score_news_buzz  # noqa: PLC0415
+
+    client = _FMPClient()
+    articles = client.get_news_raw_articles(ticker)
+    if articles:
+        s = score_news_buzz(articles)
+        if s > 0.0:
+            return s, "fmp"
+    s = _score_news_buzz_yfinance(ticker)
+    return (s, "yfinance" if s > 0.0 else "none")
 
 
 def fetch_fmp_insider_all(
@@ -1068,9 +1155,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     congress_data = fetch_congress_buys()
 
     # ── SPY baseline — fetched once so all threads share same benchmark ───────
-    log.info("Fetching SPY 3-month return (shared baseline for momentum)…")
+    log.info("Fetching SPY 12-1 month return (Jegadeesh-Titman baseline)…")
     spy_return_baseline = _fetch_spy_return()
-    log.info("SPY 3-month return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
+    log.info("SPY 12-1m return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
 
     # ── FMP insider — primary source (Form 4, cached 12h, limit=500) ─────────────
     # FMPClient.get_insider_purchases() returns (total_usd, days) per ticker.
@@ -1089,6 +1176,10 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         from regime_trader.scoring.insider_signals import (  # noqa: PLC0415
             score_insider_conviction,
             score_insider_breadth,
+        )
+        from regime_trader.scoring.momentum_signals import (  # noqa: PLC0415
+            score_momentum_long,
+            score_volume_attention,
         )
 
         ticker = row["ticker"]
@@ -1114,9 +1205,6 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
         try:
             # Insider purchases: FMP Form 4 (primary) → EDGAR XML (fallback).
-            # FMP gives aggregate USD + days; EDGAR gives full transaction lists.
-            # When FMP has data we use its aggregate for conviction but keep EDGAR
-            # p_transactions/s_transactions for breadth (FMP doesn't expose per-person lists).
             _fmp_usd, _fmp_days = fmp_insider_cache.get(ticker, (0.0, 0))
             if _fmp_usd > 0:
                 total_purchases_usd    = _fmp_usd
@@ -1128,7 +1216,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             else:
                 insider_source = "none"
 
-            # ── Fix #2/8: orthogonal insider signals ─────────────────────────
+            # ── Fix #2: orthogonal insider signals ────────────────────────
             conviction_score = score_insider_conviction(
                 key_purchases_usd=total_purchases_usd,
                 market_cap=mktcap,
@@ -1137,18 +1225,35 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             )
             breadth_score = score_insider_breadth(p_transactions, s_transactions)
 
-            # Legacy scalars preserved for downstream diagnostics / continuity
+            # ── Fix #3: orthogonal momentum + attention signals ───────────
+            price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
+            mom_long_score = score_momentum_long(
+                price_data["return_12_1m"],
+                price_data["spy_return_12_1m"],
+            )
+            vol_att_score = score_volume_attention(price_data["volume_spike"])
+
+            # ── Fix #3: orthogonal news signals ──────────────────────────
+            news_sent_score, news_sent_source = score_news_sentiment_combined(ticker)
+            news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
+
+            # ── Congress ─────────────────────────────────────────────────
+            c_score = score_congress(congress_raw)
+
+            # ── Legacy scalars (diagnostic, 30-day comparison window) ────
             e_score_legacy = score_edgar(form4_count)
             i_score_legacy = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
-
-            c_score = score_congress(congress_raw)
-            n_score = score_news_fmp(ticker)
-            price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
-            m_score = score_momentum(
-                price_data["return_20d"],
-                price_data["spy_return_20d"],
-                price_data["volume_spike"],
-            )
+            n_score_legacy = score_news_fmp(ticker)
+            # momentum_score_legacy: need 20d return; fetch_price_data no longer returns it.
+            # Approximate with return_12_1m mapped through the old 30% clip formula as a
+            # directional proxy — only used for ρ diagnostics, not in WEIGHTS.
+            _r12 = price_data.get("return_12_1m")
+            _spy12 = float(price_data.get("spy_return_12_1m") or 0.0)
+            if _r12 is not None:
+                _rel = max(-0.30, min(0.30, float(_r12) - _spy12))
+                m_score_legacy = round((_rel + 0.30) / 0.60, 4)
+            else:
+                m_score_legacy = 0.0
 
             quiver_evidence = {
                 "congress": {
@@ -1167,30 +1272,37 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "insider_source": insider_source,
             }
 
-            news_source = "fmp" if n_score > 0.0 else "none"
+            ret_12_1m = price_data.get("return_12_1m")
 
             return {
                 "ticker":                  ticker,
                 "sector":                  sector.get(ticker, "Unknown"),
                 "cap_tier":                cap_tier.get(ticker, "large"),
                 "market_cap":              mktcap,
-                # ── Fix #2 orthogonal factors (used by WEIGHTS) ────────────
+                # ── Fix #2 — orthogonal insider factors (WEIGHTS keys) ────
                 "insider_conviction_score": conviction_score,
                 "insider_breadth_score":    breadth_score,
-                # ── Remaining Markowitz factors ────────────────────────────
+                # ── Fix #3 — orthogonal momentum + news factors (WEIGHTS) ─
+                "momentum_long_score":      mom_long_score,
+                "volume_attention_score":   vol_att_score,
+                "news_sentiment_score":     news_sent_score,
+                "news_buzz_score":          news_buzz_score,
+                # ── Congress ─────────────────────────────────────────────
                 "congress_score":           c_score,
-                "news_score":               n_score,
-                "momentum_score":           m_score,
-                # ── Legacy scalars (diagnostic only — not in WEIGHTS) ──────
+                # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
                 "edgar_score_legacy":       e_score_legacy,
                 "insider_score_legacy":     i_score_legacy,
-                # ── Metadata ───────────────────────────────────────────────
+                "news_score_legacy":        n_score_legacy,
+                "momentum_score_legacy":    m_score_legacy,
+                # ── Metadata ─────────────────────────────────────────────
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
                 "quiver_evidence":         quiver_evidence,
-                "news_source":             news_source,
+                "news_sentiment_source":   news_sent_source,
+                "news_buzz_source":        news_buzz_source,
                 "insider_usd":             float(total_purchases_usd),
-                "momentum_spy_relative":   float(price_data["return_20d"] - price_data["spy_return_20d"]),
+                "return_12_1m":            ret_12_1m,
+                "momentum_spy_relative":   float(ret_12_1m - _spy12) if ret_12_1m is not None else 0.0,
                 "volume_spike":            float(price_data["volume_spike"]),
                 "_edgar_ok":               edgar_ok,
                 "_scoring_error":          False,
@@ -1204,16 +1316,22 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "market_cap":              mktcap,
                 "insider_conviction_score": 0.0,
                 "insider_breadth_score":    0.0,
+                "momentum_long_score":      0.0,
+                "volume_attention_score":   0.0,
+                "news_sentiment_score":     0.0,
+                "news_buzz_score":          0.0,
                 "congress_score":           0.0,
-                "news_score":               0.0,
-                "momentum_score":           0.0,
                 "edgar_score_legacy":       0.0,
                 "insider_score_legacy":     0.0,
+                "news_score_legacy":        0.0,
+                "momentum_score_legacy":    0.0,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
                 "quiver_evidence":         {},
-                "news_source":             "none",
+                "news_sentiment_source":   "none",
+                "news_buzz_source":        "none",
                 "insider_usd":             float(total_purchases_usd),
+                "return_12_1m":            None,
                 "momentum_spy_relative":   0.0,
                 "volume_spike":            1.0,
                 "_edgar_ok":               edgar_ok,
@@ -1291,20 +1409,58 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     congress_count = len(congress_data)
     duration      = round(time.time() - t0, 2)
 
-    # ── Orthogonality diagnostic (Fix #2) ─────────────────────────────────────
-    # Cohen, Malloy & Pomorski (2012): conviction and breadth must have Pearson r < 0.4.
-    # Log ERROR if they've drifted correlated so ops can investigate.
-    log.info(_WEIGHTS_MIGRATION_NOTE)
+    # ── Fix #3 summary: missing momentum (recent IPOs / thin history) ────────
+    n_missing_momentum = sum(1 for r in results if r.get("return_12_1m") is None and r.get("market", "USA") == "USA")
+    if n_missing_momentum > 0:
+        log.warning(
+            "Momentum 12-1m missing for %d/%d US tickers (recent IPOs or insufficient history). "
+            "These tickers get momentum_long_score=0.0 (dead signal, penalized in normalizer).",
+            n_missing_momentum, len([r for r in results if r.get("market", "USA") == "USA"]),
+        )
+
+    # ── Orthogonality diagnostics (Fix #2 + Fix #3) ──────────────────────────
+    log.warning(_WEIGHTS_MIGRATION_NOTE)
     from regime_trader.scoring.insider_signals import log_conviction_breadth_correlation  # noqa: PLC0415
-    _conviction_breadth_results = [
-        {
-            "insider_conviction_score": r.get("insider_conviction_score", 0.0),
-            "insider_breadth_score":    r.get("insider_breadth_score", 0.0),
-        }
-        for r in results
-        if r.get("market", "USA") == "USA"
-    ]
-    log_conviction_breadth_correlation(_conviction_breadth_results)
+    _us_results = [r for r in results if r.get("market", "USA") == "USA"]
+    log_conviction_breadth_correlation(_us_results)
+
+    # Fix #3: news_sentiment ⊥ news_buzz (expect ρ < 0.4)
+    # Fix #3: momentum_long ⊥ volume_attention (expect ρ < 0.3)
+    # Fix #3: momentum_long ⊥ momentum_score_legacy (expect ρ < 0.2 — temporal disjoint)
+    def _pearson(xs: list[float], ys: list[float], label: str, warn_threshold: float) -> None:
+        pairs = [(x, y) for x, y in zip(xs, ys) if x > 0.0 and y > 0.0]
+        if len(pairs) < 5:
+            log.info("ρ(%s): insufficient pairs (%d)", label, len(pairs))
+            return
+        n = len(pairs)
+        mx = sum(p[0] for p in pairs) / n
+        my = sum(p[1] for p in pairs) / n
+        num   = sum((p[0] - mx) * (p[1] - my) for p in pairs)
+        denom = math.sqrt(
+            sum((p[0] - mx) ** 2 for p in pairs) * sum((p[1] - my) ** 2 for p in pairs)
+        )
+        if denom == 0:
+            log.info("ρ(%s): undefined (zero variance)", label)
+            return
+        r = num / denom
+        flag = " ⚠ EXCEEDS THRESHOLD" if abs(r) >= warn_threshold else " ✓"
+        log.info("ρ(%s) = %.3f (threshold %.1f)%s", label, r, warn_threshold, flag)
+
+    _pearson(
+        [r.get("news_sentiment_score", 0.0) for r in _us_results],
+        [r.get("news_buzz_score", 0.0) for r in _us_results],
+        "news_sentiment,news_buzz", 0.4,
+    )
+    _pearson(
+        [r.get("momentum_long_score", 0.0) for r in _us_results],
+        [r.get("volume_attention_score", 0.0) for r in _us_results],
+        "momentum_long,volume_attention", 0.3,
+    )
+    _pearson(
+        [r.get("momentum_long_score", 0.0) for r in _us_results],
+        [r.get("momentum_score_legacy", 0.0) for r in _us_results],
+        "momentum_long,momentum_legacy", 0.2,
+    )
 
     # ── Cross-sectional neutralization ────────────────────────────────────────
     # Grinold & Kahn ch. 7: remove sector × cap_tier bias before Stage 1 gate.

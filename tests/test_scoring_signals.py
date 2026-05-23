@@ -102,7 +102,7 @@ class TestScoreNewsFMP:
         _, score_news_fmp, *_ = _import()
         from regime_trader.services.fmp_client import FMPClient
         with patch.object(FMPClient, "get_news_raw_articles", return_value=[]), \
-             patch("scripts.run_pipeline._score_news_yfinance", return_value=0.55) as mock_yf:
+             patch("scripts.run_pipeline._score_news_sentiment_yfinance", return_value=0.55) as mock_yf:
             score = score_news_fmp("MSFT")
         mock_yf.assert_called_once_with("MSFT")
         assert score == pytest.approx(0.55)
@@ -206,33 +206,36 @@ class TestFetchPriceDataEnhanced:
         import pandas as pd
         import numpy as np
 
-        # SPY return is now pre-fetched externally and passed as a parameter.
-        # fetch_price_data only downloads the ticker itself.
-        dates = pd.date_range("2026-04-01", periods=30, freq="B")
-        ticker_close = pd.Series(np.linspace(100, 110, 30), index=dates)
-        ticker_vol   = pd.Series([1_000_000] * 25 + [3_000_000] * 5, index=dates)
+        # Need ≥252 bars so Jegadeesh-Titman 12-1m is computable (not None).
+        # Volume: spike in last 5 bars vs 90-bar baseline.
+        n = 260
+        dates        = pd.date_range("2024-01-01", periods=n, freq="B")
+        ticker_close = pd.Series(np.linspace(100, 110, n), index=dates)
+        ticker_vol   = pd.Series([1_000_000] * (n - 5) + [3_000_000] * 5, index=dates)
 
         fake_ticker_df = pd.DataFrame({
             "Close":  ticker_close,
             "Volume": ticker_vol,
         })
 
-        spy_return_3m = 0.01  # simulate 1% SPY gain passed in from caller
+        spy_return_12m = 0.01  # simulate 1% SPY 12-1m baseline passed in from caller
 
         with patch("yfinance.download", return_value=fake_ticker_df):
-            result = fetch_price_data("AAPL", spy_return=spy_return_3m)
+            result = fetch_price_data("AAPL", spy_return=spy_return_12m)
 
-        assert "return_20d" in result
-        assert "spy_return_20d" in result
+        assert "return_12_1m" in result
+        assert "spy_return_12_1m" in result
         assert "volume_spike" in result
-        assert result["spy_return_20d"] == pytest.approx(spy_return_3m)
-        assert result["volume_spike"] > 1.0   # recent vol higher than avg
+        assert result["spy_return_12_1m"] == pytest.approx(spy_return_12m)
+        assert result["volume_spike"] > 1.0   # recent vol higher than baseline
 
-    def test_returns_zeros_on_failure(self):
+    def test_returns_none_on_failure(self):
+        """Exception → default dict with return_12_1m=None (dead signal)."""
         from scripts.run_pipeline import fetch_price_data
         with patch("yfinance.download", side_effect=Exception("network")):
             result = fetch_price_data("FAIL")
-        assert result == {"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0}
+        assert result["return_12_1m"] is None
+        assert result["volume_spike"] == pytest.approx(1.0)
 
 
 class TestFetchSpyReturn:
@@ -303,14 +306,12 @@ class TestQuiverEvidenceInResults:
 
 
 class TestEvidencePassthroughFields:
-    """_score_ticker() must include the 4 evidence pass-through fields."""
+    """_score_ticker() must include the Fix #3 evidence pass-through fields."""
 
     def test_score_ticker_result_contains_evidence_fields(self):
         from scripts.run_pipeline import run
         import tempfile, csv
-        import os
         from pathlib import Path
-        from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as td:
             tdp = Path(td)
@@ -323,13 +324,15 @@ class TestEvidencePassthroughFields:
                 w.writerow({"ticker": "AAPL", "sector": "Tech", "cap_tier": "large"})
 
             import pandas as pd, numpy as np
-            dates = pd.date_range("2026-04-01", periods=30, freq="B")
+            # Need ≥252 bars so return_12_1m is computable (not None)
+            n = 260
+            dates = pd.date_range("2024-01-01", periods=n, freq="B")
             fake_df = pd.DataFrame({
-                "Close":  pd.Series(np.linspace(100, 110, 30), index=dates),
-                "Volume": pd.Series([1_000_000] * 25 + [3_000_000] * 5, index=dates),
+                "Close":  pd.Series(np.linspace(100, 110, n), index=dates),
+                "Volume": pd.Series([1_000_000] * (n - 5) + [3_000_000] * 5, index=dates),
             })
             fake_spy = pd.DataFrame({
-                "Close": pd.Series(np.linspace(500, 510, 30), index=dates)
+                "Close": pd.Series(np.linspace(500, 510, n), index=dates)
             })
 
             with patch("yfinance.download", side_effect=lambda sym, **kw: fake_spy if sym == "SPY" else fake_df), \
@@ -338,16 +341,18 @@ class TestEvidencePassthroughFields:
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
                  patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_fmp", return_value=0.55):
+                 patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp")), \
+                 patch("scripts.run_pipeline.score_news_buzz_combined", return_value=(0.40, "fmp")):
                 mock_ticker.return_value.news = []
                 status = run(tickers_file, log_dir, max_workers=1)
 
             r = status["results"][0]
-            assert "news_source" in r,           "news_source missing"
+            assert "news_sentiment_source" in r, "news_sentiment_source missing"
+            assert "news_buzz_source" in r,      "news_buzz_source missing"
             assert "insider_usd" in r,           "insider_usd missing"
             assert "momentum_spy_relative" in r, "momentum_spy_relative missing"
             assert "volume_spike" in r,          "volume_spike missing"
-            assert r["news_source"] == "fmp"
+            assert r["news_sentiment_source"] == "fmp"
             assert isinstance(r["insider_usd"], float)
             assert isinstance(r["momentum_spy_relative"], float)
             assert isinstance(r["volume_spike"], float)

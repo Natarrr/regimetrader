@@ -135,17 +135,19 @@ class TestShadowScore:
         for i, ticker in enumerate(tickers):
             score = round(0.80 - i * 0.05, 4)
             results.append({
-                "ticker":         ticker,
-                "sector":         "Information Technology",
-                "cap_tier":       "large",
-                "market_cap":     1e12,
-                "edgar_score":    score,
-                "insider_score":  score,
-                "congress_score": score,
-                "news_score":     score,
-                "momentum_score": score,
-                "ceo_buy":        False,
-                "form4_count":    5,
+                "ticker":                    ticker,
+                "sector":                    "Information Technology",
+                "cap_tier":                  "large",
+                "market_cap":                1e12,
+                "insider_conviction_score":  score,
+                "insider_breadth_score":     score,
+                "congress_score":            score,
+                "news_sentiment_score":      score,
+                "news_buzz_score":           score,
+                "momentum_long_score":       score,
+                "volume_attention_score":    score,
+                "ceo_buy":                   False,
+                "form4_count":               5,
                 "quiver_evidence": {
                     "congress": {
                         "purchases": 3, "sales": 0, "net": 3,
@@ -171,8 +173,9 @@ class TestShadowScore:
                 "none":   {"last_updated": "2026-05-21T12:00:00+00:00"},
             },
             "weights": {
-                "edgar": 0.28, "insider": 0.23, "congress": 0.22,
-                "news": 0.15, "macro": 0.12,
+                "insider_conviction": 0.30, "insider_breadth": 0.15, "congress": 0.22,
+                "news_sentiment": 0.10, "news_buzz": 0.05,
+                "momentum_long": 0.15, "volume_attention": 0.03,
             },
             "results": results,
             "computed_at": "2026-05-21T12:00:00+00:00",

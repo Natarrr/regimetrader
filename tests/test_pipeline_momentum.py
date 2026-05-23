@@ -49,46 +49,55 @@ class TestScoreMomentum:
 
 
 class TestFetchPriceData:
-    def _fake_df(self, start_price: float, end_price: float, n: int = 21) -> pd.DataFrame:
-        """Create a fake yfinance Close DataFrame."""
-        prices = np.linspace(start_price, end_price, n)
-        idx    = pd.date_range("2026-01-01", periods=n, freq="B")
-        return pd.DataFrame({"Close": prices}, index=idx)
+    def _fake_df(self, start_price: float, end_price: float, n: int = 260) -> pd.DataFrame:
+        """Create a fake yfinance Close+Volume DataFrame.
+
+        n=260 gives >252 bars so Jegadeesh-Titman 12-1m period is computable.
+        """
+        prices  = np.linspace(start_price, end_price, n)
+        volumes = np.full(n, 1_000_000)
+        idx     = pd.date_range("2025-01-01", periods=n, freq="B")
+        return pd.DataFrame({"Close": prices, "Volume": volumes}, index=idx)
 
     def test_positive_momentum_detected(self):
-        fake = self._fake_df(100.0, 110.0)   # +10% over the period
+        # 260 bars from 100→110 → 12-1m return uses bars [0, 239] → positive
+        fake = self._fake_df(100.0, 110.0)
         with patch("yfinance.download", return_value=fake):
             result = fetch_price_data("AAPL")
-        assert result["return_20d"] > 0.0
+        assert result["return_12_1m"] is not None
+        assert result["return_12_1m"] > 0.0
 
     def test_negative_momentum_detected(self):
-        fake = self._fake_df(100.0, 90.0)    # -10%
+        fake = self._fake_df(100.0, 90.0)
         with patch("yfinance.download", return_value=fake):
             result = fetch_price_data("AAPL")
-        assert result["return_20d"] < 0.0
+        assert result["return_12_1m"] is not None
+        assert result["return_12_1m"] < 0.0
 
     def test_flat_market_returns_near_zero(self):
         fake = self._fake_df(100.0, 100.0)
         with patch("yfinance.download", return_value=fake):
             result = fetch_price_data("AAPL")
-        assert abs(result["return_20d"]) < 1e-6
+        assert abs(result["return_12_1m"]) < 1e-6
 
-    def test_empty_dataframe_returns_zero(self):
+    def test_empty_dataframe_returns_none(self):
+        """Insufficient history → return_12_1m=None (dead signal, not 0.0)."""
         fake = pd.DataFrame()
         with patch("yfinance.download", return_value=fake):
             result = fetch_price_data("INVALID")
-        assert result["return_20d"] == pytest.approx(0.0)
+        assert result["return_12_1m"] is None
 
-    def test_exception_returns_zero(self):
+    def test_exception_returns_none(self):
+        """Exception → default dict with return_12_1m=None."""
         with patch("yfinance.download", side_effect=Exception("network error")):
             result = fetch_price_data("AAPL")
-        assert result["return_20d"] == pytest.approx(0.0)
+        assert result["return_12_1m"] is None
 
     def test_return_key_present(self):
         fake = self._fake_df(100.0, 105.0)
         with patch("yfinance.download", return_value=fake):
             result = fetch_price_data("MSFT")
-        assert "return_20d" in result
+        assert "return_12_1m" in result
 
 
 class TestFetchFmpProfilesChunking:

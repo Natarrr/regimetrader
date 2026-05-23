@@ -328,11 +328,11 @@ class TestScoreNewsFMP:
     def test_falls_back_to_yfinance_on_empty_articles(self, monkeypatch):
         monkeypatch.setenv("FMP_API_KEY", "k")
         monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        from scripts.run_pipeline import score_news_fmp, _score_news_yfinance
+        from scripts.run_pipeline import score_news_fmp
         from regime_trader.services.fmp_client import FMPClient
 
         with patch.object(FMPClient, "get_news_raw_articles", return_value=[]), \
-             patch("scripts.run_pipeline._score_news_yfinance", return_value=0.6) as mock_yf:
+             patch("scripts.run_pipeline._score_news_sentiment_yfinance", return_value=0.6) as mock_yf:
             score = score_news_fmp("SAP.DE")
         mock_yf.assert_called_once_with("SAP.DE")
         assert score == pytest.approx(0.6)

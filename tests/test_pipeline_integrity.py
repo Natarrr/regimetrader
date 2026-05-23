@@ -27,26 +27,37 @@ def _raw_row(
     market_cap: float = 3e12,
     sector: str = "Technology",
 ) -> Dict[str, Any]:
-    """Minimal intel_source_status.json result row for use in tests."""
+    """Minimal intel_source_status.json result row for use in tests.
+
+    Parameters use short aliases for brevity; they map to the 7-factor field
+    names consumed by generate_top_lists.FACTOR_FIELDS:
+      edgar    → insider_conviction_score (primary insider signal)
+      insider  → insider_breadth_score
+      congress → congress_score
+      news     → news_sentiment_score  (news_buzz_score mirrors at 0.60)
+      momentum → momentum_long_score   (volume_attention_score mirrors at 0.50)
+    """
     return {
-        "ticker":          ticker,
-        "sector":          sector,
-        "cap_tier":        cap_tier,
-        "market_cap":      market_cap,
-        "edgar_score":     edgar,
-        "insider_score":   insider,
-        "congress_score":  congress,
-        "news_score":      news,
-        "momentum_score":  momentum,
-        "ceo_buy":         False,
-        "form4_count":     3,
-        "quiver_evidence": {},
-        "news_source":     "finnhub",
-        "insider_usd":     50_000.0,
-        "momentum_spy_relative": 0.02,
-        "volume_spike":    1.5,
-        "_edgar_ok":       True,
-        "_scoring_error":  False,
+        "ticker":                    ticker,
+        "sector":                    sector,
+        "cap_tier":                  cap_tier,
+        "market_cap":                market_cap,
+        "insider_conviction_score":  edgar,
+        "insider_breadth_score":     insider,
+        "congress_score":            congress,
+        "news_sentiment_score":      news,
+        "news_buzz_score":           round(news * 0.85, 4),
+        "momentum_long_score":       momentum,
+        "volume_attention_score":    round(momentum * 0.90, 4),
+        "ceo_buy":                   False,
+        "form4_count":               3,
+        "quiver_evidence":           {},
+        "news_source":               "finnhub",
+        "insider_usd":               50_000.0,
+        "momentum_spy_relative":     0.02,
+        "volume_spike":              1.5,
+        "_edgar_ok":                 True,
+        "_scoring_error":            False,
     }
 
 
@@ -195,15 +206,15 @@ class TestGenerateTopLists:
         out = self._generate(rows, tmp_path)
         star = next(e for e in out["top_buys"] if e["ticker"] == "STAR")
         assert star["badge"] in ("HIGH BUY", "TACTICAL BUY"), f"unexpected badge: {star['badge']}"
-        assert star["final_score"] >= star["factors"].get("edgar", 0), \
+        assert star["final_score"] >= star["factors"].get("insider_conviction", 0), \
             "final_score below individual factor — weighting broken"
 
-    def test_factors_dict_has_five_keys(self, tmp_path):
+    def test_factors_dict_has_seven_keys(self, tmp_path):
         rows = [_raw_row(f"T{i}") for i in range(5)]
         out = self._generate(rows, tmp_path)
         for entry in out["top_buys"]:
             factors = entry["factors"]
-            assert len(factors) == 5, f"expected 5 factors, got {len(factors)}: {factors}"
+            assert len(factors) == 7, f"expected 7 factors, got {len(factors)}: {factors}"
 
     def test_all_zero_scores_raises_integrity_error(self, tmp_path):
         # When every ticker has all-zero factors the circuit breaker must fire —

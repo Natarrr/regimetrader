@@ -447,8 +447,10 @@ def detect_anomalies(
             ))
 
     # ── SENTIMENT_EXTREME ─────────────────────────────────────────────────────
+    # Fix #3: check news_sentiment_score (orthogonal split); fall back to
+    # legacy news_score if the new key is absent (backwards compatibility).
     for row in rows:
-        ns = row.get("news_score")
+        ns = row.get("news_sentiment_score") if "news_sentiment_score" in row else row.get("news_score")
         if ns is None:
             continue
         v = float(ns)

@@ -46,21 +46,28 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 log = logging.getLogger("generate_top_lists")
 
 
+# Fix #2+#3: align with run_pipeline.WEIGHTS (7-factor decomposition).
+# These weights mirror the pipeline's WEIGHTS exactly; any divergence must be
+# intentional and documented.  cross_sectional_normalize reads FACTOR_FIELDS.
 WEIGHTS: Dict[str, float] = {
-    "edgar":    0.28,
-    "insider":  0.23,
-    "congress": 0.22,
-    "news":     0.15,
-    "macro":    0.12,
+    "insider_conviction": 0.30,
+    "insider_breadth":    0.15,
+    "congress":           0.22,
+    "news_sentiment":     0.10,
+    "news_buzz":          0.05,
+    "momentum_long":      0.15,
+    "volume_attention":   0.03,
 }
 
 # Maps factor key → field name in intel_source_status.json results
 FACTOR_FIELDS: Dict[str, str] = {
-    "edgar":    "edgar_score",
-    "insider":  "insider_score",
-    "congress": "congress_score",
-    "news":     "news_score",
-    "macro":    "momentum_score",  # pipeline writes momentum_score; exposed as macro
+    "insider_conviction": "insider_conviction_score",
+    "insider_breadth":    "insider_breadth_score",
+    "congress":           "congress_score",
+    "news_sentiment":     "news_sentiment_score",
+    "news_buzz":          "news_buzz_score",
+    "momentum_long":      "momentum_long_score",
+    "volume_attention":   "volume_attention_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
@@ -600,11 +607,13 @@ def generate(
             "ceo_buy":         False,
             "form4_count":     0,
             "factors":         {
-                "edgar":    0.0,
-                "insider":  float(row.get("insider_score", 0.0)),
-                "congress": 0.0,
-                "news":     0.0,
-                "macro":    float(row.get("momentum_score", 0.0)),
+                "insider_conviction": 0.0,
+                "insider_breadth":    float(row.get("insider_score", 0.0)),
+                "congress":           0.0,
+                "news_sentiment":     0.0,
+                "news_buzz":          0.0,
+                "momentum_long":      float(row.get("momentum_score", 0.0)),
+                "volume_attention":   0.0,
             },
             "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
             "quiver_evidence":         {},
@@ -719,7 +728,8 @@ def generate(
         writer.writerow([
             "rank", "ticker", "sector", "cap_tier", "market_cap",
             "final_score", "badge", "ceo_buy", "form4_count",
-            "edgar", "insider", "congress", "news", "macro",
+            "insider_conviction", "insider_breadth", "congress",
+            "news_sentiment", "news_buzz", "momentum_long", "volume_attention",
         ])
         for rank, entry in enumerate(top_buys, 1):
             f = entry["factors"]
@@ -733,7 +743,13 @@ def generate(
                 entry["badge"],
                 entry["ceo_buy"],
                 entry["form4_count"],
-                f["edgar"], f["insider"], f["congress"], f["news"], f["macro"],
+                f.get("insider_conviction", 0.0),
+                f.get("insider_breadth", 0.0),
+                f.get("congress", 0.0),
+                f.get("news_sentiment", 0.0),
+                f.get("news_buzz", 0.0),
+                f.get("momentum_long", 0.0),
+                f.get("volume_attention", 0.0),
             ])
     log.info("Wrote %s", out_csv)
 
