@@ -976,7 +976,8 @@ def fetch_edgar_data(
 
     total_purchases_usd = sum(tx["value"] for tx in p_transactions)
     ceo_purchase_usd    = sum(tx["value"] for tx in p_transactions if tx.get("is_ceo"))
-    ceo_buy             = total_purchases_usd > 25_000
+    # Fix #7: legacy bool preserved for 30-day backward compat; not used for scoring.
+    ceo_buy             = ceo_purchase_usd > 0
 
     days_since_most_recent = 0
     if p_transactions:
@@ -1234,7 +1235,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             if _fmp_usd > 0:
                 total_purchases_usd    = _fmp_usd
                 days_since_most_recent = _fmp_days
-                ceo_buy = total_purchases_usd > 25_000
+                # Fix #7: ceo_buy is legacy; scoring uses _ceo_purchase_significance() internally.
+                ceo_buy = ceo_purchase_usd > 0
                 insider_source = "fmp"
             elif total_purchases_usd > 0:
                 insider_source = "edgar"
@@ -1299,6 +1301,15 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
             ret_12_1m = price_data.get("return_12_1m")
 
+            # Fix #7: relative CEO purchase significance (bps of market cap).
+            _ceo_bps = (ceo_purchase_usd / mktcap * 10_000) if mktcap > 0 and ceo_purchase_usd > 0 else None
+            _ceo_tier = (
+                "exceptional" if _ceo_bps is not None and _ceo_bps >= 5.0 else
+                "substantial" if _ceo_bps is not None and _ceo_bps >= 1.0 else
+                "modest"      if _ceo_bps is not None and _ceo_bps >= 0.5 else
+                "none"
+            )
+
             return {
                 "ticker":                  ticker,
                 "sector":                  sector.get(ticker, "Unknown"),
@@ -1320,7 +1331,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "news_score_legacy":        n_score_legacy,
                 "momentum_score_legacy":    m_score_legacy,
                 # ── Metadata ─────────────────────────────────────────────
-                "ceo_buy":                 ceo_buy,
+                # Fix #7: relative CEO conviction replaces absolute $25k threshold.
+                "ceo_purchase_bps":        round(_ceo_bps, 4) if _ceo_bps is not None else None,
+                "ceo_conviction_tier":     _ceo_tier,
+                "ceo_buy":                 ceo_buy,  # legacy bool — _deprecated: true
+                "ceo_buy_deprecated":      True,
                 "form4_count":             form4_count,
                 "quiver_evidence":         quiver_evidence,
                 "news_sentiment_source":   news_sent_source,
@@ -1642,6 +1657,52 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "top_by_market": top_by_market,  # Fix #5: per-market Top-20, low_coverage excluded
         "computed_at":   pipeline_run_ts,
     }
+
+    # ── Fix #8: permanent factor orthogonality diagnostic ────────────────────
+    # López de Prado (AFML ch. 8): monitor that engineered features remain
+    # structurally independent on live data after every run.
+    try:
+        from regime_trader.monitoring.factor_orthogonality import (  # noqa: PLC0415
+            compute_factor_correlation_matrix,
+        )
+        orthogonality_report = compute_factor_correlation_matrix(results, market_filter="US")
+        status["factor_orthogonality"] = orthogonality_report
+
+        if "error" not in orthogonality_report:
+            _max_rho = orthogonality_report["max_abs_correlation"]
+            _pair    = orthogonality_report["max_pair"]
+            _n_obs   = orthogonality_report["n_observations"]
+            log.info(
+                "Factor orthogonality (US, neutralized): max |ρ| = %.3f between (%s, %s) "
+                "across %d observations.",
+                _max_rho,
+                _pair[0] if _pair else "n/a",
+                _pair[1] if _pair else "n/a",
+                _n_obs,
+            )
+            for _warn in orthogonality_report["warnings"]:
+                log.warning("Factor orthogonality: %s", _warn)
+            for _err in orthogonality_report["errors"]:
+                log.error(
+                    "Factor orthogonality VIOLATION: %s — review feature engineering, "
+                    "factors are no longer effectively independent.", _err,
+                )
+
+            # CEO tier distribution diagnostic (Fix #7 calibration)
+            _us_rows = [r for r in results if r.get("market", "USA") in ("US", "USA")]
+            if _us_rows:
+                _tier_counts: dict[str, int] = {}
+                for _r in _us_rows:
+                    _t = _r.get("ceo_conviction_tier", "none")
+                    _tier_counts[_t] = _tier_counts.get(_t, 0) + 1
+                log.info(
+                    "CEO conviction tier distribution (US, n=%d): %s",
+                    len(_us_rows),
+                    ", ".join(f"{k}={v}" for k, v in sorted(_tier_counts.items())),
+                )
+    except Exception as _orth_exc:
+        log.warning("Factor orthogonality diagnostic failed (non-blocking): %s", _orth_exc)
+        status["factor_orthogonality"] = {"error": str(_orth_exc)}
 
     out = log_dir / "intel_source_status.json"
     save_json_atomic(out, status)

@@ -29,6 +29,60 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# Fix #7: relative CEO purchase significance thresholds (basis points of market cap).
+# Rationale: Cohen, Malloy & Pomorski (2012) — opportunistic CEO trades are only
+# predictive when the purchase is *substantial relative to the firm's size*, not in
+# absolute USD. A $10M buy on a $100B mega-cap is immaterial window dressing;
+# the same $10M on a $1B mid-cap signals genuine conviction.
+_CEO_BPS_MODEST      = 0.5   # < 0.5 bps → no bonus (immaterial)
+_CEO_BPS_SUBSTANTIAL = 1.0   # 0.5–1.0 bps → modest; 1.0–5.0 bps → substantial
+_CEO_BPS_EXCEPTIONAL = 5.0   # ≥ 5.0 bps → exceptional (capped by annual comp check)
+_CEO_FALLBACK_USD    = 50_000  # absolute floor when market_cap unavailable
+
+
+def _ceo_purchase_significance(
+    ceo_purchase_usd: float,
+    market_cap: float,
+    ceo_annual_comp: float | None = None,
+) -> float:
+    """CEO conviction multiplier in [1.0, 1.15] based on relative purchase size.
+
+    Primary metric (always): basis points of market cap acquired.
+        bps = ceo_purchase_usd / market_cap * 10_000
+        < 0.5 bps  → 1.00 (no bonus, immaterial)
+        0.5–1.0    → 1.05 (modest)
+        1.0–5.0    → 1.10 (substantial)
+        ≥ 5.0      → 1.15 (exceptional), reduced to 1.10 if purchase
+                           also < 50% of annual comp (window dressing filter).
+
+    Fallback when market_cap <= 0: use absolute USD threshold $50k.
+
+    Scale invariance: a $10M buy on $1B (1000 bps) scores 1.15;
+    the same $10M on $100B (1 bp) scores 1.10 — not 1.15.
+    """
+    if ceo_purchase_usd <= 0:
+        return 1.0
+
+    if market_cap > 0:
+        bps = ceo_purchase_usd / market_cap * 10_000
+        if bps < _CEO_BPS_MODEST:
+            return 1.0
+        elif bps < _CEO_BPS_SUBSTANTIAL:
+            return 1.05
+        elif bps < _CEO_BPS_EXCEPTIONAL:
+            return 1.10
+        else:
+            # Exceptional tier: require purchase ≥ 50% of annual comp when known.
+            if ceo_annual_comp is not None and ceo_purchase_usd < 0.5 * ceo_annual_comp:
+                return 1.10  # large bps but small vs comp → cap at substantial
+            return 1.15
+    else:
+        # market_cap unavailable — fallback to absolute threshold (raised from $25k)
+        log.warning(
+            "CEO significance: market_cap unavailable, falling back to absolute USD threshold"
+        )
+        return 1.10 if ceo_purchase_usd >= _CEO_FALLBACK_USD else 1.0
+
 
 def score_insider_conviction(
     key_purchases_usd: float,
@@ -39,16 +93,15 @@ def score_insider_conviction(
 ) -> float:
     """Dollar-weighted conviction signal in [0, 1].
 
-    Extends score_insider_value() with a CEO/CFO premium when the purchase
-    is large relative to annual compensation (Cohen et al. 2012 — CEO
-    opportunistic trades carry 2× the alpha of director trades).
+    Extends score_insider_value() with a CEO/CFO premium scaled by purchase
+    size relative to market cap (Fix #7 — Cohen, Malloy & Pomorski 2012).
 
     Formula:
         pct  = key_purchases_usd / market_cap
-        raw  = log(1 + pct * 10000) / log(1 + 100)   # same as legacy
-        base = 0.30 + 0.60 * raw                       # floor at 0.30
-        If ceo_purchase_usd > 0 AND (comp unknown OR ceo_buy > 0.5 × comp):
-            base = min(0.95, base * 1.15)              # CEO premium
+        raw  = log(1 + pct * 10000) / log(1 + 100)
+        base = 0.30 + 0.60 * raw                      # floor at 0.30
+        multiplier = _ceo_purchase_significance(...)   # Fix #7: relative bps
+        base = min(0.95, base * multiplier)
         Recency decay to 0.5 for purchases > 30 days old.
 
     Returns 0.0 if key_purchases_usd <= 0 (dead signal, not neutral).
@@ -60,11 +113,10 @@ def score_insider_conviction(
     raw = min(1.0, math.log1p(pct * 10000) / math.log1p(100))
     base = round(0.30 + 0.60 * raw, 6)
 
-    # CEO/CFO premium — Cohen et al. 2012: opportunistic CEO trades carry
-    # 2× the alpha of routine director transactions.
-    if ceo_purchase_usd > 0:
-        if ceo_annual_comp is None or ceo_purchase_usd > 0.5 * ceo_annual_comp:
-            base = min(0.95, base * 1.15)
+    # CEO/CFO premium — Fix #7: relative to market cap, not absolute USD.
+    multiplier = _ceo_purchase_significance(ceo_purchase_usd, market_cap, ceo_annual_comp)
+    if multiplier > 1.0:
+        base = min(0.95, base * multiplier)
 
     # Recency decay: purchases older than 30 days decay toward 0.5
     if days_since_most_recent > 30:
