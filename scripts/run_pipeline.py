@@ -1668,27 +1668,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         orthogonality_report = compute_factor_correlation_matrix(results, market_filter="US")
         status["factor_orthogonality"] = orthogonality_report
 
+        # CEO tier distribution diagnostic (Fix #7 calibration)
         if "error" not in orthogonality_report:
-            _max_rho = orthogonality_report["max_abs_correlation"]
-            _pair    = orthogonality_report["max_pair"]
-            _n_obs   = orthogonality_report["n_observations"]
-            log.info(
-                "Factor orthogonality (US, neutralized): max |ρ| = %.3f between (%s, %s) "
-                "across %d observations.",
-                _max_rho,
-                _pair[0] if _pair else "n/a",
-                _pair[1] if _pair else "n/a",
-                _n_obs,
-            )
-            for _warn in orthogonality_report["warnings"]:
-                log.warning("Factor orthogonality: %s", _warn)
-            for _err in orthogonality_report["errors"]:
-                log.error(
-                    "Factor orthogonality VIOLATION: %s — review feature engineering, "
-                    "factors are no longer effectively independent.", _err,
-                )
-
-            # CEO tier distribution diagnostic (Fix #7 calibration)
             _us_rows = [r for r in results if r.get("market", "USA") in ("US", "USA")]
             if _us_rows:
                 _tier_counts: dict[str, int] = {}
