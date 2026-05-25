@@ -194,8 +194,8 @@ class TestBuildPayloadSchema:
 
     def test_stale_data_shows_warning(self):
         from scripts.send_toplists_discord import build_payload
-        # generated_at > 25h ago → stale warning in description
+        # generated_at > 25h ago → DATA IS Xh OLD stale alert in description
         status = _make_status(generated_at="2026-05-17T12:00:00+00:00")
         payload = build_payload(status)
         desc = payload["embeds"][0]["description"]
-        assert "OLD" in desc or "pipeline" in desc.lower() or "ago" in desc
+        assert "OLD" in desc

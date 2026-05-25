@@ -34,7 +34,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import math
 import os
 import sys
 import time
@@ -105,13 +104,7 @@ _BUYBACK_HIGH = 0.10
 _BUYBACK_LOW  = 0.05
 
 _MEDAL: Dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
-_MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
-
-_BADGE_EMOJI = {
-    "HIGH BUY":     "🟢",
-    "TACTICAL BUY": "🟡",
-    "WATCHLIST":    "⚪",
-}
+_MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸", "US": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
 
 _STALE_HOURS = 25
 
@@ -216,17 +209,6 @@ def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
     }
 
 
-def _sector_heatmap(top_buys: List[Dict]) -> str:
-    counts: Dict[str, int] = {}
-    for e in top_buys:
-        raw   = (e.get("sector") or "").strip()
-        label = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
-        counts[label] = counts.get(label, 0) + 1
-    if not counts:
-        return ""
-    parts = [f"{lbl} ({n})" for lbl, n in sorted(counts.items(), key=lambda x: -x[1])]
-    return "  |  ".join(parts)
-
 
 # ── Field builders ─────────────────────────────────────────────────────────────
 
@@ -325,7 +307,7 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
         if pct >= 95:
             verb = "**BUY**  "
         elif pct >= 80:
-            verb = "**WATCH**"
+            verb = "**BUY**  "
         else:
             verb = "**HOLD** "
         lines.append(f"{verb} `{ticker}` — p{pct}{ceo_note} · {cat}")
@@ -488,7 +470,7 @@ def build_payload(
     anomaly_map = anomaly_map or {}
 
     # ── Detect schema: intel_source_status vs legacy top_lists ───────────────
-    is_status_schema = "top_by_market" in status or "results" in status
+    is_status_schema = "top_by_market" in status
 
     if is_status_schema:
         generated_at = status.get("generated_at", "")
@@ -643,45 +625,14 @@ def build_payload(
         fields.append({"name": "📈 Mid Caps — Top 5 (All Markets)", "value": "​", "inline": False})
         fields.extend(_ticker_fields(mid_caps, max_n=5, budget=1800))
 
-    # ── Satellite (cyclicals + cannibals) ─────────────────────────────────────
-    try:
-        if satellite:
-            month_label = satellite.get("month", "")
-            cyclicals   = satellite.get("cyclicals") or []
-            cannibals   = satellite.get("cannibals") or []
-            if cyclicals:
-                lines = [
-                    f"**{c['ticker']}** {_score_bar(c['win_rate'], 6)} "
-                    f"`{c['win_rate']:.0%}` win  |  `{c['median_return']:+.1%}` med  |  `{c.get('years','?')}y`"
-                    for c in cyclicals
-                ]
-                fields.append({
-                    "name":   f"🌀  Seasonal Cyclicals — {month_label}",
-                    "value":  _truncate("\n".join(lines)),
-                    "inline": False,
-                })
-            if cannibals:
-                lines = [
-                    f"**{c['ticker']}**  `{c.get('buyback_yield',0):.1%}` buyback"
-                    f"  |  P/E `{c.get('pe',0):.1f}`  |  `{c.get('price_vs_52w_low',0):.2f}x` vs 52w low"
-                    for c in cannibals
-                ]
-                fields.append({
-                    "name":   "🐷  Share Cannibals",
-                    "value":  _truncate("\n".join(lines)),
-                    "inline": False,
-                })
-    except Exception as exc:
-        log.warning("satellite embed fields skipped: %s", exc)
-
-    # ── Action today ─────────────────────────────────────────────────────────
+    # ── Action today (before satellite — high priority) ───────────────────────
     all_top = us_entries + eu_entries + asia_entries
     action = _action_section(all_top, all_scores)
     if action:
         fields.append(action)
 
     # ── Sector exposure ───────────────────────────────────────────────────────
-    all_entries = all_top[:5] + mid_caps[:5]
+    all_entries = all_top + mid_caps[:5]
     structured  = _sector_heatmap_structured(all_entries)
     if structured:
         sorted_sectors = sorted(
@@ -702,9 +653,47 @@ def build_payload(
             "inline": False,
         })
 
-    # ── Pipeline health ───────────────────────────────────────────────────────
+    # ── Pipeline health (before satellite — critical visibility) ──────────────
     if is_status_schema:
         fields.append(_health_field(status))
+
+    # ── Satellite (cyclicals + cannibals) — optional, appended last ───────────
+    # Placed after Action/Sector/Health so Discord's 25-field limit drops
+    # satellite before it drops analytical fields.
+    try:
+        if satellite:
+            month_label = satellite.get("month", "")
+            cyclicals   = satellite.get("cyclicals") or []
+            cannibals   = satellite.get("cannibals") or []
+            if cyclicals and len(fields) < 24:
+                lines = [
+                    f"**{c['ticker']}** {_score_bar(c['win_rate'], 6)} "
+                    f"`{c['win_rate']:.0%}` win  |  `{c['median_return']:+.1%}` med  |  `{c.get('years','?')}y`"
+                    for c in cyclicals
+                ]
+                fields.append({
+                    "name":   f"🌀  Seasonal Cyclicals — {month_label}",
+                    "value":  _truncate("\n".join(lines)),
+                    "inline": False,
+                })
+            if cannibals and len(fields) < 24:
+                lines = [
+                    f"**{c['ticker']}**  `{c.get('buyback_yield',0):.1%}` buyback"
+                    f"  |  P/E `{c.get('pe',0):.1f}`  |  `{c.get('price_vs_52w_low',0):.2f}x` vs 52w low"
+                    for c in cannibals
+                ]
+                fields.append({
+                    "name":   "🐷  Share Cannibals",
+                    "value":  _truncate("\n".join(lines)),
+                    "inline": False,
+                })
+    except Exception as exc:
+        log.warning("satellite embed fields skipped: %s", exc)
+
+    # ── Discord 25-field hard limit guard ─────────────────────────────────────
+    if len(fields) > 25:
+        log.warning("Discord 25-field limit exceeded (%d fields) — truncating to 25", len(fields))
+        fields = fields[:25]
 
     # ── Footer ────────────────────────────────────────────────────────────────
     footer_text = f"Run: {run_id}  |  Pipeline: EDGAR-first"
@@ -940,7 +929,7 @@ def run_tests() -> int:
         failures.append(f"FAIL [catalyst_line]: {traceback.format_exc()}")
 
     # ── Report ────────────────────────────────────────────────────────────────
-    total_assertions = 35
+    total_assertions = 32
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
