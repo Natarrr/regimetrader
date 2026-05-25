@@ -74,11 +74,19 @@ FACTOR_FIELDS: Dict[str, str] = {
 # zero (i.e. missing / dead API).  Incomplete tickers are scored but flagged;
 # they are NOT excluded from ranking — exclusion would distort cross-sectional
 # normalization.  Instead, validation_metadata carries the signal to consumers.
-_SCHEMA_MISSING_THRESHOLD = 2   # >2 zero factors → is_complete = False
+_SCHEMA_MISSING_THRESHOLD = 4   # >4 zero factors → is_complete = False
+# Rationale: on the S&P 500 large-cap universe, congress (0 trades), insider_conviction
+# (sparse ~11%), and volume_attention are structurally 0.0 for most tickers.
+# A threshold of 2 would flag 80%+ of the universe as "incomplete" even when the
+# pipeline is healthy — that defeats the purpose of the circuit breaker.
+# 4 allows up to 4 structurally-zero factors before flagging a ticker as incomplete.
 
 # Circuit breaker: if fewer than this fraction of the universe pass the schema
 # gate, PipelineIntegrityError is raised and top_lists.json is NOT written.
-_CIRCUIT_BREAKER_MIN_FRACTION = 0.20   # 20 % of universe minimum
+_CIRCUIT_BREAKER_MIN_FRACTION = 0.05   # 5 % of universe minimum
+# Rationale: on a large-cap universe with sparse congress/insider data, a 20% threshold
+# blocks valid pipeline runs. 5% catches actual data outages (all factors missing) while
+# allowing the normal pattern of sparse optional factors.
 
 _BADGES = [
     (0.80, "HIGH BUY"),

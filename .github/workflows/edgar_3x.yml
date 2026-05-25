@@ -205,8 +205,8 @@ jobs:
           if [ -f logs/top_lists.json ]; then
             echo "### 📊 Pipeline Ranking Metrics (Top 5 Buys)" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo '| # | Ticker | Score | Badge | EDGAR | Insider | Congress | News | Momentum |' >> "$GITHUB_STEP_SUMMARY"
-            echo '|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | Badge | IC | IB | Cong | NS | NB | Mom | Vol |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json
           try:
@@ -215,10 +215,15 @@ jobs:
               for i, t in enumerate(d.get('top_buys', [])[:5], 1):
                   fac = t.get('factors', {})
                   print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | {t['badge']} | "
-                        f"{fac.get('edgar', 0):.2f} | {fac.get('insider', 0):.2f} | "
-                        f"{fac.get('congress', 0):.2f} | {fac.get('news', 0):.2f} | {fac.get('momentum', 0):.2f} |")
+                        f"{fac.get('insider_conviction', fac.get('edgar', 0)):.2f} | "
+                        f"{fac.get('insider_breadth', fac.get('insider', 0)):.2f} | "
+                        f"{fac.get('congress', 0):.2f} | "
+                        f"{fac.get('news_sentiment', fac.get('news', 0)):.2f} | "
+                        f"{fac.get('news_buzz', 0):.2f} | "
+                        f"{fac.get('momentum_long', fac.get('momentum', 0)):.2f} | "
+                        f"{fac.get('volume_attention', 0):.2f} |")
           except Exception as e:
-              print(f"| — | _summary unavailable: {e}_ | | | | | | | |")
+              print(f"| — | _summary unavailable: {e}_ | | | | | | | | | |")
           EOF
           else
             echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"

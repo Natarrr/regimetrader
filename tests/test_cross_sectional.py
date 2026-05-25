@@ -354,15 +354,29 @@ class TestSchemaGate:
         assert v["is_complete"] is True
         assert len(v["missing_sources"]) == 2
 
-    def test_ticker_with_three_zeros_is_incomplete(self):
-        rows = [_make_schema_row(insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)]
-        # Need universe of 5 so 0 complete < 20% threshold (min_required = 1)
-        # Add 4 complete rows to pass circuit breaker
+    def test_ticker_with_five_zeros_is_incomplete(self):
+        # Threshold raised to 4: >4 zero factors → is_complete = False.
+        # Reflects S&P 500 reality: congress, insider_conviction, volume_attention
+        # are structurally 0 for most tickers — not a data failure.
+        rows = [_make_schema_row(
+            insider_conviction_score=0.0, insider_breadth_score=0.0,
+            congress_score=0.0, news_sentiment_score=0.0, volume_attention_score=0.0,
+        )]
         complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
         all_rows = rows + complete_rows
         _schema_gate(all_rows, universe_size=len(all_rows))
         v = all_rows[0]["_validation"]
         assert v["is_complete"] is False
+        assert len(v["missing_sources"]) == 5
+
+    def test_ticker_with_three_zeros_is_now_complete(self):
+        # With threshold=4, 3 zero factors is within tolerance (normal pattern).
+        rows = [_make_schema_row(insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)]
+        complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
+        all_rows = rows + complete_rows
+        _schema_gate(all_rows, universe_size=len(all_rows))
+        v = all_rows[0]["_validation"]
+        assert v["is_complete"] is True
         assert len(v["missing_sources"]) == 3
 
     def test_missing_sources_names_correct_factors(self):
@@ -383,28 +397,37 @@ class TestSchemaGate:
         _schema_gate(all_rows, universe_size=len(all_rows))
         assert "insider_breadth" in all_rows[0]["_validation"]["missing_sources"]
 
-    def test_circuit_breaker_fires_when_below_20_percent(self):
-        # 5 tickers, all with 3 missing factors → 0 complete < 20% of 5 (min=1)
+    def test_circuit_breaker_fires_when_below_5_percent(self):
+        # Threshold lowered to 5%: all tickers need >4 zeros to be "incomplete".
+        # 5 tickers, all with 5 missing factors → 0 complete < 5% of 5 (min=1)
         rows = [
-            _make_schema_row(f"T{i}", insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)
+            _make_schema_row(
+                f"T{i}",
+                insider_conviction_score=0.0, insider_breadth_score=0.0,
+                congress_score=0.0, news_sentiment_score=0.0, volume_attention_score=0.0,
+            )
             for i in range(5)
         ]
         with pytest.raises(PipelineIntegrityError, match="Schema gate"):
             _schema_gate(rows, universe_size=5)
 
     def test_circuit_breaker_does_not_fire_when_enough_complete(self):
-        # 10 tickers: 3 complete, 7 missing 3 factors each
-        # 3/10 = 30% ≥ 20% → should NOT raise
+        # 10 tickers: 3 complete, 7 missing 3 factors each (3 zeros ≤ threshold 4 → complete)
+        # 10/10 = 100% ≥ 5% → should NOT raise
         complete = [_make_schema_row(f"C{i}") for i in range(3)]
         incomplete = [
             _make_schema_row(f"I{i}", insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)
             for i in range(7)
         ]
         rows = complete + incomplete
-        _schema_gate(rows, universe_size=10)   # must not raise
+        _schema_gate(rows, universe_size=10)   # must not raise (all 10 are "complete" with threshold=4)
 
     def test_circuit_breaker_raises_pipeline_integrity_error_type(self):
-        rows = [_make_schema_row(insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)]
+        # Need >4 zeros to be incomplete; use 5 zero factors.
+        rows = [_make_schema_row(
+            insider_conviction_score=0.0, insider_breadth_score=0.0,
+            congress_score=0.0, news_sentiment_score=0.0, volume_attention_score=0.0,
+        )]
         with pytest.raises(PipelineIntegrityError):
             _schema_gate(rows, universe_size=1)
 
