@@ -8,6 +8,17 @@ of the 7 scored factors on the US universe. If any pair exceeds CORRELATION_WARN
 emit WARNING. If any pair exceeds CORRELATION_ERROR_THRESHOLD, emit ERROR (factors are
 essentially redundant and should be re-engineered).
 
+Fix #8.1 — Sparsity-aware correlation:
+On a large-cap S&P 500-style universe, several factors (congress, news_buzz) have
+< 5% non-zero density. When 95%+ of tickers share a value of 0.0, Spearman rank
+correlation becomes dominated by tied ranks and produces artifactually high ρ even
+between conceptually independent factors. These are not design redundancies — they
+are a property of the data distribution on this universe.
+
+Pairs where either factor has density < SPARSITY_THRESHOLD are excluded from
+max_abs_correlation, warnings, and errors, but reported in low_density_pairs for
+full transparency. The full correlation_matrix is always exposed for manual inspection.
+
 Design choices:
 - Spearman (not Pearson): factor scores are bounded [0,1] with skewed distributions
   post-shrinkage; Spearman is rank-based and robust to this.
@@ -42,6 +53,11 @@ FACTORS_TO_MONITOR = [
 CORRELATION_WARN_THRESHOLD: float = 0.50   # Spearman |ρ| — warn
 CORRELATION_ERROR_THRESHOLD: float = 0.75  # Spearman |ρ| — factors essentially identical
 
+# Fix #8.1: minimum fraction of non-zero observations for a factor to participate
+# in reliable correlation measurement. Below this threshold, tied-rank artefacts
+# dominate and Spearman ρ is statistically uninformative.
+SPARSITY_THRESHOLD: float = 0.20
+
 
 def _spearman_rho(x: np.ndarray, y: np.ndarray) -> float:
     """Spearman rank correlation between two 1-D arrays (no scipy dependency)."""
@@ -70,7 +86,7 @@ def compute_factor_correlation_matrix(
     Args:
         results:          List of scored ticker dicts from run_pipeline.run().
         factors:          Factor names to evaluate. Defaults to FACTORS_TO_MONITOR.
-        use_neutralized:  If True, use *_score_neutral columns (post–Fix #1).
+        use_neutralized:  If True, use *_score_neutral columns (post-Fix #1).
                           If False, use raw *_score columns.
         market_filter:    Only include rows with r["market"] == market_filter
                           (or "USA" for legacy US rows). Pass None to use all markets.
@@ -83,11 +99,14 @@ def compute_factor_correlation_matrix(
             "n_observations": int,
             "factors_evaluated": list[str],
             "factors_skipped": list[str],
-            "correlation_matrix": {factor_i: {factor_j: rho_ij}},
-            "max_abs_correlation": float,
-            "max_pair": [str, str] | [],
-            "warnings": list[str],
-            "errors": list[str],
+            "factor_densities": {factor: float},        # fraction of non-zero values
+            "correlation_matrix": {fi: {fj: rho}},     # full matrix, all pairs
+            "max_abs_correlation": float,               # dense pairs only (Fix #8.1)
+            "max_pair": [str, str] | [],                # dense pairs only
+            "warnings": list[str],                      # dense pairs only
+            "errors": list[str],                        # dense pairs only
+            "low_density_pairs": list[dict],            # sparsity-excluded pairs
+            "reliable_correlations_only": bool,         # True when sparsity filter active
         }
         On failure: {"error": str, "computed_at": iso_timestamp}
     """
@@ -99,7 +118,6 @@ def compute_factor_correlation_matrix(
     try:
         # ── Filter by market ──────────────────────────────────────────────────
         if market_filter is not None:
-            # US rows may carry market="USA" (legacy) or market="US"
             _us_values = {"US", "USA"} if market_filter in ("US", "USA") else {market_filter}
             rows = [r for r in results if r.get("market", "USA") in _us_values]
         else:
@@ -108,7 +126,7 @@ def compute_factor_correlation_matrix(
         if len(rows) < min_observations:
             msg = (
                 f"Insufficient observations for orthogonality diagnostic: "
-                f"{len(rows)} rows (market={market_filter}, need ≥{min_observations}). "
+                f"{len(rows)} rows (market={market_filter}, need >={min_observations}). "
                 f"Factor orthogonality not computed."
             )
             log.warning(msg)
@@ -119,33 +137,36 @@ def compute_factor_correlation_matrix(
         evaluated: list[str] = []
         skipped: list[str] = []
         arrays: dict[str, np.ndarray] = {}
+        densities: dict[str, float] = {}
 
+        n_total = len(rows)
         for factor in factors:
             col = f"{factor}{suffix}" if use_neutralized else factor
-            # Collect non-None values aligned across all rows
             vals = []
             for r in rows:
                 v = r.get(col)
                 if v is None and use_neutralized:
-                    # Fall back to raw score if neutral column absent (e.g. bucket too small)
                     v = r.get(factor)
                 vals.append(v)
 
             none_count = sum(1 for v in vals if v is None)
-            if none_count > len(vals) * 0.5:
+            if none_count > n_total * 0.5:
                 skipped.append(factor)
                 log.debug(
                     "Orthogonality: skipping %s — %.0f%% None values",
-                    factor, none_count / len(vals) * 100,
+                    factor, none_count / n_total * 100,
                 )
                 continue
 
-            # Replace remaining None with median of available values (minimal imputation)
             numeric = [float(v) for v in vals if v is not None]
             median_fill = float(np.median(numeric)) if numeric else 0.0
             arr = np.array([float(v) if v is not None else median_fill for v in vals])
             arrays[factor] = arr
             evaluated.append(factor)
+
+            # Fix #8.1: compute density = fraction of strictly non-zero values
+            nonzero = int(np.count_nonzero(arr))
+            densities[factor] = round(nonzero / n_total, 4)
 
         if len(evaluated) < 2:
             msg = f"Too few factors with sufficient data: {evaluated}. Skipped: {skipped}."
@@ -158,6 +179,7 @@ def compute_factor_correlation_matrix(
         max_pair: list[str] = []
         warnings: list[str] = []
         errors: list[str] = []
+        low_density_pairs: list[dict[str, Any]] = []
 
         for fi in evaluated:
             matrix[fi] = {}
@@ -168,37 +190,81 @@ def compute_factor_correlation_matrix(
                 rho = _spearman_rho(arrays[fi], arrays[fj])
                 matrix[fi][fj] = round(rho, 4) if not np.isnan(rho) else None
 
+                if fi >= fj:
+                    continue  # process unordered pairs once
+
                 abs_rho = abs(rho) if not np.isnan(rho) else 0.0
+                d_i = densities.get(fi, 1.0)
+                d_j = densities.get(fj, 1.0)
+                is_sparse = d_i < SPARSITY_THRESHOLD or d_j < SPARSITY_THRESHOLD
+
+                if is_sparse:
+                    # Fix #8.1: sparsity artefact — record but exclude from scoring
+                    low_density_pairs.append({
+                        "factor_a":    fi,
+                        "factor_b":    fj,
+                        "correlation": round(rho, 4) if not np.isnan(rho) else None,
+                        "density_a":   d_i,
+                        "density_b":   d_j,
+                        "reason":      (
+                            f"{'both factors' if d_i < SPARSITY_THRESHOLD and d_j < SPARSITY_THRESHOLD else 'one factor'} "
+                            f"below SPARSITY_THRESHOLD={SPARSITY_THRESHOLD}"
+                        ),
+                    })
+                    continue  # does not contribute to max_abs_rho / warnings / errors
+
                 if abs_rho > max_abs_rho:
                     max_abs_rho = abs_rho
                     max_pair = [fi, fj]
 
-                # Emit warnings/errors only once per unordered pair
-                if fi < fj and not np.isnan(rho):
+                if not np.isnan(rho):
                     if abs_rho >= CORRELATION_ERROR_THRESHOLD:
-                        msg = (
-                            f"({fi}, {fj}): |ρ|={abs_rho:.3f} ≥ {CORRELATION_ERROR_THRESHOLD} "
-                            f"— factors are not effectively independent"
+                        errors.append(
+                            f"({fi}, {fj}): |rho|={abs_rho:.3f} >= {CORRELATION_ERROR_THRESHOLD}"
+                            f" -- factors are not effectively independent"
                         )
-                        errors.append(msg)
                     elif abs_rho >= CORRELATION_WARN_THRESHOLD:
-                        msg = (
-                            f"({fi}, {fj}): |ρ|={abs_rho:.3f} ≥ {CORRELATION_WARN_THRESHOLD} "
-                            f"— correlation approaching redundancy threshold"
+                        warnings.append(
+                            f"({fi}, {fj}): |rho|={abs_rho:.3f} >= {CORRELATION_WARN_THRESHOLD}"
+                            f" -- correlation approaching redundancy threshold"
                         )
-                        warnings.append(msg)
+
+        any_sparse = len(low_density_pairs) > 0
+
+        log.info(
+            "Factor orthogonality (US, neutralized, dense factors only): "
+            "max |rho| = %.3f between (%s, %s) across %d observations. "
+            "Low-density pairs (sparsity-excluded): %d.",
+            max_abs_rho,
+            max_pair[0] if max_pair else "n/a",
+            max_pair[1] if max_pair else "n/a",
+            len(rows),
+            len(low_density_pairs),
+        )
+
+        if low_density_pairs:
+            log.info(
+                "Sparsity-excluded pairs (tied-rank artefacts, not design redundancies): %s",
+                ", ".join(
+                    f"{p['factor_a'].replace('_score','')}<->{p['factor_b'].replace('_score','')}"
+                    for p in low_density_pairs[:6]
+                ),
+            )
 
         return {
-            "computed_at":         ts,
-            "market":              market_filter or "ALL",
-            "n_observations":      len(rows),
-            "factors_evaluated":   evaluated,
-            "factors_skipped":     skipped,
-            "correlation_matrix":  matrix,
-            "max_abs_correlation": round(max_abs_rho, 4),
-            "max_pair":            max_pair,
-            "warnings":            warnings,
-            "errors":              errors,
+            "computed_at":              ts,
+            "market":                   market_filter or "ALL",
+            "n_observations":           len(rows),
+            "factors_evaluated":        evaluated,
+            "factors_skipped":          skipped,
+            "factor_densities":         densities,
+            "correlation_matrix":       matrix,
+            "max_abs_correlation":      round(max_abs_rho, 4),
+            "max_pair":                 max_pair,
+            "warnings":                 warnings,
+            "errors":                   errors,
+            "low_density_pairs":        low_density_pairs,
+            "reliable_correlations_only": any_sparse,
         }
 
     except Exception as exc:

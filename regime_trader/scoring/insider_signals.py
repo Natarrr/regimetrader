@@ -59,6 +59,15 @@ def _ceo_purchase_significance(
 
     Scale invariance: a $10M buy on $1B (1000 bps) scores 1.15;
     the same $10M on $100B (1 bp) scores 1.10 — not 1.15.
+
+    NOTE on calibration: on a large-cap universe (S&P 500-style), the bps
+    thresholds are structurally rarely activated — most CEO purchases on
+    mega-caps are < 0.5 bps because market caps dwarf practical purchase sizes.
+    This is correct behavior: the multiplier detects *relatively significant*
+    CEO conviction, which by definition rarely occurs on mega-caps. For
+    small/mid-cap universes, the multiplier activates more frequently.
+    Empirical: on a 160-ticker S&P 500-style universe, ~99% of tickers receive
+    'none' tier. To activate the multiplier broadly, expand universe to mid/small caps.
     """
     if ceo_purchase_usd <= 0:
         return 1.0
