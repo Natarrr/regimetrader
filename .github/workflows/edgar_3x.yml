@@ -241,6 +241,7 @@ jobs:
             logs/top_lists.json
             logs/top5.csv
             logs/satellite_insights.json
+            logs/intel_source_status.json
 
       - name: Upload pipeline debug artifacts
         if: always()

@@ -108,27 +108,27 @@ jobs:
       # If the artifact is older than 25h (missed run + buffer), fail loud
       # rather than repeating yesterday's rankings.
       # Uses generated_at field (ISO timestamp) — robust regardless of artifact mtime.
-      - name: Verify top_lists.json freshness
+      - name: Verify intel_source_status.json freshness
         run: |
           python3 - <<'EOF'
           import json, sys
           from datetime import datetime, timezone
           from pathlib import Path
-          p = Path("logs/top_lists.json")
+          p = Path("logs/intel_source_status.json")
           if not p.exists():
-              print("top_lists.json not found — send step will handle alert embed")
+              print("intel_source_status.json not found — send step will handle alert embed")
               sys.exit(0)
           try:
               d = json.loads(p.read_text(encoding="utf-8"))
               generated_at = d.get("generated_at", "")
               if not generated_at:
-                  print("::error::top_lists.json has no generated_at field — refusing to send stale data")
+                  print("::error::intel_source_status.json has no generated_at field — refusing to send stale data")
                   sys.exit(1)
               ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
               age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-              print(f"top_lists.json age: {age_h:.1f}h (generated_at: {generated_at})")
+              print(f"intel_source_status.json age: {age_h:.1f}h (generated_at: {generated_at})")
               if age_h > 25:
-                  print(f"::error::top_lists.json is {age_h:.1f}h old (> 25h threshold) — "
+                  print(f"::error::intel_source_status.json is {age_h:.1f}h old (> 25h threshold) — "
                         f"edgar_3x may have failed. Refusing to send stale Discord message.")
                   sys.exit(1)
               print(f"Freshness OK: {age_h:.1f}h < 25h")
@@ -148,7 +148,7 @@ jobs:
             DRY_RUN_FLAG="--dry-run"
           fi
           python scripts/send_toplists_discord.py \
-            --input   logs/top_lists.json \
+            --input   logs/intel_source_status.json \
             --log-dir logs \
             $DRY_RUN_FLAG
 

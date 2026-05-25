@@ -1,123 +1,201 @@
 """tests/test_discord_formatter.py
-Unit tests for Discord formatter helpers.
+Unit tests for Discord formatter helpers — 7-factor schema (P0 rewrite).
 """
 from __future__ import annotations
 
-
-class TestFactorGroup:
-    """Tests for _factor_group — grouped factor rendering used in conviction field."""
-
-    def test_renders_edgar_and_insider(self):
-        from scripts.send_toplists_discord import _factor_group, _FUNDAMENTAL
-        factors = {"edgar": 0.80, "insider": 0.70}
-        out = _factor_group(factors, _FUNDAMENTAL)
-        assert "0.80" in out
-        assert "0.70" in out
-        assert "EDGAR" in out
-        assert "Insider" in out
-
-    def test_renders_congress_and_news(self):
-        from scripts.send_toplists_discord import _factor_group, _SENTIMENT
-        factors = {"congress": 0.60, "news": 0.55}
-        out = _factor_group(factors, _SENTIMENT)
-        assert "0.60" in out
-        assert "0.55" in out
-
-    def test_renders_macro(self):
-        from scripts.send_toplists_discord import _factor_group, _TECHNICAL
-        factors = {"macro": 0.99}
-        out = _factor_group(factors, _TECHNICAL)
-        assert "0.99" in out
-
-    def test_missing_key_omitted_not_defaulted(self):
-        from scripts.send_toplists_discord import _factor_group, _FUNDAMENTAL
-        # missing insider → only edgar rendered, no 0.00 filler
-        out = _factor_group({"edgar": 0.72}, _FUNDAMENTAL)
-        assert "0.72" in out
-        assert "Insider" not in out
-
-    def test_empty_factors_returns_dash(self):
-        from scripts.send_toplists_discord import _factor_group, _FUNDAMENTAL
-        assert _factor_group({}, _FUNDAMENTAL) == "—"
+import json
 
 
-class TestConvictionField:
-    """Conviction field must expose key signals for the #1 pick."""
+def _make_status(tickers=None, generated_at="2026-05-17T12:00:00+00:00"):
+    """Minimal intel_source_status.json fixture for build_payload tests."""
+    if tickers is None:
+        tickers = [
+            {"ticker": "AAPL", "final_score": 0.70, "badge": "WATCHLIST",
+             "sector": "Technology", "cap_tier": "large", "market": "US",
+             "insider_conviction_score_neutral": 0.80,
+             "insider_breadth_score_neutral": 0.70,
+             "congress_score_neutral": 0.0,
+             "news_sentiment_score_neutral": 0.60,
+             "news_buzz_score_neutral": 0.50,
+             "momentum_long_score_neutral": 0.40,
+             "volume_attention_score_neutral": 0.0,
+             "ceo_conviction_tier": "CEO BUY"},
+        ]
+    return {
+        "generated_at": generated_at,
+        "source_run_id": "test-run",
+        "ticker_count": len(tickers),
+        "top_by_market": {"US": tickers, "EUROPE": [], "ASIA": []},
+        "results": tickers,
+    }
+
+
+class TestTickerDetailField:
+    """_ticker_detail_field renders the 3-line card format with 7 factors."""
 
     def _entry(self, **overrides):
         base = {
-            "ticker": "AAPL", "final_score": 0.82, "badge": "HIGH BUY",
-            "sector": "Technology", "market_cap": 3e12, "ceo_buy": False,
-            "factors": {"edgar": 0.80, "insider": 0.90, "congress": 0.60,
-                        "news": 0.70, "macro": 0.50},
+            "ticker": "AAPL",
+            "final_score": 0.82,
+            "badge": "HIGH BUY",
+            "sector": "Technology",
+            "cap_tier": "large",
+            "market": "USA",
+            "ceo_conviction_tier": "BUY",
+            "factors": {
+                "insider_conviction": 0.80,
+                "insider_breadth": 0.70,
+                "congress": 0.0,
+                "news_sentiment": 0.60,
+                "news_buzz": 0.50,
+                "momentum_long": 0.40,
+                "volume_attention": 0.0,
+            },
         }
         base.update(overrides)
         return base
 
+    def _all_scores(self):
+        return [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.82, 0.9]
+
     def test_ticker_in_field(self):
-        from scripts.send_toplists_discord import _conviction_field
-        f = _conviction_field(self._entry())
-        assert "AAPL" in f["value"]
+        from scripts.send_toplists_discord import _ticker_detail_field
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        assert "AAPL" in f["name"]
 
     def test_score_in_field(self):
-        from scripts.send_toplists_discord import _conviction_field
-        f = _conviction_field(self._entry())
+        from scripts.send_toplists_discord import _ticker_detail_field
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
         assert "0.8200" in f["value"]
 
-    def test_ceo_buy_tag_shown(self):
-        from scripts.send_toplists_discord import _conviction_field
-        f = _conviction_field(self._entry(ceo_buy=True))
+    def test_7factor_matrix_rendered(self):
+        from scripts.send_toplists_discord import _ticker_detail_field
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        val = f["value"]
+        assert "IC:" in val
+        assert "IB:" in val
+        assert "CG:" in val
+        assert "NS:" in val
+        assert "NB:" in val
+        assert "MO:" in val
+        assert "VA:" in val
+
+    def test_zero_factors_rendered_as_dash(self):
+        from scripts.send_toplists_discord import _ticker_detail_field
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        val = f["value"]
+        # congress=0.0 and volume_attention=0.0 → should render as "—"
+        assert "CG:—" in val
+        assert "VA:—" in val
+
+    def test_ceo_tier_shown(self):
+        from scripts.send_toplists_discord import _ticker_detail_field
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
         assert "CEO BUY" in f["value"]
 
-    def test_ceo_buy_tag_absent_when_false(self):
-        from scripts.send_toplists_discord import _conviction_field
-        f = _conviction_field(self._entry(ceo_buy=False))
-        assert "CEO BUY" not in f["value"]
+    def test_ceo_tier_absent_when_none(self):
+        from scripts.send_toplists_discord import _ticker_detail_field
+        entry = self._entry(ceo_conviction_tier=None)
+        f = _ticker_detail_field(1, entry, all_scores=self._all_scores())
+        assert "CEO" not in f["value"]
 
-    def test_factor_groups_all_present(self):
-        from scripts.send_toplists_discord import _conviction_field
-        f = _conviction_field(self._entry())
-        assert "Fundamental" in f["value"]
-        assert "Sentiment" in f["value"]
-        assert "Technical" in f["value"]
+    def test_percentile_in_field(self):
+        from scripts.send_toplists_discord import _ticker_detail_field
+        # all_scores has 9 values, 0.82 is 8th → p88
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        assert "p8" in f["value"]  # p80–p89 range
 
-    def test_missing_factor_omitted_not_zero(self):
-        from scripts.send_toplists_discord import _conviction_field
-        entry = self._entry()
-        del entry["factors"]["insider"]
-        f = _conviction_field(entry)
-        assert "Insider" not in f["value"]
+    def test_catalyst_line_present(self):
+        from scripts.send_toplists_discord import _ticker_detail_field
+        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        assert "driven by" in f["value"]
 
 
-class TestBuildPayloadWeights:
-    def _make_top_lists(self, weights):
-        return {
-            "generated_at":  "2026-05-17T12:00:00+00:00",
+class TestComputePercentile:
+    """_compute_percentile returns correct rank within population."""
+
+    def test_top_score_is_p100(self):
+        from scripts.send_toplists_discord import _compute_percentile
+        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+        assert _compute_percentile(0.5, scores) == 100
+
+    def test_bottom_score_is_low(self):
+        from scripts.send_toplists_discord import _compute_percentile
+        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+        pct = _compute_percentile(0.1, scores)
+        assert pct <= 20
+
+    def test_empty_population_returns_zero(self):
+        from scripts.send_toplists_discord import _compute_percentile
+        assert _compute_percentile(0.5, []) == 0
+
+
+class TestComputeCatalyst:
+    """_compute_catalyst returns top active factors in descending order."""
+
+    def test_returns_top_two_drivers(self):
+        from scripts.send_toplists_discord import _compute_catalyst
+        entry = {"factors": {"insider_conviction": 0.9, "insider_breadth": 0.8,
+                              "congress": 0.0, "news_sentiment": 0.7}}
+        cat = _compute_catalyst(entry)
+        assert "IC" in cat
+        assert "IB" in cat
+        assert "driven by" in cat
+
+    def test_no_active_factors_returns_no_catalyst(self):
+        from scripts.send_toplists_discord import _compute_catalyst
+        entry = {"factors": {"insider_conviction": 0.0, "congress": 0.0}}
+        cat = _compute_catalyst(entry)
+        assert "no primary catalyst" in cat
+
+    def test_zeros_excluded_from_catalyst(self):
+        from scripts.send_toplists_discord import _compute_catalyst
+        entry = {"factors": {"insider_conviction": 0.9, "congress": 0.0,
+                              "news_sentiment": 0.0}}
+        cat = _compute_catalyst(entry)
+        assert "CG" not in cat
+
+
+class TestBuildPayloadSchema:
+    """build_payload handles both intel_source_status.json and legacy top_lists.json."""
+
+    def test_status_schema_produces_embed(self):
+        from scripts.send_toplists_discord import build_payload
+        payload = build_payload(_make_status())
+        assert "embeds" in payload
+        assert len(payload["embeds"]) >= 1
+
+    def test_status_schema_has_usa_section(self):
+        from scripts.send_toplists_discord import build_payload
+        payload = build_payload(_make_status())
+        fields = payload["embeds"][0]["fields"]
+        names = [f["name"] for f in fields]
+        assert any("USA" in n for n in names)
+
+    def test_legacy_schema_still_works(self):
+        from scripts.send_toplists_discord import build_payload
+        legacy = {
+            "generated_at": "2026-05-17T12:00:00+00:00",
             "source_run_id": "test-run",
-            "ticker_count":  10,
-            "weights":       weights,
-            "kill_switch":   False,
-            "top_buys":      [{"ticker": "AAPL", "final_score": 0.70, "badge": "TACTICAL BUY",
-                               "factors": {"edgar": 0.7, "insider": 0.6, "congress": 0.5,
-                                           "news": 0.6, "macro": 0.5}, "ceo_buy": False}],
-            "mid_caps":      [],
-            "small_caps":    [],
+            "ticker_count": 1,
+            "weights": {"edgar": 0.28, "insider": 0.23, "congress": 0.22,
+                        "news": 0.15, "macro": 0.12},
+            "top_buys": [{"ticker": "AAPL", "final_score": 0.70,
+                          "badge": "WATCHLIST",
+                          "factors": {"edgar": 0.7, "insider": 0.6,
+                                      "congress": 0.5, "news": 0.6,
+                                      "macro": 0.5},
+                          "ceo_buy": False}],
+            "mid_caps": [],
+            "small_caps": [],
         }
+        payload = build_payload(legacy)
+        assert "embeds" in payload
 
-    def test_nominal_weights_no_redistribution_label(self):
+    def test_stale_data_shows_warning(self):
         from scripts.send_toplists_discord import build_payload
-        weights = {"edgar": 0.28, "insider": 0.23, "congress": 0.22, "news": 0.15, "macro": 0.12}
-        payload = build_payload(self._make_top_lists(weights))
+        # generated_at > 25h ago → stale warning in description
+        status = _make_status(generated_at="2026-05-17T12:00:00+00:00")
+        payload = build_payload(status)
         desc = payload["embeds"][0]["description"]
-        assert "feed down" not in desc, "nominal weights must not trigger redistribution warning"
-        assert "redistributed" not in desc
-
-    def test_redistributed_weights_shows_warning(self):
-        from scripts.send_toplists_discord import build_payload
-        # Simulate insider feed dead — weight redistributed to other factors
-        weights = {"edgar": 0.359, "congress": 0.282, "news": 0.192, "macro": 0.154}
-        payload = build_payload(self._make_top_lists(weights))
-        desc = payload["embeds"][0]["description"]
-        assert "feed down" in desc or "redistributed" in desc, (
-            "redistributed weights must show a warning in description"
-        )
+        assert "OLD" in desc or "pipeline" in desc.lower() or "ago" in desc
