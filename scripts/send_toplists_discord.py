@@ -166,10 +166,25 @@ def _embed_color(anomaly_map: Dict[str, List[str]], kill_switch: bool) -> int:
 
 def _data_age_hours(generated_at: str) -> Optional[float]:
     try:
-        ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        ts = datetime.fromisoformat((generated_at or "").replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
     except Exception:
         return None
+
+
+def _timestamp_from_status(status: Dict[str, Any]) -> str:
+    """Extract the pipeline timestamp from intel_source_status or top_lists schema.
+
+    intel_source_status.json uses 'computed_at' (top-level) and '_edgar_meta.last_run'.
+    top_lists.json uses 'generated_at'.
+    Falls back through all three.
+    """
+    return (
+        status.get("generated_at")
+        or status.get("computed_at")
+        or (status.get("_edgar_meta") or {}).get("last_run")
+        or ""
+    )
 
 
 def _compute_percentile(score: float, all_scores: List[float]) -> int:
@@ -473,10 +488,7 @@ def build_payload(
     is_status_schema = "top_by_market" in status
 
     if is_status_schema:
-        generated_at = status.get("generated_at", "")
-        if not generated_at:
-            meta = status.get("_edgar_meta", {})
-            generated_at = meta.get("last_run", "")
+        generated_at = _timestamp_from_status(status)
         run_id   = status.get("run_id", "")
         weights  = status.get("weights", {})
         vix_val  = status.get("vix")
@@ -503,7 +515,7 @@ def build_payload(
 
     else:
         # Legacy top_lists.json schema — graceful degradation
-        generated_at = status.get("generated_at", "")
+        generated_at = _timestamp_from_status(status)
         run_id   = status.get("source_run_id", status.get("run_id", ""))
         weights  = status.get("weights", {})
         vix_val  = status.get("vix")

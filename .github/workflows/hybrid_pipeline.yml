@@ -120,10 +120,14 @@ jobs:
                   {
                       "symbol":            e["ticker"],
                       "smart_money_score": e.get("final_score", 0.0),
-                      "insider_score":     e.get("factors", {}).get("insider", 0.0),
+                      # 7-factor schema (with legacy 5-factor fallback keys)
+                      "insider_score":     (e.get("factors", {}).get("insider_conviction")
+                                            or e.get("factors", {}).get("insider", 0.0)),
                       "inst_score":        e.get("factors", {}).get("congress", 0.0),
-                      "momentum_score":    e.get("factors", {}).get("momentum", 0.0),
-                      "edgar_score":       e.get("factors", {}).get("edgar", 0.0),
+                      "momentum_score":    (e.get("factors", {}).get("momentum_long")
+                                            or e.get("factors", {}).get("momentum", 0.0)),
+                      "edgar_score":       (e.get("factors", {}).get("insider_breadth")
+                                            or e.get("factors", {}).get("edgar", 0.0)),
                   }
                   for e in top_buys
               ]

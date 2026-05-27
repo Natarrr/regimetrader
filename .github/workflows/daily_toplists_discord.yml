@@ -120,13 +120,17 @@ jobs:
               sys.exit(0)
           try:
               d = json.loads(p.read_text(encoding="utf-8"))
-              generated_at = d.get("generated_at", "")
+              # intel_source_status.json uses 'computed_at'; top_lists.json uses 'generated_at'
+              generated_at = (d.get("generated_at")
+                              or d.get("computed_at")
+                              or (d.get("_edgar_meta") or {}).get("last_run")
+                              or "")
               if not generated_at:
-                  print("::error::intel_source_status.json has no generated_at field — refusing to send stale data")
+                  print("::error::intel_source_status.json has no timestamp field — refusing to send stale data")
                   sys.exit(1)
               ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
               age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-              print(f"intel_source_status.json age: {age_h:.1f}h (generated_at: {generated_at})")
+              print(f"intel_source_status.json age: {age_h:.1f}h (timestamp: {generated_at})")
               if age_h > 25:
                   print(f"::error::intel_source_status.json is {age_h:.1f}h old (> 25h threshold) — "
                         f"edgar_3x may have failed. Refusing to send stale Discord message.")
