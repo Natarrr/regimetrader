@@ -9,7 +9,7 @@ Reads intel_source_status.json (written by run_pipeline.py) and computes three
 stress signals:
     1. CEO buy ratio   — fraction of tickers with key-exec purchases
     2. Filing velocity — mean Form 4 count across the universe
-    3. Insider breadth — fraction of tickers with elevated insider_score (≥ 0.70)
+    3. Insider breadth — fraction of tickers with elevated insider_breadth_score (≥ 0.70)
 
 Stress levels:
     CLEAR    — all signals below watch thresholds
@@ -67,7 +67,12 @@ def _compute_stress(results: list) -> _StressResult:
 
     ceo_buys   = sum(1 for r in results if r.get("ceo_buy", False))
     mean_form4 = sum(r.get("form4_count", 0) for r in results) / n
-    breadth    = sum(1 for r in results if r.get("insider_score", 0) >= 0.70)
+    # 7-factor pipeline emits `insider_breadth_score`; fall back to the legacy
+    # `insider_score` so historical snapshots still score correctly.
+    breadth    = sum(
+        1 for r in results
+        if (r.get("insider_breadth_score") or r.get("insider_score") or 0) >= 0.70
+    )
 
     ceo_ratio     = ceo_buys / n
     breadth_ratio = breadth / n
