@@ -1,10 +1,13 @@
 """backend/market_intel/generate_top_lists.py
-Five-factor weighted scoring → top_lists.json + top5.csv
+Seven-factor weighted scoring → top_lists.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
-and applies Markowitz (1990 Nobel) portfolio ranking:
+and applies Markowitz (1990 Nobel) portfolio ranking. Weights mirror
+run_pipeline.WEIGHTS exactly (see WEIGHTS below):
 
-  final_score = 0.28×edgar + 0.23×insider + 0.22×congress + 0.15×news + 0.12×momentum
+  final_score = 0.30×insider_conviction + 0.15×insider_breadth + 0.22×congress
+              + 0.10×news_sentiment + 0.05×news_buzz
+              + 0.15×momentum_long + 0.03×volume_attention
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -247,11 +250,9 @@ def _effective_weights(
     all-zero factors and rolls their weight to the live factors so the remaining
     signals retain full discriminating power.
 
-    Example: congress dead (all 0.0), weight=0.22 →
-        edgar    0.28 → 0.28 + 0.22*(0.28/0.78) = 0.3590
-        insider  0.23 → 0.23 + 0.22*(0.23/0.78) = 0.2948
-        news     0.15 → 0.15 + 0.22*(0.15/0.78) = 0.1923
-        momentum 0.12 → 0.12 + 0.22*(0.12/0.78) = 0.1538  (sum = 1.0)
+    Example: congress dead (all 0.0), weight=0.22 redistributes pro-rata across
+    the six live factors in proportion to their existing weights, so the
+    surviving weights still sum to 1.0.
     """
     if not norm_factor_list:
         return dict(weights)
@@ -614,14 +615,18 @@ def generate(
             "badge":           _badge(float(row.get("final_score", 0.0))),
             "ceo_buy":         False,
             "form4_count":     0,
+            # EU/Asia rows carry only momentum_long + volume_attention (yfinance);
+            # insider/congress/news are structurally absent (FMP 403 for non-US).
+            # Read the 7-factor *_score keys the international scorer emits — the
+            # legacy insider_score / momentum_score keys no longer exist.
             "factors":         {
                 "insider_conviction": 0.0,
-                "insider_breadth":    float(row.get("insider_score", 0.0)),
+                "insider_breadth":    0.0,
                 "congress":           0.0,
                 "news_sentiment":     0.0,
                 "news_buzz":          0.0,
-                "momentum_long":      float(row.get("momentum_score", 0.0)),
-                "volume_attention":   0.0,
+                "momentum_long":      float(row.get("momentum_long_score") or 0.0),
+                "volume_attention":   float(row.get("volume_attention_score") or 0.0),
             },
             "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
             "quiver_evidence":         {},

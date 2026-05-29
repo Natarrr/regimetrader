@@ -46,20 +46,12 @@ class VIXCoherenceError(PipelineAuditError):
 # Constants
 # ---------------------------------------------------------------------------
 
-_WEIGHTS = {
-    "edgar": 0.28,
-    "insider": 0.23,
-    "congress": 0.22,
-    "news": 0.15,
-    "momentum": 0.12,
-}
-
-_RELIABILITY = {"USA": 1.0, "EUROPE": 0.75, "ASIA": 0.60}
-
+# Badge thresholds — the single source of truth for this audit. Must match
+# generate_top_lists._BADGES and send_toplists_discord._badge_from_score.
 _BADGE_THRESHOLDS = [(0.80, "HIGH BUY"), (0.60, "TACTICAL BUY"), (0.00, "WATCHLIST")]
 
-VIX_BEARISH = 25.0   # > 25 → BEARISH
-VIX_STABLE  = 15.0   # > 15 → STABLE, else BULLISH
+# VIX coherence bound used by check F (plausible-range guard, not a regime label).
+_VIX_MAX = 200.0
 
 # Ticker regex: up to 5 uppercase letters (USA) or alphanumeric + dot + 1-2 uppercase (intl)
 _TICKER_RE = re.compile(r"^([A-Z]{1,5}|[A-Z0-9]{1,6}\.[A-Z]{1,2})$")
@@ -191,9 +183,9 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
     # F. VIX coherence — value must be a plausible positive float
     # ------------------------------------------------------------------
     vix = data.get("vix")
-    if vix is None or not (0.0 <= float(vix) <= 200.0):
+    if vix is None or not (0.0 <= float(vix) <= _VIX_MAX):
         raise VIXCoherenceError(
-            f"VIX={vix!r} is outside the plausible range [0, 200]"
+            f"VIX={vix!r} is outside the plausible range [0, {_VIX_MAX:.0f}]"
         )
 
     # ------------------------------------------------------------------

@@ -135,9 +135,11 @@ jobs:
 
       # ── 6. Generate top_lists.json ───────────────────────────────────────────
       #
-      # Five-factor scoring: edgar(0.28) insider(0.23) congress(0.22) news(0.15) momentum(0.12)
+      # Seven-factor scoring: insider_conviction(0.30) insider_breadth(0.15)
+      # congress(0.22) news_sentiment(0.10) news_buzz(0.05) momentum_long(0.15)
+      # volume_attention(0.03) — weights mirror run_pipeline.WEIGHTS.
       # Congress data from House/Senate Stock Watcher S3 (no API key needed).
-      # Market cap tiers assigned relative to the 160-ticker universe.
+      # Market cap tiers assigned by absolute thresholds (large ≥$10B, mid ≥$2B).
       - name: Generate top lists
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}

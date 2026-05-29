@@ -1036,14 +1036,6 @@ def _registry_meta() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
-def _badge_from_score(score: float) -> str:
-    if score >= 0.65:
-        return "HIGH BUY"
-    if score >= 0.45:
-        return "TACTICAL BUY"
-    return "WATCHLIST"
-
-
 def _score_ticker_international(
     entry: Any,
     spy_return_baseline: float = 0.0,
