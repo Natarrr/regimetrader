@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import warnings
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -219,7 +219,7 @@ def _try_write_chart(ic_results: list, output_dir: Path) -> None:
 
         fig, ax = plt.subplots(figsize=(10, 5))
         colors = ["#2ecc71" if m > 0 else "#e74c3c" for m in means]
-        bars = ax.bar(names, means, color=colors, alpha=0.85)
+        ax.bar(names, means, color=colors, alpha=0.85)
         ax.errorbar(range(len(means)), means, yerr=[ci_lo, ci_hi],
                     fmt="none", color="black", capsize=4, linewidth=1.2)
         ax.axhline(0, color="black", linewidth=0.8)
@@ -280,12 +280,12 @@ def _render_report(
         "",
         "## Methodology",
         "",
-        f"- **IC measure:** Spearman rank correlation (Grinold & Kahn 2000, ch. 6)",
+        "- **IC measure:** Spearman rank correlation (Grinold & Kahn 2000, ch. 6)",
         f"- **Forward return horizon:** {horizon_days} calendar days (~1 month)",
         f"- **Validation:** Purged {n_folds}-fold CV, embargo={embargo_days} days",
-        f"  (López de Prado 2018 AFML ch. 7 — prevents leakage from overlapping return windows)",
+        "  (López de Prado 2018 AFML ch. 7 — prevents leakage from overlapping return windows)",
         f"- **Score variant:** `{score_variant}`",
-        f"- **Bootstrap CI:** 1 000 samples, 95% two-sided",
+        "- **Bootstrap CI:** 1 000 samples, 95% two-sided",
         "",
         "## Dataset",
         "",

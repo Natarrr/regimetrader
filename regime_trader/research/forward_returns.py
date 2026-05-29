@@ -117,7 +117,7 @@ def fetch_forward_returns(
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
-def _nearest_price(series: "pd.Series", target: date, direction: str = "forward") -> float | None:
+def _nearest_price(series: object, target: date, direction: str = "forward") -> float | None:
     """Return closest price to target date within a 5-day window."""
     import pandas as pd
 

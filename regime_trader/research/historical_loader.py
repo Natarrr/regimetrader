@@ -14,9 +14,9 @@ import json
 import logging
 import shutil
 import warnings
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
-from typing import Generator, Iterator
+from typing import Iterator
 
 logger = logging.getLogger(__name__)
 

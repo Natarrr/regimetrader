@@ -21,8 +21,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
-
 from .base import BaseMarketFetcher, MarketEnum, TickerEntry
 
 logger = logging.getLogger(__name__)

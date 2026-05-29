@@ -490,7 +490,6 @@ def build_payload(
     if is_status_schema:
         generated_at = _timestamp_from_status(status)
         run_id   = status.get("run_id", "")
-        weights  = status.get("weights", {})
         vix_val  = status.get("vix")
         kill_switch = status.get("kill_switch", False)
 
@@ -517,7 +516,6 @@ def build_payload(
         # Legacy top_lists.json schema — graceful degradation
         generated_at = _timestamp_from_status(status)
         run_id   = status.get("source_run_id", status.get("run_id", ""))
-        weights  = status.get("weights", {})
         vix_val  = status.get("vix")
         kill_switch = status.get("kill_switch", False)
 
@@ -936,7 +934,7 @@ def run_tests() -> int:
         field = _ticker_detail_field(1, e, all_scores=[0.49])
         lines = field["value"].split("\n")
         _check("has_three_lines_plus_sep", len(lines) >= 3, f"lines={lines}")
-        _check("catalyst_line_present", any("driven by" in l or "no primary" in l for l in lines), f"lines={lines}")
+        _check("catalyst_line_present", any("driven by" in ln or "no primary" in ln for ln in lines), f"lines={lines}")
     except Exception:
         failures.append(f"FAIL [catalyst_line]: {traceback.format_exc()}")
 

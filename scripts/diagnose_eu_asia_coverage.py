@@ -70,7 +70,7 @@ def run_diagnostic() -> None:
                 sentiments = [a.get("sentiment", "?") for a in articles[:5]]
                 print(f"  FMP news:     {len(articles)} articles, sample sentiments: {sentiments}")
             else:
-                print(f"  FMP news:     0 articles")
+                print("  FMP news:     0 articles")
         except Exception as exc:
             row["fmp_news_count"] = None
             print(f"  FMP news:     ERROR — {exc}")
@@ -104,7 +104,7 @@ def run_diagnostic() -> None:
                 print(f"  yfinance:     {n_bars} bars, 12-1m OK={has_12_1m}, volume={has_vol}")
             else:
                 row["yf_has_volume"] = False
-                print(f"  yfinance:     0 bars (no data)")
+                print("  yfinance:     0 bars (no data)")
         except Exception as exc:
             row["yf_bars"] = None
             row["yf_has_12_1m"] = False
