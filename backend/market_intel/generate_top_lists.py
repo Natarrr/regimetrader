@@ -86,10 +86,12 @@ _SCHEMA_MISSING_THRESHOLD = 4   # >4 zero factors → is_complete = False
 
 # Circuit breaker: if fewer than this fraction of the universe pass the schema
 # gate, PipelineIntegrityError is raised and top_lists.json is NOT written.
-_CIRCUIT_BREAKER_MIN_FRACTION = 0.05   # 5 % of universe minimum
-# Rationale: on a large-cap universe with sparse congress/insider data, a 20% threshold
-# blocks valid pipeline runs. 5% catches actual data outages (all factors missing) while
-# allowing the normal pattern of sparse optional factors.
+_CIRCUIT_BREAKER_MIN_FRACTION = 0.40   # 40% of universe minimum
+# Rationale: with live FMP stable/ routes for insider/news/quote (Phase 1 migration),
+# the schema-completeness rate should be well above 40% on a healthy pipeline.
+# 0.05 was a workaround for the broken /api/v4 routes that zeroed factors silently.
+# Now that FMPEndpointError surfaces dead routes loudly, a low threshold is a trap
+# that would allow a partially-broken pipeline to write rankings without alerting.
 
 _BADGES = [
     (0.80, "HIGH BUY"),

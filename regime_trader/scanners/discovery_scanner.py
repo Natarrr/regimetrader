@@ -39,6 +39,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from regime_trader.utils.io import load_json_safe, save_json_atomic
+from regime_trader.services.fmp_client import FMPClient as _FMPClient
 
 log = logging.getLogger(__name__)
 
@@ -279,75 +280,48 @@ def fmp_screener(limit: int = 200) -> List[Dict]:
 # ── Step 2: FMP insider buys ───────────────────────────────────────────────────
 
 def fmp_insider_buys(limit: int = 500) -> List[Dict]:
-    """Akerlof (2001 Nobel) — insider open-market purchases via yfinance/SEC data.
+    """Insider open-market purchases via FMP stable/insider-trading/search.
 
-    FMP v4/insider-trading retired Aug 2025. This implementation queries
-    yfinance insider_transactions (sourced from SEC Form 4 filings) for every
-    symbol in _YF_WATCHLIST, filtering to open-market purchases by key executives.
+    Insider conviction signal (Cohen, Malloy & Pomorski 2012): opportunistic
+    CEO/CFO purchases carry measurable forward alpha (~7% annualised).
+
+    Uses FMPClient.get_insider_purchases() (stable/ route, PASS in Phase-0
+    smoke-test) for total acquisition USD and recency, then batch-quotes for
+    market caps. Replaced yfinance insider_transactions which scraped from
+    a fragile SEC HTML endpoint with no rate control.
 
     Args:
-        limit: Max symbols to scan (not individual transactions).
+        limit: Max symbols to return (sorted by normalized_pct_mcap desc).
 
     Returns:
-        List of dicts sorted by normalized_pct_mcap descending:
+        List of dicts (same schema as before):
         {sym, key_value_usd, normalized_pct_mcap, market_cap, roles,
          tx_count, most_recent_date}
     """
-    try:
-        import yfinance as yf
-    except ImportError:
-        log.warning("[INSIDER] yfinance not installed — insider discovery skipped")
+    client = _FMPClient()
+    if not client._api_key:
+        log.warning("[INSIDER] FMP_API_KEY not set — insider discovery skipped")
         return []
-
-    _KEY_ROLES_YF = (
-        "CEO", "CFO", "COO", "CTO", "President", "Chairman",
-        "Chief Executive", "Chief Financial", "Chief Operating",
-        "Director", "Founder",
-    )
 
     def _fetch_insider(sym: str) -> Optional[Dict]:
         try:
-            df = yf.Ticker(sym).insider_transactions
-            if df is None or df.empty:
+            total_usd, days_since = client.get_insider_purchases(sym, lookback_days=180)
+            if total_usd < _MIN_KEY_INSIDER_USD:
                 return None
-            # Open-market purchases only — not stock awards, grants, or derivatives
-            buys = df[
-                df["Text"].str.contains("Purchase", case=False, na=False)
-                & ~df["Text"].str.contains(
-                    "Award|Grant|Option|Derivative|Restricted", case=False, na=False
-                )
-            ]
-            if buys.empty:
-                return None
-            key_buys = buys[
-                buys["Position"].str.contains(
-                    "|".join(_KEY_ROLES_YF), case=False, na=False
-                )
-            ]
-            if key_buys.empty:
-                return None
-            total_value = float(key_buys["Value"].fillna(0).sum())
-            if total_value < _MIN_KEY_INSIDER_USD:
-                return None
-            roles = sorted({str(r) for r in key_buys["Position"].dropna()})[:4]
-            most_recent = ""
-            if "Start Date" in key_buys.columns:
-                dates = key_buys["Start Date"].dropna()
-                most_recent = str(dates.iloc[0]) if not dates.empty else ""
             return {
                 "sym": sym,
-                "key_value_usd": round(total_value, 0),
+                "key_value_usd": round(total_usd, 0),
                 "normalized_pct_mcap": 0.0,
                 "market_cap": 0.0,
-                "roles": roles,
-                "tx_count": len(key_buys),
-                "most_recent_date": most_recent,
+                "roles": [],           # FMP purchase summary doesn't split by role
+                "tx_count": 1,         # conservative: at least one qualifying purchase
+                "most_recent_date": f"-{days_since}d" if days_since else "",
             }
         except Exception:
             return None
 
     raw_results: List[Dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
         futures = {pool.submit(_fetch_insider, sym): sym for sym in _YF_WATCHLIST}
         for fut in concurrent.futures.as_completed(futures, timeout=90):
             r = fut.result()
@@ -358,10 +332,11 @@ def fmp_insider_buys(limit: int = 500) -> List[Dict]:
         log.warning("[INSIDER] No key-insider purchases found in watchlist")
         return []
 
-    market_caps = fmp_profile_batch([r["sym"] for r in raw_results])
+    # Batch market caps in one call instead of N serial profile calls
+    batch_caps = client.get_batch_quotes([r["sym"] for r in raw_results])
     results = []
     for r in raw_results:
-        mcap = market_caps.get(r["sym"], 0.0)
+        mcap = float(batch_caps.get(r["sym"], {}).get("marketCap", 0) or 0)
         key_val = r["key_value_usd"]
         norm_pct = round((key_val / mcap * 100) if mcap > 1e6 else 0.0, 6)
         if norm_pct < _MIN_NORMALIZED_SIGNAL * 100:
@@ -371,42 +346,31 @@ def fmp_insider_buys(limit: int = 500) -> List[Dict]:
         results.append(r)
 
     results.sort(key=lambda x: x["normalized_pct_mcap"], reverse=True)
-    log.info("[INSIDER] %d symbols with key-insider buys (yf)", len(results))
+    log.info("[INSIDER] %d symbols with key-insider buys (FMP stable/)", len(results))
     return results[:limit]
 
 
 # ── Profile batch ──────────────────────────────────────────────────────────────
 
 def fmp_profile_batch(symbols: List[str]) -> Dict[str, float]:
-    """Fetch market caps via FMP stable/profile (one call per symbol, parallel).
+    """Fetch market caps via FMP stable/batch-quote (one call for all symbols).
 
-    Granger (2003 Nobel) — accurate denominators for normalised signals.
-    FMP v3/profile retired Aug 2025; migrated to stable/profile.
+    Uses FMPClient.get_batch_quotes() which confirmed PASS in Phase-0 smoke-test.
+    Replaces N serial stable/profile calls with a single bulk call.
 
     Returns:
         {sym: market_cap_float}  — 0.0 for missing symbols (safe for division).
     """
-    key = _fmp_key()
-    if not key or not symbols:
+    if not symbols:
         return {}
-
-    caps: Dict[str, float] = {}
-
-    def _fetch_one(sym: str) -> None:
-        data = disc_get_json(
-            f"{_FMP_STABLE}/profile",
-            params={"symbol": sym, "apikey": key},
-        )
-        if isinstance(data, list) and data:
-            try:
-                caps[sym] = float(data[0].get("mktCap", 0) or 0)
-            except Exception:
-                pass
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(_fetch_one, symbols, timeout=60))
-
-    return caps
+    client = _FMPClient()
+    if not client._api_key:
+        return {}
+    batch = client.get_batch_quotes(symbols)
+    return {
+        sym: float(row.get("marketCap", 0) or 0)
+        for sym, row in batch.items()
+    }
 
 
 def fmp_profile(sym: str) -> Optional[Dict]:
@@ -433,11 +397,12 @@ def fmp_institutional_accumulation(
     candidate_symbols: List[str],
     limit: int = 50,
 ) -> List[Dict]:
-    """Tirole (2014 Nobel) — institutional accumulation via yfinance 13F data.
+    """Institutional accumulation via yfinance 13F data.
 
-    FMP v3/institutional-holder retired Aug 2025. This implementation uses
-    yfinance institutional_holders (quarterly 13F-sourced) and computes the
-    same accumulation_score schema from pctChange fields.
+    FMP stable/institutional-ownership/symbol-positions-summary returned HTTP 400
+    in the Phase-0 smoke-test (2026-05-30) — not available on current plan.
+    yfinance institutional_holders (quarterly 13F-sourced) is the documented
+    fallback until FMP restores the 13F endpoint. Keep return schema unchanged.
 
     Args:
         candidate_symbols: Pool of tickers to check.

@@ -1,14 +1,21 @@
 """regime_trader.scoring.market_config — per-market factor availability and weight renormalization.
 
-Diagnostic-driven configuration (Fix #5):
+Diagnostic-driven configuration (updated 2026-05-30 Phase-0 smoke-test):
 
-FMP plan covers US symbols only. All EU/Asia FMP endpoints return 403 Forbidden.
-yfinance provides full price+volume for all major EU/Asia symbols universally.
+Phase-0 smoke-test results (FMP Ultimate, stable/ routes):
+  PASS:  EU:quote, EU:ratios-ttm, ASIA:quote, ASIA:ratios-ttm
+  EMPTY: EU/ASIA news/stock (returns 0 articles for non-US tickers)
+  N/A:   insider/congress — no EU MAR / EDINET / STOCK-Act equivalent via FMP
+
+The earlier claim "all EU/Asia FMP endpoints return 403" was based on retired
+/api/v3/ routes. Under stable/, quote and ratios work for EU/Asia, but the
+factor-availability matrix is unchanged because the EMPTY news routes and the
+structurally-absent insider/congress sources are what drive factor counts.
 
 Therefore:
   US     — 7 factors (full WEIGHTS)
-  EUROPE — 2 factors: momentum_long + volume_attention (yfinance only)
-  ASIA   — 2 factors: momentum_long + volume_attention (yfinance only)
+  EUROPE — 2 factors: momentum_long + volume_attention (yfinance price/volume)
+  ASIA   — 2 factors: momentum_long + volume_attention (yfinance price/volume)
 
 Structurally absent factors (no data source available) are excluded from
 renormalize_weights_for_market so their weight is redistributed proportionally
@@ -51,13 +58,16 @@ PIPELINE_MARKET_MAP: Dict[str, Market] = {
 # "Potentially" = a data source exists; absence for a specific ticker (insufficient
 # history, recent IPO) is still possible and handled downstream via None vs 0.0.
 #
-# EUROPE/ASIA rationale (Fix #5 diagnostic 2026-05-23):
-#   FMP Ultimate plan covers US symbols only (403 for all EU/Asia endpoints).
+# EUROPE/ASIA rationale (updated 2026-05-30 Phase-0 smoke-test):
+#   FMP stable/ quote + ratios-ttm: PASS for EU/Asia — usable for market cap,
+#     P/E, quality factors in future phases.
+#   FMP stable/ news/stock: EMPTY for EU/Asia (0 articles for SAP.DE, 7203.T).
 #   Congress disclosures: no STOCK Act equivalent outside the US.
-#   Insider disclosures (EU MAR, Japan EDINET): no accessible API without
-#     institutional-grade data subscription (Refinitiv, Bloomberg).
+#   Insider disclosures: EU MAR, Japan EDINET — no accessible API without
+#     institutional-grade subscription (Refinitiv, Bloomberg).
 #   Momentum + volume: yfinance provides universal coverage for all major
 #     exchange-listed EU/Asia symbols.
+#   Factor matrix unchanged — only documentation corrected.
 MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
     Market.US: frozenset({
         "insider_conviction_score",
@@ -70,18 +80,18 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
     }),
     Market.EUROPE: frozenset({
         # congress_score: STRUCTURALLY ABSENT — no STOCK Act equivalent in EU
-        # insider_conviction_score: STRUCTURALLY ABSENT — FMP 403, no EU MAR API
+        # insider_conviction_score: STRUCTURALLY ABSENT — no EU MAR API integrated
         # insider_breadth_score: STRUCTURALLY ABSENT — same
-        # news_sentiment_score: STRUCTURALLY ABSENT — FMP 403, yfinance news unreliable
+        # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for EU tickers
         # news_buzz_score: STRUCTURALLY ABSENT — same
         "momentum_long_score",    # yfinance universal ✅
         "volume_attention_score", # yfinance universal ✅
     }),
     Market.ASIA: frozenset({
         # congress_score: STRUCTURALLY ABSENT
-        # insider_conviction_score: STRUCTURALLY ABSENT — FMP 403, EDINET not integrated
+        # insider_conviction_score: STRUCTURALLY ABSENT — EDINET not integrated
         # insider_breadth_score: STRUCTURALLY ABSENT — same
-        # news_sentiment_score: STRUCTURALLY ABSENT — FMP 403, English coverage thin
+        # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for Asia tickers
         # news_buzz_score: STRUCTURALLY ABSENT — same
         "momentum_long_score",    # yfinance universal ✅
         "volume_attention_score", # yfinance universal ✅
