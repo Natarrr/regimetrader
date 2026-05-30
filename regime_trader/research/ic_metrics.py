@@ -2,18 +2,24 @@
 
 Implements:
   - Spearman rank IC with bootstrap 95% CI and p-value
-  - Purged k-fold IC per López de Prado (2018) AFML ch. 7
-    (embargo_days prevents leakage from overlapping forward-return windows)
+  - De-overlapped IC time series: retains only snapshots whose forward-return
+    windows are disjoint (spacing >= embargo_days), so the t-test and bootstrap
+    see independent observations rather than serially-dependent overlapping ones.
+
+Note: this is an embargo / de-overlapping procedure in the spirit of López de
+Prado's purged CV, NOT train/test purging — IC is a per-cross-section statistic,
+so there is no fitted model whose training labels need purging. The leakage we
+remove is the serial dependence of overlapping label windows.
 
 References:
   Grinold & Kahn (2000) Active Portfolio Management ch. 6 — IC and IR definitions
-  López de Prado (2018) AFML ch. 7 — purged k-fold CV for financial data
+  López de Prado (2018) AFML ch. 7 — overlapping labels inflate effective sample size
 """
 from __future__ import annotations
 
 import logging
 import math
-from datetime import date, timedelta
+from datetime import date
 from typing import NamedTuple, Sequence
 
 import numpy as np
@@ -70,6 +76,31 @@ def _bootstrap_ci(ic_series: np.ndarray, n_samples: int = _BOOTSTRAP_SAMPLES) ->
     return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
 
 
+def _select_non_overlapping(dates: list[date], embargo_days: int) -> list[int]:
+    """Return indices of a non-overlapping subset of `dates` (assumed sorted).
+
+    López de Prado (2018) AFML ch. 7: when forward-return windows overlap, the
+    per-snapshot IC observations are serially dependent and must not be treated
+    as independent draws. Greedily keep the earliest snapshot, then skip every
+    later one whose date falls within `embargo_days` of the last kept snapshot —
+    i.e. enforce a minimum spacing equal to the forward-return horizon so each
+    retained observation has a disjoint label window.
+
+    embargo_days <= 0 disables de-overlapping (every index retained), preserving
+    backward-compatible behaviour for callers that pass non-overlapping data.
+    """
+    if embargo_days <= 0 or not dates:
+        return list(range(len(dates)))
+
+    kept: list[int] = []
+    last_kept: date | None = None
+    for i, d in enumerate(dates):
+        if last_kept is None or (d - last_kept).days >= embargo_days:
+            kept.append(i)
+            last_kept = d
+    return kept
+
+
 def purged_kfold_ic(
     snapshots: list[tuple[date, list[dict]]],
     factor_name: str,
@@ -78,21 +109,31 @@ def purged_kfold_ic(
     embargo_days: int = 5,
     schema_warning: str = "",
 ) -> ICResult:
-    """Compute purged k-fold IC for factor_name across all snapshots.
+    """Compute IC across non-overlapping cross-sections for factor_name.
 
-    Purging: test-fold snapshots within embargo_days of a training fold boundary
-    are excluded to prevent leakage from overlapping 21-day forward-return windows.
+    Overlapping forward-return windows make per-snapshot IC observations serially
+    dependent; counting them all inflates the effective sample size and produces
+    spuriously small p-values / narrow CIs. To prevent this leakage we first
+    select a non-overlapping subset of snapshots spaced >= embargo_days apart
+    (López de Prado 2018 AFML ch. 7), then compute the cross-sectional Spearman
+    IC on each retained snapshot.
+
+    Note: this is a de-overlapping (embargo) procedure, not train/test purging —
+    IC is a per-cross-section statistic, so there is no fitted model to purge.
+    Set embargo_days = horizon_days so retained windows are disjoint.
 
     Args:
         snapshots: Ordered list of (date, rows) from load_historical_snapshots().
         factor_name: Key in rows dict to use as factor score.
         forward_return_map: {date: {ticker: forward_return}} from fetch_forward_returns.
-        n_folds: Number of purged k-folds.
-        embargo_days: Days of embargo around fold boundaries.
+        n_folds: Retained for API compatibility / sufficiency check (>= n_folds
+                 non-overlapping snapshots required for a stable estimate).
+        embargo_days: Minimum spacing (days) between retained snapshots. Should
+                      equal the forward-return horizon. 0 disables de-overlapping.
         schema_warning: Propagated to ICResult.schema_warning.
 
     Returns:
-        ICResult with mean/std/IR/p-value/CI across all qualifying cross-sections.
+        ICResult with mean/std/IR/p-value/CI across non-overlapping cross-sections.
     """
     dates = [d for d, _ in snapshots]
     n = len(dates)
@@ -103,47 +144,46 @@ def purged_kfold_ic(
             f"Cannot construct {n_folds} folds."
         )
 
-    fold_size = n // n_folds
+    # De-overlap: keep only snapshots whose label windows are disjoint so the
+    # downstream t-test / bootstrap see independent observations.
+    keep_indices = _select_non_overlapping(dates, embargo_days)
+    if embargo_days > 0 and len(keep_indices) < len(dates):
+        logger.info(
+            "purged_kfold_ic[%s]: de-overlapped %d→%d snapshots "
+            "(embargo=%dd) to remove forward-window leakage",
+            factor_name, len(dates), len(keep_indices), embargo_days,
+        )
+
     ic_values: list[float] = []
     ticker_counts: list[int] = []
 
-    for fold_idx in range(n_folds):
-        test_start = fold_idx * fold_size
-        test_end = test_start + fold_size if fold_idx < n_folds - 1 else n
+    for snap_idx in keep_indices:
+        snap_date, rows = snapshots[snap_idx]
 
-        # Embargo: exclude snapshots within embargo_days of fold boundaries
-        embargo_before = dates[test_start] - timedelta(days=embargo_days)
-        embargo_after  = dates[test_end - 1] + timedelta(days=embargo_days)
+        fwd = forward_return_map.get(snap_date, {})
+        if not fwd:
+            logger.debug("purged_kfold_ic: no forward returns for %s — skip", snap_date)
+            continue
 
-        for snap_idx in range(test_start, test_end):
-            snap_date, rows = snapshots[snap_idx]
-            if snap_date < embargo_before or snap_date > embargo_after:
-                continue  # outside embargo (shouldn't happen within test fold, but guard)
-
-            fwd = forward_return_map.get(snap_date, {})
-            if not fwd:
-                logger.debug("purged_kfold_ic: no forward returns for %s — skip", snap_date)
+        scores, returns = [], []
+        for row in rows:
+            ticker = row.get("ticker", "")
+            score = row.get(factor_name)
+            fwd_ret = fwd.get(ticker)
+            if score is None or fwd_ret is None:
+                continue
+            try:
+                scores.append(float(score))
+                returns.append(float(fwd_ret))
+            except (TypeError, ValueError):
                 continue
 
-            scores, returns = [], []
-            for row in rows:
-                ticker = row.get("ticker", "")
-                score = row.get(factor_name)
-                fwd_ret = fwd.get(ticker)
-                if score is None or fwd_ret is None:
-                    continue
-                try:
-                    scores.append(float(score))
-                    returns.append(float(fwd_ret))
-                except (TypeError, ValueError):
-                    continue
+        ic, _ = compute_ic(scores, returns)
+        if math.isnan(ic):
+            continue
 
-            ic, _ = compute_ic(scores, returns)
-            if math.isnan(ic):
-                continue
-
-            ic_values.append(ic)
-            ticker_counts.append(len(scores))
+        ic_values.append(ic)
+        ticker_counts.append(len(scores))
 
     if not ic_values:
         return ICResult(

@@ -52,7 +52,7 @@ def run_ic_backtest(
     score_variant: Literal["raw", "neutralized", "both"] = "raw",
     horizon_days: int = 21,
     n_folds: int = 5,
-    embargo_days: int = 5,
+    embargo_days: int | None = None,
     min_snapshots: int = 60,
     cache_root: Path | None = None,
 ) -> Path:
@@ -63,8 +63,10 @@ def run_ic_backtest(
         output_dir: Directory where report (and optional PNG) is written.
         score_variant: "raw" uses *_score fields; "neutralized" uses *_score_neutral.
         horizon_days: Forward return horizon in calendar days (~21 = 1 month).
-        n_folds: Purged k-fold count.
-        embargo_days: Embargo window in days around fold boundaries.
+        n_folds: Minimum non-overlapping snapshots required for a stable estimate.
+        embargo_days: Minimum spacing between retained snapshots. Defaults to
+            horizon_days so retained forward-return windows are disjoint (no
+            overlap leakage). Override only to relax/tighten the embargo.
         min_snapshots: Abort if fewer qualifying snapshots.
         cache_root: Project root for forward-return cache.
 
@@ -78,6 +80,11 @@ def run_ic_backtest(
     from .historical_loader import load_historical_snapshots, detect_schema_version
     from .forward_returns import fetch_forward_returns
     from .ic_metrics import purged_kfold_ic, ICResult
+
+    # Embargo defaults to the forward-return horizon so retained snapshots have
+    # disjoint label windows (López de Prado AFML ch. 7 — no overlap leakage).
+    if embargo_days is None:
+        embargo_days = horizon_days
 
     historical_dir = log_dir / "historical"
 
@@ -282,8 +289,9 @@ def _render_report(
         "",
         "- **IC measure:** Spearman rank correlation (Grinold & Kahn 2000, ch. 6)",
         f"- **Forward return horizon:** {horizon_days} calendar days (~1 month)",
-        f"- **Validation:** Purged {n_folds}-fold CV, embargo={embargo_days} days",
-        "  (López de Prado 2018 AFML ch. 7 — prevents leakage from overlapping return windows)",
+        f"- **Leakage control:** snapshots de-overlapped to >= {embargo_days}-day spacing",
+        "  (López de Prado 2018 AFML ch. 7 — disjoint label windows so IC observations",
+        "  are independent; overlapping windows would inflate significance)",
         f"- **Score variant:** `{score_variant}`",
         "- **Bootstrap CI:** 1 000 samples, 95% two-sided",
         "",
