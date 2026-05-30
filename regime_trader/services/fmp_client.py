@@ -66,6 +66,25 @@ _TTL: Dict[str, int] = {
 }
 
 
+def fmp_prices_to_arrays(
+    rows: List[Dict],
+) -> "tuple[list[float], list[float], list[str]]":
+    """Convert FMP historical-price-eod/full rows → (close_prices, volumes, dates).
+
+    FMP returns newest-first; this reverses to oldest-first (matches yfinance df order).
+    All three lists are aligned by index.
+
+    Returns empty lists if rows is empty.
+    """
+    if not rows:
+        return [], [], []
+    ordered = list(reversed(rows))   # oldest-first
+    closes  = [float(r.get("close",  0) or 0) for r in ordered]
+    volumes = [float(r.get("volume", 0) or 0) for r in ordered]
+    dates   = [str(r.get("date", ""))          for r in ordered]
+    return closes, volumes, dates
+
+
 class FMPEndpointError(RuntimeError):
     """Raised on 401/403/404 — a structural endpoint failure, not empty data.
 
@@ -196,7 +215,43 @@ class FMPClient:
             log.warning("FMP GET %s JSON decode failed: %s", path, exc)
             return None
 
+    # ── Historical prices (replaces all yfinance.download calls) ──────────────
+
+    def get_historical_prices(self, ticker: str, limit: int = 280) -> List[Dict]:
+        """Daily OHLCV from stable/historical-price-eod/full.
+
+        Returns list of dicts sorted newest-first:
+            [{symbol, date, open, high, low, close, volume, change, changePercent, vwap}, ...]
+
+        Works for US, EU (SAP.DE), Asia (7203.T), indices (^VIX, ^TNX),
+        ETFs (SPY, GLD), and futures (CL=F, GC=F) — confirmed in Phase-0 tests.
+
+        Args:
+            limit: Number of trading days to return. 280 ≈ 13 months (12-1m window).
+        """
+        if not self._api_key:
+            return []
+        cached = self._cache_read("quote", f"hist_{ticker}_{limit}")
+        if cached is not None:
+            return cached
+        data = self._get("historical-price-eod/full",
+                         {"symbol": ticker, "limit": limit},
+                         bucket="quote") or []
+        result = data if isinstance(data, list) else []
+        if result:
+            self._cache_write("quote", f"hist_{ticker}_{limit}", result)
+        return result
+
     # ── Congress ───────────────────────────────────────────────────────────────
+
+    def get_quote_full(self, ticker: str) -> Dict:
+        """Extended quote with 52-week high/low, 50/200-day MA, marketCap.
+
+        Fields: price, yearHigh, yearLow, priceAvg50, priceAvg200, marketCap,
+                volume, previousClose. Replaces yf.Ticker(t).info for price-
+                based filters (cannibal filter, stock picker, macro trend).
+        """
+        return self.get_quote(ticker)
 
     def get_congress_trades(self, ticker: str, lookback_days: int = 180) -> Dict:
         """Congressional trading data from public S3 Stock Watcher feeds.

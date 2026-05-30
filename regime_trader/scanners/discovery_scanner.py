@@ -204,76 +204,66 @@ def _fmp_key() -> str:
 # ── Step 1: FMP screener ───────────────────────────────────────────────────────
 
 def fmp_screener(limit: int = 200) -> List[Dict]:
-    """Fama (2013 Nobel) — screen liquid US equities via yfinance momentum/volume.
+    """Screen liquid US equities via FMP stable/ historical prices and batch-quote.
 
-    FMP v3/v4 screener endpoints were retired Aug 2025. This implementation
-    downloads 30-day OHLCV for the curated _YF_WATCHLIST and ranks by volume
-    spike + 5-day price momentum, preserving the same return schema.
-
-    Args:
-        limit: Max candidates to return.
+    Uses get_historical_prices (30d) for volume-spike + 5d momentum,
+    and get_batch_quotes for current price and market cap filter.
+    Fully on FMP Ultimate — no yfinance.
 
     Returns:
         List of dicts: {sym, market_cap, price, volume, volume_spike,
                         price_change_pct, avg_volume, sector}
     """
-    try:
-        import yfinance as yf
-        import pandas as pd
-    except ImportError:
-        log.warning("[SCREENER] yfinance not installed — screener skipped")
+    client = _FMPClient()
+    if not client._api_key:
+        log.warning("[SCREENER] FMP_API_KEY not set — screener skipped")
         return []
 
-    syms = _YF_WATCHLIST
-    try:
-        raw = yf.download(
-            syms, period="30d", interval="1d",
-            progress=False, auto_adjust=True, threads=True,
-        )
-    except Exception as exc:
-        log.warning("[SCREENER] yfinance batch download failed: %s", exc)
-        return []
+    from regime_trader.services.fmp_client import fmp_prices_to_arrays  # noqa: PLC0415
 
-    results = []
-    for sym in syms:
+    # Batch quotes for current price + market cap in one call
+    quotes = client.get_batch_quotes(_YF_WATCHLIST)
+
+    def _fetch_sym(sym: str) -> Optional[Dict]:
         try:
-            if isinstance(raw.columns, pd.MultiIndex):
-                df = raw.xs(sym, level=1, axis=1).dropna(how="all")
-            else:
-                df = raw.dropna(how="all")
+            rows = client.get_historical_prices(sym, limit=30)
+            closes, volumes, _ = fmp_prices_to_arrays(rows)
+            if len(closes) < 6:
+                return None
 
-            if df.empty or len(df) < 6:
-                continue
-
-            close = df["Close"].squeeze().astype(float)
-            volume = df["Volume"].squeeze().astype(float)
-
-            price = float(close.iloc[-1])
-            today_vol = float(volume.iloc[-1])
-            avg_vol = float(volume.iloc[:-1].mean()) if len(volume) > 1 else today_vol
-            volume_spike = round(today_vol / max(avg_vol, 1.0), 3)
-            price_change_pct = round(
-                (price / float(close.iloc[-6]) - 1) * 100, 4
-            ) if len(close) >= 6 else 0.0
+            price     = closes[-1]
+            today_vol = volumes[-1]
+            avg_vol   = sum(volumes[:-1]) / max(len(volumes) - 1, 1)
+            vol_spike = round(today_vol / max(avg_vol, 1.0), 3)
+            pct_chg   = round((price / closes[-6] - 1) * 100, 4) if closes[-6] else 0.0
 
             if price < 1.0 or today_vol * price < _SCREENER_MIN_VOLUME:
-                continue
+                return None
 
-            results.append({
-                "sym": sym,
-                "market_cap": 0.0,
-                "price": round(price, 4),
-                "volume": round(today_vol, 0),
-                "avg_volume": round(avg_vol, 0),
-                "volume_spike": volume_spike,
-                "price_change_pct": price_change_pct,
-                "sector": "",
-            })
+            q = quotes.get(sym, {})
+            return {
+                "sym":              sym,
+                "market_cap":       float(q.get("marketCap", 0) or 0),
+                "price":            round(price, 4),
+                "volume":           round(today_vol, 0),
+                "avg_volume":       round(avg_vol, 0),
+                "volume_spike":     vol_spike,
+                "price_change_pct": pct_chg,
+                "sector":           "",
+            }
         except Exception:
-            continue
+            return None
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(_fetch_sym, sym): sym for sym in _YF_WATCHLIST}
+        for fut in concurrent.futures.as_completed(futures, timeout=90):
+            r = fut.result()
+            if r is not None:
+                results.append(r)
 
     results.sort(key=lambda x: x["volume_spike"] + abs(x["price_change_pct"]) / 10, reverse=True)
-    log.info("[SCREENER] %d candidates from yfinance watchlist", len(results))
+    log.info("[SCREENER] %d candidates from FMP watchlist", len(results))
     return results[:limit]
 
 
@@ -505,38 +495,27 @@ def enrich_with_momentum(
 
     Args:
         candidates:  List of dicts with a 'sym' key.
-        max_workers: Thread-pool bound (default 8, respects yfinance rate limit).
+        max_workers: Thread-pool concurrency.
 
     Returns:
         Same list with 'volume_spike' and 'price_change_pct' added in-place.
     """
-    try:
-        import yfinance as yf
-    except ImportError:
-        log.warning("[MOMENTUM] yfinance not installed — momentum enrichment skipped")
-        return candidates
+    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays  # noqa: PLC0415
 
-    import pandas as pd
-
+    client = _FC()
     syms = [str(r.get("sym", "")) for r in candidates if r.get("sym")]
     if not syms:
         return candidates
 
     def _fetch(sym: str) -> Tuple[str, float, float]:
         try:
-            df = yf.download(sym, period="25d", interval="1d",
-                             progress=False, auto_adjust=True)
-            if df.empty or len(df) < 6:
+            rows = client.get_historical_prices(sym, limit=30)
+            closes, volumes, _ = fmp_prices_to_arrays(rows)
+            if len(closes) < 6:
                 return sym, 1.0, 0.0
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = [c[0] for c in df.columns]
-            close = df["Close"].squeeze().astype(float)
-            volume = df["Volume"].squeeze().astype(float)
-            avg_vol = float(volume.iloc[:-1].mean()) if len(volume) > 1 else 1.0
-            spike = round(float(volume.iloc[-1]) / max(avg_vol, 1), 2)
-            price_chg = round(
-                (float(close.iloc[-1]) / float(close.iloc[-6]) - 1) * 100, 2
-            ) if len(close) >= 6 else 0.0
+            avg_vol   = sum(volumes[:-1]) / max(len(volumes) - 1, 1)
+            spike     = round(volumes[-1] / max(avg_vol, 1), 2)
+            price_chg = round((closes[-1] / closes[-6] - 1) * 100, 2) if closes[-6] else 0.0
             return sym, spike, price_chg
         except Exception:
             return sym, 1.0, 0.0

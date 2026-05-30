@@ -14,8 +14,8 @@ structurally-absent insider/congress sources are what drive factor counts.
 
 Therefore:
   US     — 7 factors (full WEIGHTS)
-  EUROPE — 2 factors: momentum_long + volume_attention (yfinance price/volume)
-  ASIA   — 2 factors: momentum_long + volume_attention (yfinance price/volume)
+  EUROPE — 2 factors: momentum_long + volume_attention (FMP historical prices)
+  ASIA   — 2 factors: momentum_long + volume_attention (FMP historical prices)
 
 Structurally absent factors (no data source available) are excluded from
 renormalize_weights_for_market so their weight is redistributed proportionally
@@ -84,8 +84,8 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
         # insider_breadth_score: STRUCTURALLY ABSENT — same
         # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for EU tickers
         # news_buzz_score: STRUCTURALLY ABSENT — same
-        "momentum_long_score",    # yfinance universal ✅
-        "volume_attention_score", # yfinance universal ✅
+        "momentum_long_score",    # FMP historical-price-eod/full ✅
+        "volume_attention_score", # FMP historical-price-eod/full ✅
     }),
     Market.ASIA: frozenset({
         # congress_score: STRUCTURALLY ABSENT
@@ -93,8 +93,8 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
         # insider_breadth_score: STRUCTURALLY ABSENT — same
         # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for Asia tickers
         # news_buzz_score: STRUCTURALLY ABSENT — same
-        "momentum_long_score",    # yfinance universal ✅
-        "volume_attention_score", # yfinance universal ✅
+        "momentum_long_score",    # FMP historical-price-eod/full ✅
+        "volume_attention_score", # FMP historical-price-eod/full ✅
     }),
 }
 

@@ -13,7 +13,6 @@ import argparse
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,106 +34,91 @@ from regime_trader.services.fmp_client import FMPClient as _FMPClient  # noqa: E
 def get_top_cyclical(tickers: list[str]) -> list[dict]:
     """Return up to TOP_N tickers with best win-rate in the current calendar month.
 
-    Data source: yfinance batch download, 10 years of monthly OHLCV.
-    Returns [] on any exception.
+    Data source: FMP stable/historical-price-eod/full (10 years daily OHLCV).
+    Monthly returns computed from first/last close of each month's trading days.
+    Replaces yfinance batch monthly download.
     """
-    try:
-        import pandas as pd
-        import yfinance as yf
+    from regime_trader.services.fmp_client import FMPClient, fmp_prices_to_arrays  # noqa: PLC0415
 
-        current_month = datetime.now(timezone.utc).month
+    client = FMPClient()
+    current_month = datetime.now(timezone.utc).month
+    # 10 years ≈ 2520 trading days
+    results: list[dict] = []
 
-        raw = yf.download(
-            tickers,
-            period="10y",
-            interval="1mo",
-            auto_adjust=True,
-            group_by="ticker",
-            progress=False,
-        )
+    for ticker in tickers:
+        try:
+            rows = client.get_historical_prices(ticker, limit=2520)
+            closes, _, dates = fmp_prices_to_arrays(rows)
+            if not closes or len(closes) < 20:
+                continue
 
-        # Normalise index to DatetimeIndex (batch download can produce MultiIndex)
-        if not isinstance(raw.index, pd.DatetimeIndex):
-            raw.index = pd.to_datetime(raw.index.get_level_values(-1))
+            # Group by year-month → collect first and last close of each month
+            monthly: dict[str, list[float]] = {}
+            for i, d in enumerate(dates):
+                ym = d[:7]  # "YYYY-MM"
+                monthly.setdefault(ym, []).append(closes[i])
 
-        # Detect column structure once: yfinance ≥0.2.31 uses (ticker, col),
-        # older versions use (col, ticker).  Single-ticker downloads have flat cols.
-        col_structure: str
-        if isinstance(raw.columns, pd.MultiIndex):
-            top_level = raw.columns.get_level_values(0).tolist()
-            if tickers and tickers[0] in top_level:
-                col_structure = "ticker_first"   # (ticker, col) — yfinance ≥0.2.31
-            else:
-                col_structure = "col_first"      # (col, ticker) — older yfinance
-        else:
-            col_structure = "flat"               # single-ticker, flat columns
+            # Filter to current calendar month only
+            month_str = f"-{current_month:02d}"
+            month_closes = {ym: v for ym, v in monthly.items() if ym.endswith(month_str)}
+            if len(month_closes) < MIN_MONTHLY_OBSERVATIONS:
+                continue
 
-        results: list[dict] = []
-        for ticker in tickers:
-            try:
-                # Extract per-ticker slice; column key depends on download shape
-                try:
-                    if col_structure == "ticker_first":
-                        df = raw[ticker][["Open", "Close"]].copy()
-                    elif col_structure == "col_first":
-                        df = raw[[("Open", ticker), ("Close", ticker)]].copy()
-                        df.columns = ["Open", "Close"]
-                    else:
-                        df = raw[["Open", "Close"]].copy()
-                except KeyError:
-                    log.warning("cyclical: column slice missing for %s — skipping", ticker)
+            wins = 0
+            returns: list[float] = []
+            for v in month_closes.values():
+                if len(v) < 2:
                     continue
+                first, last = v[0], v[-1]
+                ret = (last - first) / first if first != 0 else 0.0
+                returns.append(ret)
+                if last > first:
+                    wins += 1
 
-                filtered = df[df.index.month == current_month].dropna(
-                    subset=["Open", "Close"]
-                )
-                if len(filtered) < MIN_MONTHLY_OBSERVATIONS:
-                    continue
+            if not returns:
+                continue
 
-                wins = (filtered["Close"] > filtered["Open"]).sum()
-                win_rate = float(wins / len(filtered))
-                median_return = float(
-                    ((filtered["Close"] - filtered["Open"]) / filtered["Open"]).median()
-                )
-                results.append(
-                    {
-                        "ticker":        ticker,
-                        "win_rate":      round(win_rate, 4),
-                        "median_return": round(median_return, 4),
-                        "years":         len(filtered),
-                    }
-                )
-            except Exception as exc:
-                log.warning("cyclical: skipping %s — %s", ticker, exc)
+            returns.sort()
+            mid = len(returns) // 2
+            median_ret = returns[mid] if len(returns) % 2 else (returns[mid-1] + returns[mid]) / 2
 
-        results.sort(key=lambda r: (-r["win_rate"], -r["median_return"]))
-        return results[:TOP_N]
+            results.append({
+                "ticker":        ticker,
+                "win_rate":      round(wins / len(returns), 4),
+                "median_return": round(median_ret, 4),
+                "years":         len(returns),
+            })
+        except Exception as exc:
+            log.warning("cyclical: skipping %s — %s", ticker, exc)
 
-    except Exception as exc:
-        log.warning("get_top_cyclical failed entirely: %s", exc)
-        return []
+    results.sort(key=lambda r: (-r["win_rate"], -r["median_return"]))
+    return results[:TOP_N]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Share cannibals
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _fetch_yf_info(ticker: str, max_retries: int = 3) -> dict:
-    """Fetch yfinance .info with up to max_retries attempts."""
-    import yfinance as yf
+def _fetch_fmp_info(ticker: str, fmp_key: str) -> dict:
+    """Fetch price fundamentals from FMP stable/quote + stable/ratios-ttm.
 
-    last_exc: Exception = RuntimeError("no attempts")
-    for attempt in range(max_retries):
-        try:
-            info = yf.Ticker(ticker).info
-            if not isinstance(info, dict):
-                raise AttributeError(f"yf.Ticker({ticker!r}).info returned non-dict")
-            return info
-        except Exception as exc:
-            last_exc = exc
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)   # 1s, 2s
-    raise last_exc
+    Returns a dict matching the fields used by get_top_cannibals:
+        trailingPE     ← peRatioTTM from ratios-ttm
+        currentPrice   ← price from quote
+        fiftyTwoWeekLow ← yearLow from quote
+    """
+    from regime_trader.services.fmp_client import FMPClient  # noqa: PLC0415
+
+    client = FMPClient(api_key=fmp_key)
+    quote   = client.get_quote(ticker)
+    ratios  = client.get_ratios_ttm(ticker)
+
+    pe = ratios.get("peRatioTTM") or ratios.get("priceEarningsRatioTTM")
+    return {
+        "trailingPE":       float(pe) if pe is not None else None,
+        "currentPrice":     float(quote.get("price") or 0),
+        "fiftyTwoWeekLow":  float(quote.get("yearLow") or 0),
+    }
 
 
 def get_top_cannibals(
@@ -145,9 +129,8 @@ def get_top_cannibals(
     """Return up to TOP_N tickers ranked by trailing 4-quarter buyback yield.
 
     Filters: trailingPE < PE_MAX and currentPrice < PRICE_VS_52W_LOW_MAX * fiftyTwoWeekLow.
-    Data sources: yfinance .info (P/E, 52w-low), FMPClient.get_cash_flow_statements()
-    (repurchases — PASS in Phase-0 smoke-test), market_caps dict.
-    Returns [] when fmp_key is absent or on any unrecoverable exception.
+    Data sources: FMPClient (quote for P/E + 52w-low, cash-flow for buybacks).
+    Fully on FMP Ultimate — no yfinance.
     """
     if not fmp_key:
         log.warning("FMP_API_KEY absent — skipping cannibal scan")
@@ -159,7 +142,7 @@ def get_top_cannibals(
 
         for ticker in tickers:
             try:
-                info = _fetch_yf_info(ticker)
+                info = _fetch_fmp_info(ticker, fmp_key)
             except Exception as exc:
                 log.warning(
                     "cannibal: yf.info failed for %s — %s", ticker, type(exc).__name__,

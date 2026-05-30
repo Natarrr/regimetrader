@@ -200,39 +200,43 @@ class TestScoreMomentumEnhanced:
             assert 0.0 <= score <= 1.0, f"Out of bounds: t={t}, s={s}, v={v}"
 
 
+def _fmp_rows(closes: list, volumes: list) -> list:
+    """Build FMP historical-price-eod/full rows (newest-first)."""
+    rows = []
+    for i, (c, v) in enumerate(zip(closes, volumes)):
+        rows.append({"date": f"2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}",
+                     "close": c, "volume": v})
+    return list(reversed(rows))   # newest-first
+
+
+_PRICES = "regime_trader.services.fmp_client.FMPClient.get_historical_prices"
+
+
 class TestFetchPriceDataEnhanced:
     def test_returns_spy_return_and_volume_spike(self):
         from scripts.run_pipeline import fetch_price_data
-        import pandas as pd
-        import numpy as np
 
-        # Need ≥252 bars so Jegadeesh-Titman 12-1m is computable (not None).
-        # Volume: spike in last 5 bars vs 90-bar baseline.
+        # ≥252 bars so 12-1m is computable; volume spike in last 5 bars.
         n = 260
-        dates        = pd.date_range("2024-01-01", periods=n, freq="B")
-        ticker_close = pd.Series(np.linspace(100, 110, n), index=dates)
-        ticker_vol   = pd.Series([1_000_000] * (n - 5) + [3_000_000] * 5, index=dates)
+        closes  = [100.0 + (10.0 * i / (n - 1)) for i in range(n)]
+        volumes = [1_000_000.0] * (n - 5) + [3_000_000.0] * 5
+        rows = _fmp_rows(closes, volumes)
 
-        fake_ticker_df = pd.DataFrame({
-            "Close":  ticker_close,
-            "Volume": ticker_vol,
-        })
+        spy_return_12m = 0.01
 
-        spy_return_12m = 0.01  # simulate 1% SPY 12-1m baseline passed in from caller
-
-        with patch("yfinance.download", return_value=fake_ticker_df):
+        with patch(_PRICES, return_value=rows):
             result = fetch_price_data("AAPL", spy_return=spy_return_12m)
 
         assert "return_12_1m" in result
         assert "spy_return_12_1m" in result
         assert "volume_spike" in result
         assert result["spy_return_12_1m"] == pytest.approx(spy_return_12m)
-        assert result["volume_spike"] > 1.0   # recent vol higher than baseline
+        assert result["volume_spike"] > 1.0
 
     def test_returns_none_on_failure(self):
         """Exception → default dict with return_12_1m=None (dead signal)."""
         from scripts.run_pipeline import fetch_price_data
-        with patch("yfinance.download", side_effect=Exception("network")):
+        with patch(_PRICES, side_effect=Exception("network")):
             result = fetch_price_data("FAIL")
         assert result["return_12_1m"] is None
         assert result["volume_spike"] == pytest.approx(1.0)
@@ -241,13 +245,13 @@ class TestFetchPriceDataEnhanced:
 class TestFetchSpyReturn:
     def test_success_returns_float(self):
         from scripts.run_pipeline import _fetch_spy_return
-        import pandas as pd, numpy as np
 
-        dates = pd.date_range("2026-02-01", periods=65, freq="B")
-        spy_close = pd.Series(np.linspace(500, 510, 65), index=dates)
-        fake_spy_df = pd.DataFrame({"Close": spy_close})
+        # Rising 60-bar series → positive 12-1m return (idx_far=0, idx_near=-21)
+        closes  = [500.0 + (10.0 * i / 59) for i in range(60)]
+        volumes = [1_000_000.0] * 60
+        rows = _fmp_rows(closes, volumes)
 
-        with patch("yfinance.download", return_value=fake_spy_df):
+        with patch(_PRICES, return_value=rows):
             result = _fetch_spy_return()
 
         assert isinstance(result, float)
@@ -255,10 +259,8 @@ class TestFetchSpyReturn:
 
     def test_failure_returns_zero(self):
         from scripts.run_pipeline import _fetch_spy_return
-
-        with patch("yfinance.download", side_effect=Exception("network")):
+        with patch(_PRICES, side_effect=Exception("network")):
             result = _fetch_spy_return()
-
         assert result == pytest.approx(0.0)
 
 
@@ -279,24 +281,21 @@ class TestQuiverEvidenceInResults:
                 w.writeheader()
                 w.writerow({"ticker": "AAPL", "sector": "Tech", "cap_tier": "large"})
 
-            import pandas as pd, numpy as np
-            dates = pd.date_range("2026-04-01", periods=30, freq="B")
-            fake_df = pd.DataFrame({
-                "Close":  pd.Series(np.linspace(100, 110, 30), index=dates),
-                "Volume": pd.Series([1_000_000] * 30, index=dates),
-            })
-            fake_spy = pd.DataFrame({
-                "Close": pd.Series(np.linspace(500, 510, 30), index=dates)
-            })
+            def _fmp_rows(closes, vols):
+                rows = [{"date": f"2026-{(i % 12)+1:02d}-{(i % 28)+1:02d}",
+                         "close": c, "volume": v} for i, (c, v) in enumerate(zip(closes, vols))]
+                return list(reversed(rows))
 
-            with patch("yfinance.download", side_effect=lambda sym, **kw: fake_spy if sym == "SPY" else fake_df), \
-                 patch("yfinance.Ticker") as mock_ticker, \
+            ticker_rows = _fmp_rows([100.0 + i / 3 for i in range(30)], [1_000_000.0] * 30)
+
+            with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+                       return_value=ticker_rows), \
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC in test")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
                  patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_fmp", return_value=0.55):
-                mock_ticker.return_value.news = []
+                 patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp")), \
+                 patch("scripts.run_pipeline.score_news_buzz_combined", return_value=(0.40, "fmp")):
                 status = run(tickers_file, log_dir, max_workers=1)
 
             results = status.get("results", [])
@@ -323,27 +322,23 @@ class TestEvidencePassthroughFields:
                 w.writeheader()
                 w.writerow({"ticker": "AAPL", "sector": "Tech", "cap_tier": "large"})
 
-            import pandas as pd, numpy as np
             # Need ≥252 bars so return_12_1m is computable (not None)
             n = 260
-            dates = pd.date_range("2024-01-01", periods=n, freq="B")
-            fake_df = pd.DataFrame({
-                "Close":  pd.Series(np.linspace(100, 110, n), index=dates),
-                "Volume": pd.Series([1_000_000] * (n - 5) + [3_000_000] * 5, index=dates),
-            })
-            fake_spy = pd.DataFrame({
-                "Close": pd.Series(np.linspace(500, 510, n), index=dates)
-            })
+            closes  = [100.0 + (10.0 * i / (n - 1)) for i in range(n)]
+            volumes = [1_000_000.0] * (n - 5) + [3_000_000.0] * 5
+            ticker_rows = [{"date": f"2024-{(i % 12)+1:02d}-{(i % 28)+1:02d}",
+                            "close": c, "volume": v}
+                           for i, (c, v) in enumerate(zip(closes, volumes))]
+            ticker_rows = list(reversed(ticker_rows))
 
-            with patch("yfinance.download", side_effect=lambda sym, **kw: fake_spy if sym == "SPY" else fake_df), \
-                 patch("yfinance.Ticker") as mock_ticker, \
+            with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+                       return_value=ticker_rows), \
                  patch("scripts.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
                  patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
                  patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp")), \
                  patch("scripts.run_pipeline.score_news_buzz_combined", return_value=(0.40, "fmp")):
-                mock_ticker.return_value.news = []
                 status = run(tickers_file, log_dir, max_workers=1)
 
             r = status["results"][0]
