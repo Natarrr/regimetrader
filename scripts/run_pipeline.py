@@ -34,7 +34,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from regime_trader.utils.io import save_json_atomic  # noqa: E402
-from regime_trader.services.fmp_client import FMPClient as _FMPClient  # noqa: E402
+from regime_trader.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError  # noqa: E402
 from backend.market_intel.validator import validate_raw  # noqa: E402
 
 log = logging.getLogger("run_pipeline")
@@ -714,19 +714,24 @@ def fetch_fmp_insider_all(
     tickers: List[str],
     lookback_days: int = 180,
     max_workers: int = 10,
+    client: Optional[Any] = None,
 ) -> Dict[str, Tuple[float, int]]:
-    """Fetch insider purchase data for all tickers via FMP Ultimate /api/v4/insider-trading.
+    """Fetch insider purchase data for all tickers via FMP stable/insider-trading/search.
 
-    Stiglitz (2001 Nobel) — Form 4 insider purchases are a credible costly-to-fake signal.
+    Form 4 insider purchases are a credible, costly-to-fake signal (Stiglitz 2001).
     Uses FMPClient with limit=500 per ticker to cover 180-day lookback for mega-caps.
+    max_workers=10: FMP Ultimate cap is 50 req/s; 10 threads at ~30 rps is safe.
 
-    max_workers=10 chosen for FMP Ultimate (50 req/s cap, 20 rps default via FMP_MAX_RPS).
+    Args:
+        client: Optional pre-created FMPClient instance. If None, creates one.
+                Pass a shared client so health_report() captures all calls/failures.
 
     Returns {ticker: (total_purchases_usd, days_since_most_recent)}.
     Tickers with no qualifying purchases get (0.0, 0).
     Returns {} if FMP_API_KEY is not set.
     """
-    client = _FMPClient()
+    if client is None:
+        client = _FMPClient()
     if not client._api_key:
         log.info("FMP_API_KEY not set -- skipping FMP insider pre-fetch")
         return {}
@@ -734,9 +739,19 @@ def fetch_fmp_insider_all(
     if not tickers:
         return {}
 
+    structural_failure_seen = threading.Event()
+
     def _fetch_one(ticker: str) -> Tuple[str, Tuple[float, int]]:
         try:
             result = client.get_insider_purchases(ticker, lookback_days=lookback_days)
+        except FMPEndpointError as exc:
+            log.error(
+                "FMP structural failure on insider route for %s: %s "
+                "— setting structural_failure flag. Do not lower circuit-breaker.",
+                ticker, exc,
+            )
+            structural_failure_seen.set()
+            result = (0.0, 0)
         except Exception as exc:
             log.debug("FMP insider fetch failed for %s: %s", ticker, type(exc).__name__)
             result = (0.0, 0)
@@ -747,6 +762,12 @@ def fetch_fmp_insider_all(
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         for ticker, value in pool.map(_fetch_one, tickers):
             results[ticker] = value
+
+    if structural_failure_seen.is_set():
+        log.error(
+            "FMP insider route is structurally broken — insider factors will be zeroed. "
+            "Check fmp_health.json and investigate the endpoint before the next run."
+        )
 
     nonzero = sum(1 for v in results.values() if v[0] > 0)
     log.info(
@@ -1139,7 +1160,7 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, Any]:
-    """Markowitz (1990 Nobel) — run full scoring pipeline; return status dict."""
+    """Run the full scoring pipeline; return status dict."""
     log_dir.mkdir(parents=True, exist_ok=True)
     ticker_rows = load_tickers(tickers_file)
     tickers     = [r["ticker"] for r in ticker_rows]
@@ -1148,6 +1169,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
 
     t0 = time.time()
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
+
+    # ── Shared FMP client — created once so health_report() captures all calls ─
+    _fmp_client = _FMPClient()
 
     # ── EDGAR connectivity preflight ──────────────────────────────────────────
     # Log the effective User-Agent and test data.sec.gov with AAPL (CIK 320193).
@@ -1178,13 +1202,40 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     log.info("SPY 12-1m return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
 
     # ── FMP insider — primary source (Form 4, cached 12h, limit=500) ─────────────
-    # FMPClient.get_insider_purchases() returns (total_usd, days) per ticker.
-    # Pre-fetched serially here; the thread pool below reads from the in-memory dict.
+    # get_insider_purchases() returns (total_usd, days) per ticker.
+    # get_insider_transactions() returns {P: [...], S: [...]} for breadth signal.
+    # Both pre-fetched here; the thread pool reads from the in-memory dicts.
+    # Shared client passed in so health_report() sees all calls/failures.
     log.info("Pre-fetching FMP insider transactions for %d tickers…", len(tickers))
-    fmp_insider_cache: Dict[str, Tuple[float, int]] = fetch_fmp_insider_all(tickers)
+    fmp_insider_cache: Dict[str, Tuple[float, int]] = fetch_fmp_insider_all(
+        tickers, client=_fmp_client
+    )
     fmp_has_data = any(v[0] > 0 for v in fmp_insider_cache.values())
     if not fmp_has_data:
         log.info("FMP insider returned no data -- insider scoring uses EDGAR XML only")
+
+    # Pre-fetch breadth transactions (P/S per distinct insider) for score_insider_breadth.
+    # Runs only when key is set; falls back to EDGAR-derived p_transactions otherwise.
+    log.info("Pre-fetching FMP insider breadth (P/S transactions) for %d tickers…", len(tickers))
+    fmp_breadth_cache: Dict[str, Dict] = {}
+    if _fmp_client._api_key:
+        def _fetch_breadth(ticker: str) -> Tuple[str, Dict]:
+            try:
+                return ticker, _fmp_client.get_insider_transactions(ticker, lookback_days=90)
+            except FMPEndpointError as exc:
+                log.error("FMP breadth structural failure %s: %s", ticker, exc)
+                return ticker, {"P": [], "S": []}
+            except Exception as exc:
+                log.debug("FMP breadth fetch failed %s: %s", ticker, exc)
+                return ticker, {"P": [], "S": []}
+
+        with ThreadPoolExecutor(max_workers=10) as _bp:
+            for _ticker, _btx in _bp.map(_fetch_breadth, tickers):
+                fmp_breadth_cache[_ticker] = _btx
+        _breadth_nonzero = sum(1 for v in fmp_breadth_cache.values()
+                               if v.get("P") or v.get("S"))
+        log.info("FMP breadth pre-fetch: %d/%d tickers with P or S transactions",
+                 _breadth_nonzero, len(tickers))
 
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
@@ -1242,7 +1293,12 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 days_since_most_recent=days_since_most_recent,
                 ceo_purchase_usd=ceo_purchase_usd,
             )
-            breadth_score = score_insider_breadth(p_transactions, s_transactions)
+            # Breadth: use FMP P/S transaction list (richer, deduplicated by
+            # insider_id) when available; fall back to EDGAR-parsed p_transactions.
+            _fmp_btx = fmp_breadth_cache.get(ticker, {})
+            _p_for_breadth = _fmp_btx.get("P") or p_transactions
+            _s_for_breadth = _fmp_btx.get("S") or s_transactions
+            breadth_score = score_insider_breadth(_p_for_breadth, _s_for_breadth)
 
             # ── Fix #3: orthogonal momentum + attention signals ───────────
             price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
@@ -1683,6 +1739,24 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "Done in %.1fs -- tickers=%d edgar=%d fmp_calls=%d congress=%d errors=%d -> %s",
         duration, len(tickers), edgar_count, fmp_count, congress_count, errors, out,
     )
+
+    # ── FMP health report — written every run for monitoring ──────────────────
+    # A non-zero failure count means a factor is being zeroed by a dead route.
+    # check_metrics reads this file and fails the canary on structural failures.
+    try:
+        fmp_health = _fmp_client.health_report()
+        fmp_health["run_timestamp"] = pipeline_run_ts
+        save_json_atomic(log_dir / "fmp_health.json", fmp_health)
+        if fmp_health.get("has_structural_failure"):
+            log.error(
+                "FMP structural failures detected this run: %s — "
+                "do NOT lower circuit-breaker thresholds; fix the endpoint.",
+                fmp_health.get("failures", {}),
+            )
+        else:
+            log.info("FMP health OK — no structural endpoint failures this run.")
+    except Exception as _fmp_health_exc:
+        log.warning("FMP health report write failed (non-fatal): %s", _fmp_health_exc)
 
     # ── Auto-archive: copy today's snapshot to logs/historical/YYYY-MM-DD/ ───
     try:
