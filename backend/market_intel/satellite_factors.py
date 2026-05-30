@@ -25,8 +25,7 @@ PE_MAX                   = 25.0  # P/E ratio ceiling for cannibal filter
 PRICE_VS_52W_LOW_MAX     = 1.25  # price must be < 125% of 52-week low
 TOP_N                    = 3     # tickers returned by each function
 
-# ── FMP base URL ─────────────────────────────────────────────────────────────
-_FMP_BASE = "https://financialmodelingprep.com"
+from regime_trader.services.fmp_client import FMPClient as _FMPClient  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,7 +145,8 @@ def get_top_cannibals(
     """Return up to TOP_N tickers ranked by trailing 4-quarter buyback yield.
 
     Filters: trailingPE < PE_MAX and currentPrice < PRICE_VS_52W_LOW_MAX * fiftyTwoWeekLow.
-    Data sources: yfinance .info (P/E, 52w-low), FMP cash-flow (repurchases), market_caps dict.
+    Data sources: yfinance .info (P/E, 52w-low), FMPClient.get_cash_flow_statements()
+    (repurchases — PASS in Phase-0 smoke-test), market_caps dict.
     Returns [] when fmp_key is absent or on any unrecoverable exception.
     """
     if not fmp_key:
@@ -154,8 +154,7 @@ def get_top_cannibals(
         return []
 
     try:
-        import requests as req
-
+        fmp = _FMPClient(api_key=fmp_key)
         results: list[dict] = []
 
         for ticker in tickers:
@@ -186,15 +185,9 @@ def get_top_cannibals(
             except (KeyError, AttributeError, TypeError, ValueError):
                 continue
 
-            # FMP cash-flow — 4 trailing quarters
+            # FMP cash-flow — 4 trailing quarters via FMPClient (cache + rate-limit)
             try:
-                url = (
-                    f"{_FMP_BASE}/stable/cash-flow-statement"
-                    f"?symbol={ticker}&period=quarter&limit=4&apikey={fmp_key}"
-                )
-                resp = req.get(url, timeout=15.0)
-                resp.raise_for_status()
-                quarters: list[dict] = resp.json()
+                quarters = fmp.get_cash_flow_statements(ticker, limit=4)
                 if not quarters:
                     continue
             except Exception as exc:

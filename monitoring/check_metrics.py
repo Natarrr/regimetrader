@@ -2,7 +2,8 @@
 
 Reads `<log-dir>/metrics.json` and exits:
     0 — all thresholds passed
-    2 — ALERT (errors > 0  OR  edgar_count / ticker_count < min_coverage)
+    2 — ALERT (errors > 0  OR  edgar_count / ticker_count < min_coverage
+               OR fmp_health.json reports has_structural_failure=true)
 
 On a failed gate, posts to Discord via DISCORD_WEBHOOK_URL when set.
 
@@ -70,6 +71,24 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     ok, reasons = evaluate(metrics, min_coverage=args.min_coverage, max_errors=args.max_errors)
+
+    # ── FMP structural-failure gate ────────────────────────────────────────────
+    # A non-zero failure count means a factor feed is dead — the pipeline is
+    # producing zeroed scores, not sparse ones. This must fail the canary so it
+    # surfaces loudly rather than being masked by a lowered circuit-breaker.
+    fmp_health_path = args.log_dir / "fmp_health.json"
+    if fmp_health_path.exists():
+        try:
+            fmp_health = json.loads(fmp_health_path.read_text(encoding="utf-8"))
+            if fmp_health.get("has_structural_failure"):
+                failed_routes = fmp_health.get("failures", {})
+                reason = f"FMP structural failure on route(s): {failed_routes}"
+                reasons.append(reason)
+                ok = False
+                log.error("FMP structural failure detected: %s", failed_routes)
+        except Exception as exc:
+            log.warning("could not read fmp_health.json: %s", exc)
+
     decision = update_after_evaluation(ok)
 
     if ok:

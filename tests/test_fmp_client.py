@@ -74,28 +74,22 @@ HOUSE_RECORD = {
 
 
 class TestFMPClientCongress:
-    def test_returns_dict_with_purchases_on_senate_data(self, client):
-        with patch.object(client._session, "get", return_value=_ok_resp([SENATE_RECORD])):
-            result = client.get_congress_trades("NVDA", lookback_days=180)
-        assert isinstance(result, dict)
-        assert result.get("purchases", 0) >= 1
+    """get_congress_trades is a stub — FMP senate/house routes returned HTTP 404
+    in the Phase-0 smoke-test (2026-05-30). Congress uses S3 Stock Watcher feeds.
+    All calls return {} regardless of session state."""
 
-    def test_recency_days_uses_disclosure_date(self, client):
-        """disclosureDate=2026-04-15 should be used, not transactionDate=2026-04-01."""
-        with patch.object(client._session, "get", return_value=_ok_resp([SENATE_RECORD])):
-            result = client.get_congress_trades("NVDA", lookback_days=180)
-        assert "recency_days" in result
-        # disclosureDate is more recent than transactionDate, so recency_days should be < 60
-        assert result["recency_days"] < 60
+    def test_returns_empty_dict_stub(self, client):
+        """Stub always returns {} — congress routes are dead on this plan."""
+        result = client.get_congress_trades("NVDA", lookback_days=180)
+        assert result == {}
 
     def test_returns_empty_dict_on_api_error(self, client):
-        with patch.object(client._session, "get", side_effect=Exception("timeout")):
-            result = client.get_congress_trades("NVDA")
+        # Stub does not call session at all — error path still returns {}
+        result = client.get_congress_trades("NVDA")
         assert result == {}
 
     def test_returns_empty_dict_on_empty_response(self, client):
-        with patch.object(client._session, "get", return_value=_empty_resp()):
-            result = client.get_congress_trades("NVDA")
+        result = client.get_congress_trades("NVDA")
         assert result == {}
 
     def test_returns_empty_dict_when_no_api_key(self, tmp_path, monkeypatch):
@@ -104,12 +98,11 @@ class TestFMPClientCongress:
         result = c.get_congress_trades("NVDA")
         assert result == {}
 
-    def test_caches_result_on_second_call(self, client):
-        with patch.object(client._session, "get", return_value=_ok_resp([SENATE_RECORD])) as mock_get:
+    def test_no_http_calls_made(self, client):
+        """Stub makes zero HTTP calls — never hits the dead FMP route."""
+        with patch.object(client._session, "get") as mock_get:
             client.get_congress_trades("NVDA", lookback_days=180)
-            first_count = mock_get.call_count  # senate + house = 2 calls
-            client.get_congress_trades("NVDA", lookback_days=180)
-            assert mock_get.call_count == first_count  # no new calls — served from cache
+            assert mock_get.call_count == 0
 
 
 # ── Insider factor ──────────────────────────────────────────────────────────
@@ -274,11 +267,12 @@ class TestCIIsolation:
         assert c is not None
         assert c._api_key == "test-key"
 
-    def test_fmp_max_rps_defaults_to_20(self, tmp_path, monkeypatch):
+    def test_fmp_max_rps_defaults_to_30(self, tmp_path, monkeypatch):
+        """Default changed from 20 to 30 RPS (Ultimate cap 50; 30 leaves headroom)."""
         monkeypatch.setenv("FMP_API_KEY", "k")
         monkeypatch.delenv("FMP_MAX_RPS", raising=False)
         c = FMPClient(api_key="k", cache_root=tmp_path / "fmp")
-        assert c._min_delay == pytest.approx(1.0 / 20.0, abs=1e-6)
+        assert c._min_delay == pytest.approx(1.0 / 30.0, abs=1e-6)
 
 
 # ── Pipeline wrappers ───────────────────────────────────────────────────────

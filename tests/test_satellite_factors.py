@@ -144,15 +144,15 @@ class TestGetTopCannibals:
         """Ticker with market_cap = 0 is skipped — no ZeroDivisionError."""
         info = self._good_info()
         quarters = self._fmp_quarters()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = quarters
-        mock_resp.raise_for_status = lambda: None
 
         with patch(
             "backend.market_intel.satellite_factors._fetch_yf_info",
             return_value=info,
         ):
-            with patch("requests.get", return_value=mock_resp):
+            with patch(
+                "regime_trader.services.fmp_client.FMPClient.get_cash_flow_statements",
+                return_value=quarters,
+            ):
                 result = get_top_cannibals(["PLTR"], self._FMP_KEY, {"PLTR": 0.0})
         assert result == []
 
@@ -166,15 +166,15 @@ class TestGetTopCannibals:
         info = self._good_info(pe=10.0, price=19.0, low_52w=18.0)
         # 4 quarters × 250M = 1B repurchased; market_cap = 50B → yield = 0.02
         quarters = [{"repurchasedCommonStock": -250_000_000}] * 4
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = quarters
-        mock_resp.raise_for_status = lambda: None
 
         with patch(
             "backend.market_intel.satellite_factors._fetch_yf_info",
             return_value=info,
         ):
-            with patch("requests.get", return_value=mock_resp):
+            with patch(
+                "regime_trader.services.fmp_client.FMPClient.get_cash_flow_statements",
+                return_value=quarters,
+            ):
                 result = get_top_cannibals(
                     ["PLTR"], self._FMP_KEY, {"PLTR": 50_000_000_000.0}
                 )
