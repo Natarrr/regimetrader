@@ -396,6 +396,25 @@ class FMPClient:
                     out[sym] = row
         return out
 
+    def get_cot_report(self) -> List[Dict]:
+        """Full Commitment of Traders report (stable/commitment-of-traders-report).
+
+        PASS in Phase-0 smoke-test (536 rows). Returns one row per commodity
+        contract with commPositionsLongAll / commPositionsShortAll (commercial
+        hedger positions) and noncomm* (speculator positions).
+        No symbol filter — returns the full universe; caller filters by name/symbol.
+        Cached 12h (COT is weekly, published Fridays).
+        """
+        if not self._api_key:
+            return []
+        cached = self._cache_read("key_metrics", "_cot_full")
+        if cached is not None:
+            return cached
+        data = self._get("commitment-of-traders-report", {}, bucket="key_metrics") or []
+        result = data if isinstance(data, list) else []
+        self._cache_write("key_metrics", "_cot_full", result)
+        return result
+
     def get_cash_flow_statements(self, ticker: str, limit: int = 4) -> List[Dict]:
         """Quarterly cash flow statements (stable/cash-flow-statement). PASS in smoke-test.
 

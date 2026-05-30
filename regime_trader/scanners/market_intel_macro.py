@@ -26,15 +26,16 @@ log = logging.getLogger(__name__)
 # ── Static reference data ──────────────────────────────────────────────────────
 
 COMMODITY_UNIVERSE: List[Dict[str, Any]] = [
-    {"name": "Crude Oil",   "ticker": "CL=F", "etf": "USO",  "sector": "Energy",      "unit": "$/bbl"},
-    {"name": "Brent Crude", "ticker": "BZ=F", "etf": "BNO",  "sector": "Energy",      "unit": "$/bbl"},
-    {"name": "Natural Gas", "ticker": "NG=F", "etf": "UNG",  "sector": "Energy",      "unit": "$/MMBtu"},
-    {"name": "Gold",        "ticker": "GC=F", "etf": "GLD",  "sector": "Metals",      "unit": "$/oz"},
-    {"name": "Silver",      "ticker": "SI=F", "etf": "SLV",  "sector": "Metals",      "unit": "$/oz"},
-    {"name": "Copper",      "ticker": "HG=F", "etf": "CPER", "sector": "Metals",      "unit": "$/lb"},
-    {"name": "Wheat",       "ticker": "ZW=F", "etf": "WEAT", "sector": "Agriculture", "unit": "c/bu"},
-    {"name": "Corn",        "ticker": "ZC=F", "etf": "CORN", "sector": "Agriculture", "unit": "c/bu"},
-    {"name": "Soybeans",    "ticker": "ZS=F", "etf": "SOYB", "sector": "Agriculture", "unit": "c/bu"},
+    # cot_symbol: prefix to match FMP commitment-of-traders-report symbol field
+    {"name": "Crude Oil",   "ticker": "CL=F", "etf": "USO",  "sector": "Energy",      "unit": "$/bbl",   "cot_symbol": "CL"},
+    {"name": "Brent Crude", "ticker": "BZ=F", "etf": "BNO",  "sector": "Energy",      "unit": "$/bbl",   "cot_symbol": "BZ"},
+    {"name": "Natural Gas", "ticker": "NG=F", "etf": "UNG",  "sector": "Energy",      "unit": "$/MMBtu", "cot_symbol": "NG"},
+    {"name": "Gold",        "ticker": "GC=F", "etf": "GLD",  "sector": "Metals",      "unit": "$/oz",    "cot_symbol": "GC"},
+    {"name": "Silver",      "ticker": "SI=F", "etf": "SLV",  "sector": "Metals",      "unit": "$/oz",    "cot_symbol": "SI"},
+    {"name": "Copper",      "ticker": "HG=F", "etf": "CPER", "sector": "Metals",      "unit": "$/lb",    "cot_symbol": "HG"},
+    {"name": "Wheat",       "ticker": "ZW=F", "etf": "WEAT", "sector": "Agriculture", "unit": "c/bu",    "cot_symbol": "ZW"},
+    {"name": "Corn",        "ticker": "ZC=F", "etf": "CORN", "sector": "Agriculture", "unit": "c/bu",    "cot_symbol": "ZC"},
+    {"name": "Soybeans",    "ticker": "ZS=F", "etf": "SOYB", "sector": "Agriculture", "unit": "c/bu",    "cot_symbol": "ZS"},
 ]
 
 MACRO_INDICATORS: List[Dict[str, str]] = [
@@ -318,6 +319,64 @@ def calc_term_structure_score(data: Dict[str, Any]) -> Tuple[float, str]:
     return score, label
 
 
+def calc_cot_real_score(cot_symbol: str, fmp_key: str) -> Optional[Tuple[float, str]]:
+    """Real COT commercial net-position score from FMP stable/commitment-of-traders-report.
+
+    PASS in Phase-0 smoke-test (536 rows, weekly CFTC data).
+    Uses commercial hedger net position (long - short) as the primary signal:
+    commercial hedgers are informed actors who hedge real commodity exposure, so
+    extreme net-short = market top, extreme net-long = market bottom.
+
+    Score formula:
+        comm_net_ratio = commLong / (commLong + commShort)  → [0, 1]
+        score = 1 - comm_net_ratio  (inverted: heavy commercial shorting → bullish)
+
+    Args:
+        cot_symbol: COT contract symbol (e.g. "CL" for crude, "GC" for gold).
+        fmp_key:    FMP API key.
+
+    Returns:
+        (score [0,1], label) or None if symbol not found / key absent.
+    """
+    try:
+        from regime_trader.services.fmp_client import FMPClient as _FMPClient
+        client = _FMPClient(api_key=fmp_key)
+        rows = client.get_cot_report()
+        if not rows:
+            return None
+        # Match by symbol prefix (FMP uses CLF, CL1, GCF, etc.)
+        match = next(
+            (r for r in rows if str(r.get("symbol", "")).startswith(cot_symbol)),
+            None,
+        )
+        if not match:
+            return None
+        comm_long  = float(match.get("commPositionsLongAll",  0) or 0)
+        comm_short = float(match.get("commPositionsShortAll", 0) or 0)
+        total = comm_long + comm_short
+        if total <= 0:
+            return None
+        comm_net_ratio = comm_long / total   # high = commercial long (bullish)
+        score = round(1.0 - comm_net_ratio, 4)  # invert: commercial shorting = bullish for price
+
+        if comm_net_ratio < 0.25:
+            label = "STRONGLY BULLISH (heavy commercial short = classic bottom signal)"
+        elif comm_net_ratio < 0.40:
+            label = "Bullish — Commercial Selling Dominates"
+        elif comm_net_ratio < 0.60:
+            label = "Neutral"
+        elif comm_net_ratio < 0.75:
+            label = "Bearish — Commercial Buying Dominates"
+        else:
+            label = "STRONGLY BEARISH (heavy commercial long = classic top signal)"
+
+        return score, label
+    except Exception as exc:
+        log.debug("calc_cot_real_score(%s) failed: %s", cot_symbol, exc)
+        return None
+
+
+# Fallback proxy (used when FMP COT is unavailable or fmp_key absent)
 def calc_cot_proxy_score(data: Dict[str, Any]) -> Tuple[float, str]:
     """Proxy for Commitment of Traders (COT) positioning via 52-week percentile.
 
@@ -447,8 +506,16 @@ def calc_macro_conviction(
     Returns:
         Dict with composite score, conviction label/colour, and sub-scores.
     """
+    import os as _os
     ts_s, ts_l = calc_term_structure_score(price_data)
-    cot_s, cot_l = calc_cot_proxy_score(price_data)
+    # Use real COT data when FMP key is present; fall back to 52-week-percentile proxy.
+    _cot_sym = price_data.get("cot_symbol", "")
+    _fmp_key = _os.getenv("FMP_API_KEY", "")
+    _cot_real = calc_cot_real_score(_cot_sym, _fmp_key) if _cot_sym and _fmp_key else None
+    if _cot_real is not None:
+        cot_s, cot_l = _cot_real
+    else:
+        cot_s, cot_l = calc_cot_proxy_score(price_data)
     etf = price_data.get("etf", "")
     sent_s, sent_l = calc_sentiment_score(etf, sentiment_map)
     tr_s, tr_l = calc_trend_score(price_data)

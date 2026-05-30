@@ -73,7 +73,7 @@ jobs:
         env:
           EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
-          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '1' }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '30' }}
           EDGAR_FIRST: "true"
         run: |
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
