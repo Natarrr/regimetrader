@@ -117,24 +117,27 @@ class TestFindSwapCandidate:
 # ── build_advice() weights and keys ───────────────────────────────────────────
 
 class TestBuildAdviceWeightsAndKeys:
-    """build_advice() must use 28/23/22/15/12 weights and 'macro' key."""
+    """build_advice() must use canonical 7-factor WEIGHTS and 7 short-name keys."""
 
     def _make_status(self) -> dict:
         return {
             "computed_at": "2026-05-17T10:00:00Z",
             "results": [{
-                "ticker":         "AAPL",
-                "sector":         "Information Technology",
-                "cap_tier":       "large",
-                "edgar_score":    1.0,
-                "insider_score":  0.0,
-                "congress_score": 0.0,
-                "news_score":     0.0,
-                "momentum_score": 0.0,
+                "ticker":                    "AAPL",
+                "sector":                    "Information Technology",
+                "cap_tier":                  "large",
+                "insider_conviction_score":  1.0,
+                "insider_breadth_score":     0.0,
+                "congress_score":            0.0,
+                "news_sentiment_score":      0.0,
+                "news_buzz_score":           0.0,
+                "momentum_long_score":       0.0,
+                "volume_attention_score":    0.0,
             }],
         }
 
     def test_final_score_uses_correct_weights(self):
+        """insider_conviction_score=1.0, all others=0 → final_score=0.30 (canonical weight)."""
         from regime_trader.ui.portfolio_advisor_engine import build_advice
 
         status = self._make_status()
@@ -153,11 +156,13 @@ class TestBuildAdviceWeightsAndKeys:
 
         assert len(result) == 1
         adv = result[0]
-        # edgar_score=1.0, all others=0 → final_score should be 0.28 (not 0.30)
-        assert adv.final_score == pytest.approx(0.28, abs=1e-4)
+        # insider_conviction_score=1.0, all others=0 → final_score = 0.30 (canonical weight)
+        assert adv.final_score == pytest.approx(0.30, abs=1e-4)
 
-    def test_factors_dict_has_macro_not_momentum(self):
+    def test_factors_dict_has_7_canonical_keys(self):
+        """factors dict must have exactly the 7 canonical short names from WEIGHTS."""
         from regime_trader.ui.portfolio_advisor_engine import build_advice
+        from backend.market_intel.generate_top_lists import WEIGHTS
 
         status = self._make_status()
         with tempfile.TemporaryDirectory() as td:
@@ -174,5 +179,7 @@ class TestBuildAdviceWeightsAndKeys:
                 )
 
         adv = result[0]
-        assert "macro"    in adv.factors,    "'macro' key missing from factors"
-        assert "momentum" not in adv.factors, "'momentum' key must not be in factors"
+        assert set(adv.factors) == set(WEIGHTS), (
+            f"factors keys {set(adv.factors)} != WEIGHTS keys {set(WEIGHTS)}"
+        )
+        assert "macro" not in adv.factors, "'macro' is a legacy v1 key — must not appear"

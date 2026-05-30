@@ -199,10 +199,12 @@ class TestGenerateTopLists:
                 assert field in entry, f"entry missing {field}: {entry}"
 
     def test_badge_high_buy_threshold(self, tmp_path):
-        # Give one ticker clearly dominant raw scores → should get HIGH BUY after normalization
+        # Give one ticker clearly dominant raw scores → should get HIGH BUY after normalization.
+        # Need >= 40% of universe (2/5) with non-zero factors to pass the circuit-breaker.
         rows = [_raw_row("STAR", edgar=1.0, insider=1.0, congress=1.0, news=1.0, momentum=1.0)]
+        rows += [_raw_row("BASE", edgar=0.3, insider=0.3, congress=0.1, news=0.2, momentum=0.2)]
         rows += [_raw_row(f"T{i}", edgar=0.0, insider=0.0, congress=0.0, news=0.0, momentum=0.0)
-                 for i in range(4)]
+                 for i in range(3)]
         out = self._generate(rows, tmp_path)
         star = next(e for e in out["top_buys"] if e["ticker"] == "STAR")
         assert star["badge"] in ("HIGH BUY", "TACTICAL BUY"), f"unexpected badge: {star['badge']}"
