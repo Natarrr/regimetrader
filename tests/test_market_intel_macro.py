@@ -316,31 +316,27 @@ class TestGenerateMacroSynthesis:
 # ── safe_download ──────────────────────────────────────────────────────────────
 
 class TestSafeDownload:
-    def test_returns_none_on_empty_df(self):
-        import pandas as pd
-        empty_df = pd.DataFrame()
-        with patch("yfinance.download", return_value=empty_df):
+    _PRICES = "regime_trader.services.fmp_client.FMPClient.get_historical_prices"
+
+    def test_returns_none_on_empty_data(self):
+        with patch(self._PRICES, return_value=[]):
             result = safe_download("MISSING")
         assert result is None
 
     def test_returns_none_on_exception(self):
-        with patch("yfinance.download", side_effect=RuntimeError("network")):
+        with patch(self._PRICES, side_effect=RuntimeError("network")):
             result = safe_download("AAPL")
         assert result is None
 
-    def test_returns_dataframe_on_success(self):
-        import pandas as pd
-        import numpy as np
+    def test_returns_pricearray_on_success(self):
         n = 15
-        idx = pd.date_range("2026-01-01", periods=n, freq="B")
-        df = pd.DataFrame({
-            "Close":  np.linspace(100, 110, n),
-            "Volume": [1_000_000.0] * n,
-            "Open":   np.linspace(99, 109, n),
-            "High":   np.linspace(101, 111, n),
-            "Low":    np.linspace(98, 108, n),
-        }, index=idx)
-        with patch("yfinance.download", return_value=df):
+        rows = [
+            {"date": f"2026-01-{(i % 28) + 1:02d}", "close": 100.0 + i, "volume": 1_000_000.0}
+            for i in range(n)
+        ]
+        with patch(self._PRICES, return_value=rows):
             result = safe_download("AAPL")
         assert result is not None
         assert len(result) == n
+        # _PriceArray supports Close access used by callers
+        assert len(result["Close"].dropna()) == n

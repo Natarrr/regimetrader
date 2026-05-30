@@ -49,91 +49,81 @@ class TestScoreMomentum:
 
 
 class TestFetchPriceData:
-    def _fake_df(self, start_price: float, end_price: float, n: int = 260) -> pd.DataFrame:
-        """Create a fake yfinance Close+Volume DataFrame.
+    def _fake_rows(self, start_price: float, end_price: float, n: int = 260) -> list:
+        """Build FMP historical-price-eod/full rows (newest-first).
 
         n=260 gives >252 bars so Jegadeesh-Titman 12-1m period is computable.
         """
-        prices  = np.linspace(start_price, end_price, n)
-        volumes = np.full(n, 1_000_000)
-        idx     = pd.date_range("2025-01-01", periods=n, freq="B")
-        return pd.DataFrame({"Close": prices, "Volume": volumes}, index=idx)
+        step = (end_price - start_price) / max(n - 1, 1)
+        rows = []
+        for i in range(n):
+            rows.append({
+                "date":   f"2025-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}",
+                "close":  start_price + step * i,
+                "volume": 1_000_000.0,
+            })
+        return list(reversed(rows))   # newest-first
+
+    def _patch(self, rows):
+        return patch(
+            "regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+            return_value=rows,
+        )
 
     def test_positive_momentum_detected(self):
-        # 260 bars from 100→110 → 12-1m return uses bars [0, 239] → positive
-        fake = self._fake_df(100.0, 110.0)
-        with patch("yfinance.download", return_value=fake):
+        with self._patch(self._fake_rows(100.0, 110.0)):
             result = fetch_price_data("AAPL")
         assert result["return_12_1m"] is not None
         assert result["return_12_1m"] > 0.0
 
     def test_negative_momentum_detected(self):
-        fake = self._fake_df(100.0, 90.0)
-        with patch("yfinance.download", return_value=fake):
+        with self._patch(self._fake_rows(100.0, 90.0)):
             result = fetch_price_data("AAPL")
         assert result["return_12_1m"] is not None
         assert result["return_12_1m"] < 0.0
 
     def test_flat_market_returns_near_zero(self):
-        fake = self._fake_df(100.0, 100.0)
-        with patch("yfinance.download", return_value=fake):
+        with self._patch(self._fake_rows(100.0, 100.0)):
             result = fetch_price_data("AAPL")
         assert abs(result["return_12_1m"]) < 1e-6
 
-    def test_empty_dataframe_returns_none(self):
+    def test_empty_data_returns_none(self):
         """Insufficient history → return_12_1m=None (dead signal, not 0.0)."""
-        fake = pd.DataFrame()
-        with patch("yfinance.download", return_value=fake):
+        with self._patch([]):
             result = fetch_price_data("INVALID")
         assert result["return_12_1m"] is None
 
     def test_exception_returns_none(self):
         """Exception → default dict with return_12_1m=None."""
-        with patch("yfinance.download", side_effect=Exception("network error")):
+        with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+                   side_effect=Exception("network error")):
             result = fetch_price_data("AAPL")
         assert result["return_12_1m"] is None
 
     def test_return_key_present(self):
-        fake = self._fake_df(100.0, 105.0)
-        with patch("yfinance.download", return_value=fake):
+        with self._patch(self._fake_rows(100.0, 105.0)):
             result = fetch_price_data("MSFT")
         assert "return_12_1m" in result
 
 
-class TestFetchFmpProfilesChunking:
+class TestFetchFmpProfilesBatch:
     def test_returns_market_caps_for_all_tickers(self):
-        """fetch_fmp_profiles returns a non-empty market cap for each ticker."""
+        """fetch_fmp_profiles returns a market cap for each ticker via batch-quote."""
         tickers = ["AAPL", "MSFT", "GOOGL"]
-
-        def fake_get(url, timeout=15):
-            # Extract ticker from URL ?symbol=TICKER&apikey=...
-            sym = url.split("symbol=")[1].split("&")[0]
-            mock = MagicMock()
-            mock.raise_for_status = MagicMock()
-            mock.json.return_value = [{"symbol": sym, "marketCap": 1e12}]
-            return mock
+        batch = {t: {"symbol": t, "marketCap": 1e12} for t in tickers}
 
         import os
-        with patch("scripts.run_pipeline.time.sleep"), \
-             patch.dict(os.environ, {"FMP_API_KEY": "test-key"}), \
-             patch("requests.Session.get", side_effect=fake_get):
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}), \
+             patch("regime_trader.services.fmp_client.FMPClient.get_batch_quotes",
+                   return_value=batch):
             result = fetch_fmp_profiles(tickers)
 
         assert all(result.get(t, 0) > 0 for t in tickers), f"Missing caps: {result}"
 
-    def test_yfinance_fallback_when_fmp_key_absent(self):
-        """When FMP_API_KEY is absent, yfinance provides market caps."""
+    def test_no_key_returns_zero_caps(self):
+        """When FMP_API_KEY is absent, all caps are 0.0 (no yfinance fallback)."""
         import os
         tickers = ["AAPL", "MSFT"]
-
-        mock_info = {"marketCap": 3e12}
-        mock_ticker = MagicMock()
-        mock_ticker.info = mock_info
-
-        with patch.dict(os.environ, {}, clear=True), \
-             patch("os.environ.get", side_effect=lambda k, d="": "" if k == "FMP_API_KEY" else os.environ.get(k, d)), \
-             patch("yfinance.Ticker", return_value=mock_ticker):
+        with patch.dict(os.environ, {}, clear=True):
             result = fetch_fmp_profiles(tickers)
-
-        # Should get caps via yfinance fallback
-        assert len(result) >= 0   # may be empty if env patch is imperfect — just no crash
+        assert result == {"AAPL": 0.0, "MSFT": 0.0}

@@ -111,59 +111,59 @@ class TestDiscGetJson:
 
 # ── fmp_screener ──────────────────────────────────────────────────────────────
 
-def _make_yf_df(sym: str, prices: List[float], volumes: List[float]):
-    """Build a minimal yfinance-compatible MultiIndex DataFrame for one ticker."""
-    import pandas as pd
-    import numpy as np
+def _fmp_rows(prices: List[float], volumes: List[float]) -> list:
+    """Build FMP historical-price-eod/full rows (newest-first)."""
+    rows = []
+    for i, (p, v) in enumerate(zip(prices, volumes)):
+        rows.append({"date": f"2026-04-{(i % 28) + 1:02d}", "close": p, "volume": v})
+    return list(reversed(rows))   # newest-first
 
-    dates = pd.date_range("2026-04-01", periods=len(prices), freq="B")
-    cols = pd.MultiIndex.from_product([["Close", "Volume"], [sym]])
-    data = np.column_stack([prices, volumes])
-    return pd.DataFrame(data, index=dates, columns=cols)
+
+_PRICES = "regime_trader.services.fmp_client.FMPClient.get_historical_prices"
+_BATCH  = "regime_trader.services.fmp_client.FMPClient.get_batch_quotes"
 
 
 class TestFmpScreener:
-    def test_yfinance_download_error_returns_empty(self):
-        """If yfinance.download raises, fmp_screener() must return []."""
-        with patch("yfinance.download", side_effect=RuntimeError("network failure")):
-            result = fmp_screener()
+    def test_no_key_returns_empty(self, monkeypatch):
+        """If FMP_API_KEY is absent, fmp_screener() returns []."""
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        result = fmp_screener()
         assert result == []
 
-    def test_valid_ticker_produces_correct_fields(self):
-        """Volume spike and price_change_pct are computed from raw OHLCV correctly."""
+    def test_valid_ticker_produces_correct_fields(self, monkeypatch):
+        """Volume spike and price_change_pct computed correctly from FMP prices."""
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
         prices  = [100.0, 101.0, 102.0, 103.0, 104.0, 110.0, 120.0]
         volumes = [1_000_000.0] * 6 + [2_000_000.0]
-        df = _make_yf_df("AAPL", prices, volumes)
+        rows = _fmp_rows(prices, volumes)
 
-        with patch("yfinance.download", return_value=df):
-            with patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["AAPL"]):
-                results = fmp_screener()
+        with patch(_PRICES, return_value=rows), \
+             patch(_BATCH, return_value={"AAPL": {"symbol": "AAPL", "marketCap": 3e12}}), \
+             patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["AAPL"]):
+            results = fmp_screener()
 
         assert len(results) == 1
         r = results[0]
         assert r["sym"] == "AAPL"
-        # volume_spike = last_vol / mean(prior vols) = 2_000_000 / 1_000_000 = 2.0
         assert r["volume_spike"] == pytest.approx(2.0, rel=0.01)
-        # price_change_pct = (120/iloc[-6] - 1)*100; iloc[-6] = 101 → ≈ 18.81
         assert r["price_change_pct"] == pytest.approx((120.0 / 101.0 - 1) * 100, rel=0.01)
 
-    def test_low_price_ticker_filtered(self):
+    def test_low_price_ticker_filtered(self, monkeypatch):
         """Tickers priced below $1 must not appear in results."""
-        prices  = [0.50] * 7
-        volumes = [50_000_000.0] * 7
-        df = _make_yf_df("PENNYSTOCK", prices, volumes)
-
-        with patch("yfinance.download", return_value=df):
-            with patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["PENNYSTOCK"]):
-                results = fmp_screener()
-
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
+        rows = _fmp_rows([0.50] * 7, [50_000_000.0] * 7)
+        with patch(_PRICES, return_value=rows), \
+             patch(_BATCH, return_value={}), \
+             patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["PENNYSTOCK"]):
+            results = fmp_screener()
         assert results == []
 
-    def test_empty_download_returns_empty(self):
-        """An all-NaN DataFrame from yfinance results in []."""
-        import pandas as pd
-
-        with patch("yfinance.download", return_value=pd.DataFrame()):
+    def test_empty_data_returns_empty(self, monkeypatch):
+        """No price data from FMP results in []."""
+        monkeypatch.setenv("FMP_API_KEY", "test-key")
+        with patch(_PRICES, return_value=[]), \
+             patch(_BATCH, return_value={}), \
+             patch("regime_trader.scanners.discovery_scanner._YF_WATCHLIST", ["AAPL"]):
             result = fmp_screener()
         assert result == []
 
@@ -219,20 +219,9 @@ class TestSelectCandidates:
 class TestEnrichWithMomentum:
     def test_enrichment_adds_fields(self):
         candidates = [{"sym": "AAPL"}, {"sym": "MSFT"}]
+        rows = _fmp_rows([100.0 + i for i in range(25)], [1_000_000.0] * 25)
 
-        import pandas as pd
-        import numpy as np
-
-        def _fake_download(sym, period, interval, progress, auto_adjust):
-            n = 25
-            idx = pd.date_range("2026-01-01", periods=n, freq="B")
-            closes = pd.Series(np.linspace(100, 110, n), index=idx)
-            volumes = pd.Series([1_000_000.0] * n, index=idx)
-            df = pd.DataFrame({"Close": closes, "Volume": volumes})
-            df.columns = pd.Index(["Close", "Volume"])
-            return df
-
-        with patch("yfinance.download", side_effect=_fake_download):
+        with patch(_PRICES, return_value=rows):
             result = enrich_with_momentum(candidates, max_workers=2)
 
         assert all("volume_spike" in r for r in result)
@@ -241,9 +230,9 @@ class TestEnrichWithMomentum:
     def test_empty_input_returns_empty(self):
         assert enrich_with_momentum([]) == []
 
-    def test_yfinance_failure_defaults_to_safe_values(self):
+    def test_fmp_failure_defaults_to_safe_values(self):
         candidates = [{"sym": "BROKEN"}]
-        with patch("yfinance.download", side_effect=RuntimeError("API down")):
+        with patch(_PRICES, side_effect=RuntimeError("API down")):
             result = enrich_with_momentum(candidates, max_workers=1)
         assert result[0]["volume_spike"] == 1.0
         assert result[0]["price_change_pct"] == 0.0
