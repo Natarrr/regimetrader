@@ -6,6 +6,12 @@ Theory — Grinold & Kahn (2000), "Active Portfolio Management" ch. 7:
     exposures.  Raw scores contaminated by sector/size biases produce spurious
     IC estimates and degrade IR = IC × √breadth.
 
+    Method note: G&K neutralize by REGRESSING the factor on its common-factor
+    exposures (sector/size betas) and keeping the residual. This module uses a
+    coarser proxy — within-bucket z-scoring by (market, sector, cap_tier) — which
+    removes the per-bucket mean (the dominant bias) but not continuous size tilts.
+    It is a pragmatic approximation, not the full cross-sectional regression.
+
     Procedure:
       1. For each (market, sector, cap_tier) bucket with >= min_bucket_size
          non-zero observations, compute the bucket mean and std over the factor,
@@ -32,12 +38,16 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# 7-factor keys (mirror run_pipeline.WEIGHTS). All callers pass `factors=`
+# explicitly; this default exists only so the function is usable standalone.
 _FACTORS_DEFAULT = (
-    "edgar_score",
-    "insider_score",
+    "insider_conviction_score",
+    "insider_breadth_score",
     "congress_score",
-    "news_score",
-    "momentum_score",
+    "news_sentiment_score",
+    "news_buzz_score",
+    "momentum_long_score",
+    "volume_attention_score",
 )
 _SIGMOID_CLIP_LO = 0.01
 _SIGMOID_CLIP_HI = 0.99

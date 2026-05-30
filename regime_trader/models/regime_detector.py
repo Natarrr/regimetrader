@@ -56,7 +56,9 @@ N_PERSIST = int(os.getenv("REGIME_PERSIST", "2"))
 N_HMM_STATES = int(os.getenv("REGIME_HMM_STATES", "5"))
 
 # ── VIX thresholds → regime ────────────────────────────────────────────────────
-# Engle (2003 Nobel) — volatility clustering: VIX regimes are persistent
+# Fixed VIX cutoffs. Volatility clusters and is persistent (Engle 1982, ARCH),
+# but this is a static threshold rule, not a GARCH estimate — the HMM/ML
+# detectors below capture the dynamics; this rule is a fast, interpretable baseline.
 _VIX_THRESHOLDS: List[Tuple[float, str]] = [
     (45.0, "Crash"),
     (35.0, "Panic"),
@@ -76,7 +78,7 @@ _LABEL_IDX = {lbl: i for i, lbl in enumerate(_LABELS)}
 def vix_rule(vix: float) -> str:
     """Classify regime from a single VIX value using fixed thresholds.
 
-    Engle (2003 Nobel) — volatility is the primary regime indicator.
+    VIX (implied volatility) is the primary regime indicator here.
 
     Args:
         vix: CBOE VIX level.
@@ -119,8 +121,9 @@ def vix_proba(vix: float) -> np.ndarray:
 class HMMRegimeDetector:
     """Hidden Markov Model on (normalised VIX, log-returns).
 
-    Lucas (1995 Nobel) — rational-expectations regime switching captures
-    the non-linear dynamics that threshold rules miss.
+    Regime-switching captures non-linear volatility dynamics that fixed
+    thresholds miss (Hamilton 1989, "A New Approach to the Economic Analysis of
+    Nonstationary Time Series"; HMM estimation per Rabiner 1989).
 
     Implementation:
         GaussianHMM from hmmlearn with N_HMM_STATES hidden states.
@@ -220,8 +223,8 @@ class HMMRegimeDetector:
 class MLRegimeDetector:
     """RandomForest classifier on 8 volatility/trend features.
 
-    Fama (2013 Nobel) — systematic feature engineering extracts
-    predictive regime signals that threshold rules miss.
+    Supervised regime classification from engineered VIX/return features
+    (Breiman 2001, "Random Forests", Machine Learning 45(1)).
 
     Features (all from VIX + returns):
         vix, vix_20d_ma, vix_5d_chg, vix_20d_std,
@@ -319,8 +322,8 @@ class MLRegimeDetector:
 def apply_persistence_filter(labels: pd.Series, n: int = N_PERSIST) -> pd.Series:
     """Smooth regime sequence: only switch after N consecutive same-label.
 
-    Lucas (1995 Nobel) — regime transitions should be economically significant,
-    not noise-driven. Persistence dampens false positives at the cost of latency.
+    Debounce filter: regime transitions should be persistent, not noise-driven.
+    Dampens false positives at the cost of switch latency.
 
     # Debounce rule: commit to new regime only after n consecutive identical
     # candidate signals (persistence check before committing).

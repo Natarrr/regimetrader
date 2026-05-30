@@ -28,9 +28,9 @@ Asymmetric persistence filter:
   Enter CRISIS  : 3 consecutive CRISIS signals
   Exit to lower : 1 signal sufficient  (fast de-escalation)
 
-Engle (2003 Nobel) — volatility and credit spreads are co-integrated
-during systemic stress; combining both signals reduces false-positive
-regime switches present in VIX-only detection.
+Volatility and credit spreads tend to co-move during systemic stress
+(cointegration framework — Engle & Granger 1987); combining both signals
+reduces the false-positive regime switches present in VIX-only detection.
 """
 from __future__ import annotations
 
@@ -85,9 +85,8 @@ class CreditFeatures:
 
     All signed so that POSITIVE values indicate MORE stress.
 
-    Black-Scholes (1997 Nobel) — credit spreads embed forward-looking
-    default probabilities; these features extract that information
-    in a model-free way.
+    Credit spreads embed forward-looking default probabilities (Merton 1974
+    structural model); these features extract that information model-free.
     """
     z_hy: Optional[float] = None              # HY log-price z-score (negated)
     z_ig: Optional[float] = None              # IG log-price z-score (negated)
@@ -101,10 +100,8 @@ class CreditFeatures:
 # ── Pure math helpers ─────────────────────────────────────────────────────────
 
 def _zscore_series(series: pd.Series, window: int = 60) -> pd.Series:
-    """Rolling z-score.
-
-    Markowitz (1952 Nobel) — standardisation makes heterogeneous
-    time-series comparable for portfolio (here: ensemble) combination.
+    """Rolling z-score — standardise heterogeneous series to a common scale
+    so they can be combined in the ensemble.
 
     z_t = (x_t - mu_{t-window:t}) / sigma_{t-window:t}
     """
@@ -116,8 +113,7 @@ def _zscore_series(series: pd.Series, window: int = 60) -> pd.Series:
 def _ols_slope(series: pd.Series) -> float:
     """OLS slope of the series vs a linear trend (per-period).
 
-    Granger (2003 Nobel) — slope of log-price encodes directional momentum
-    in a causal-regression framework.
+    The slope of log-price over the window encodes directional drift (momentum).
 
     Returns NaN if series is too short.
     """
@@ -184,8 +180,8 @@ def compute_credit_stress_score(features: CreditFeatures) -> float:
 
     Returns 0.5 (neutral/caution boundary) when NO data is available.
 
-    Engle (2003 Nobel) — credit volatility is jointly determined with
-    equity volatility; a scalar composite score captures this joint signal.
+    Credit and equity volatility are jointly determined during stress; a scalar
+    composite score over the standardised sub-signals captures that joint signal.
     """
     _WEIGHTS = [
         ("z_hy",            0.35),
@@ -221,8 +217,8 @@ def classify_credit_regime(score: float) -> CreditRegime:
       CAUTION  0.40 <= score < 0.60
       NORMAL   score < 0.40
 
-    Lucas (1995 Nobel) — regime thresholds should be set at economically
-    meaningful discontinuities, not arbitrary quantiles.
+    Thresholds are set at economically meaningful stress discontinuities
+    rather than arbitrary quantiles of the score distribution.
     """
     if score >= 0.75:
         return CreditRegime.CRISIS
@@ -248,8 +244,8 @@ def apply_credit_persistence_filter(
       STRESS  : 2   (require 2 consecutive STRESS signals)
       CRISIS  : 3   (require 3 consecutive CRISIS signals)
 
-    Lucas (1995 Nobel) — asymmetric adjustment costs justify asymmetric
-    persistence: entering a stress positioning is costly, exiting is free.
+    Asymmetric adjustment costs justify asymmetric persistence: entering a
+    stress positioning is costly (require confirmation), exiting is free.
 
     Args:
         regimes: Raw daily signal list (oldest first).
@@ -325,8 +321,8 @@ def apply_credit_overrides(
       2. STRESS + VIX < 20 → force at least "Bear" (early-warning: credit stress
          while equity vol is still low signals early systemic deterioration)
 
-    Merton (1997 Nobel) — credit and equity markets are structurally linked;
-    credit-market stress is a leading indicator of equity-volatility regimes.
+    Credit and equity markets are structurally linked (Merton 1974); credit-market
+    stress is a leading indicator of equity-volatility regimes.
 
     Args:
         ensemble_label: Raw ensemble output label.
@@ -402,9 +398,9 @@ class CreditRegimeDetector:
 
     Designed for use as an optional fourth signal in RegimeDetector ensemble.
 
-    Merton (1997 Nobel) — structural credit models link default probability
-    to equity volatility; this detector operationalises that link with
-    observable ETF prices as spread proxies.
+    Structural credit models (Merton 1974) link default probability to equity
+    volatility; this detector operationalises that link with observable ETF
+    prices as spread proxies.
     """
 
     def __init__(

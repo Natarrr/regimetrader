@@ -1,9 +1,12 @@
 """hmm_engine/classifier.py
 GaussianHMM regime classifier.
 
-Lucas (1995 Nobel) — Rational expectations: the forward algorithm prices all
-available information without look-ahead bias.  No Viterbi decoding is used
-in predict_current() so backtests are free of future-data contamination.
+Reference: Rabiner (1989), "A Tutorial on Hidden Markov Models", Proc. IEEE 77(2);
+parameters fit via Baum-Welch EM (Baum et al. 1970).
+
+predict_current() uses the forward algorithm only (no Viterbi decoding), so the
+current-bar posterior depends only on past observations — backtests are free of
+look-ahead / future-data contamination.
 
 $q_t \\sim \\text{HMM}(\\pi, A, B)$ — forward filter only.
 """
@@ -22,8 +25,8 @@ _LABEL_MAP = {0: "Bear", 1: "Neutral", 2: "Bull"}
 _COLOR_MAP  = {"Bull": "#00FFA3", "Neutral": "#60A5FA", "Bear": "#FF6B6B",
                "Unknown": "#888888"}
 
-# Position scales per raw state (before laureate adjustment).
-# Sargent (2011): policy regime drives allocation, not just price signal.
+# Position scales per raw state: scale exposure down as the regime deteriorates
+# (volatility-targeting heuristic — Bear/Crash regimes carry higher tail risk).
 _SCALE_MAP = {"Bull": 1.0, "Neutral": 0.6, "Bear": 0.2, "Unknown": 1.0}
 
 # A state is "confirmed" when the last _CONFIRM_WINDOW bars agree.
@@ -46,7 +49,7 @@ class RegimeState:
 
 
 class RegimeClassifier:
-    """Lucas (1995 Nobel) + Sargent (2011 Nobel) — three-state Gaussian HMM classifier.
+    """Three-state Gaussian HMM regime classifier (Rabiner 1989).
 
     State ordering is normalised post-fit by mean return so that state 0 = Bear,
     state 1 = Neutral, state 2 = Bull regardless of HMM initialisation order.
@@ -82,7 +85,7 @@ class RegimeClassifier:
     # ── fit ───────────────────────────────────────────────────────────────────
 
     def fit(self, features: np.ndarray, returns: np.ndarray) -> "RegimeClassifier":
-        """Lucas (1995 Nobel) — Fit GaussianHMM via Baum-Welch EM.
+        """Fit GaussianHMM via Baum-Welch EM (Baum et al. 1970).
 
         States are reordered post-fit by mean return so that state indices are
         stable: 0 = Bear, 1 = Neutral, 2 = Bull.
@@ -123,7 +126,7 @@ class RegimeClassifier:
     # ── predict_current ───────────────────────────────────────────────────────
 
     def predict_current(self, features_window: np.ndarray) -> RegimeState:
-        """Lucas (1995 Nobel) — Forward-filter only: no Viterbi, no look-ahead.
+        """Forward-filter only: no Viterbi, no look-ahead (Rabiner 1989 §III).
 
         Uses the HMM posterior (forward algorithm) to estimate the current
         regime probability. The «confirmed» label requires _CONFIRM_WINDOW
@@ -183,7 +186,7 @@ class RegimeClassifier:
     # ── predict_sequence ──────────────────────────────────────────────────────
 
     def predict_sequence(self, features: np.ndarray) -> pd.DataFrame:
-        """Sargent (2011 Nobel) — Annotate the full history with regime labels.
+        """Annotate the full history with regime labels (MAP state per bar).
 
         Uses the MAP state per bar (argmax posterior).  The «confirmed» column
         marks bars where the surrounding _CONFIRM_WINDOW bars all agreed — a

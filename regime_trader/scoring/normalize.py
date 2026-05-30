@@ -1,9 +1,9 @@
 """regime_trader/scoring/normalize.py
 Score normalization, winsorizing, fallback reweighting, and explainability.
 
-Markowitz (1990 Nobel) — portfolio construction requires comparable, bounded
-signals. Raw scores from heterogeneous sources (EDGAR, FMP, yfinance) span
-different scales; normalization makes them combinable without distortion.
+Combining signals requires comparable, bounded inputs. Raw scores from
+heterogeneous sources (EDGAR, FMP, yfinance) span different scales;
+normalization makes them combinable without distortion.
 
 Winsorizing at the 1st/99th percentile caps extreme outliers that would
 dominate a naive rank — a direct application of Tukey's robustness principle.
@@ -41,7 +41,7 @@ _EXPLAIN_ROOT = Path(__file__).parent.parent.parent / ".cache" / "explain"
 # ── Winsorize ──────────────────────────────────────────────────────────────────
 
 def winsorize(arr: np.ndarray, lo: float = 1.0, hi: float = 99.0) -> np.ndarray:
-    """Markowitz (1990 Nobel) — cap extreme values at lo/hi percentiles.
+    """Cap extreme values at the lo/hi percentiles (Tukey winsorization).
 
     Clips values outside the [lo, hi] percentile range to those boundary
     values.  This prevents single outliers from dominating composite scores.
@@ -73,7 +73,7 @@ def normalize_score(
     out_min: float = 0.0,
     out_max: float = 100.0,
 ) -> np.ndarray:
-    """Markowitz (1990 Nobel) — winsorize then linearly scale to [out_min, out_max].
+    """Winsorize then linearly scale to [out_min, out_max].
 
     Step 1: winsorize at [lo_pct, hi_pct].
     Step 2: min-max scale to [out_min, out_max].
@@ -109,7 +109,7 @@ def fallback_reweight(
     weights:        Sequence[float],
     available_mask: Sequence[bool],
 ) -> np.ndarray:
-    """Markowitz (1990 Nobel) — proportionally renormalize weights for available components.
+    """Proportionally renormalize weights over the available components.
 
     When a scoring component is missing (e.g. FMP unavailable), its weight is
     redistributed proportionally among the remaining components so the composite
@@ -156,8 +156,8 @@ def build_explain(
 ) -> Dict[str, Any]:
     """Build a structured explainability record for a single ticker.
 
-    Markowitz (1990 Nobel): portfolio decisions require transparency; each
-    composite score must be decomposable into constituent factors.
+    Allocation decisions require transparency; each composite score must be
+    decomposable into its constituent factors.
 
     Args:
         ticker:       Ticker symbol.

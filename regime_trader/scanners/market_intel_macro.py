@@ -113,8 +113,7 @@ _BEAR_WORDS: frozenset = frozenset([
 def safe_download(ticker: str, period: str = "1y") -> Optional[Any]:
     """Download OHLCV data via yfinance; return None on failure.
 
-    Fama (2013 Nobel) — reliable price history is the foundation of any
-    market signal computation.
+    Reliable price history is the foundation of any market signal computation.
 
     Args:
         ticker: Yahoo Finance ticker symbol.
@@ -138,7 +137,7 @@ def safe_download(ticker: str, period: str = "1y") -> Optional[Any]:
 def fetch_commodity_prices(commodity: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Fetch price data for a commodity, falling back from futures to ETF ticker.
 
-    Shiller (2013 Nobel) — long price series for cyclically-adjusted valuation.
+    Long price series for cyclically-adjusted valuation (CAPE-style, Shiller 1988).
 
     Args:
         commodity: Entry from COMMODITY_UNIVERSE (must have 'ticker', 'etf').
@@ -321,7 +320,7 @@ def calc_term_structure_score(data: Dict[str, Any]) -> Tuple[float, str]:
 def calc_cot_proxy_score(data: Dict[str, Any]) -> Tuple[float, str]:
     """Proxy for Commitment of Traders (COT) positioning via 52-week percentile.
 
-    Akerlof (2001 Nobel) — price position relative to range as smart-money proxy.
+    Price position relative to its 52-week range as a smart-money proxy.
 
     Args:
         data: Output of fetch_commodity_prices() with pct_52 and rsi14.
@@ -363,8 +362,8 @@ def calc_sentiment_score(
 ) -> Tuple[float, str]:
     """Contrarian retail-sentiment score (high retail bullishness → sell signal).
 
-    Shiller (2013 Nobel) — irrational exuberance: extreme retail bullishness
-    is a contrarian sell indicator.
+    Extreme retail bullishness as a contrarian sell indicator
+    ("irrational exuberance", Shiller 2000).
 
     Args:
         etf:           ETF ticker to look up in sentiment_map.
@@ -394,7 +393,7 @@ def calc_sentiment_score(
 def calc_trend_score(data: Dict[str, Any]) -> Tuple[float, str]:
     """Technical trend score combining moving-average cross and RSI.
 
-    Fama (2013 Nobel) — price relative to 200-day MA as regime indicator.
+    Price relative to its 200-day moving average as a trend/regime indicator.
 
     Args:
         data: Output of fetch_commodity_prices() with price, sma50, sma200, rsi14.
@@ -487,8 +486,8 @@ def check_macro_shocks(
 ) -> List[Dict[str, str]]:
     """Detect significant commodity price moves and return structured alerts.
 
-    Leontief (1973 Nobel) — input-output linkages: commodity spikes propagate
-    through the economy and affect equity sector margins.
+    Input-output linkages (Leontief 1936): commodity spikes propagate through
+    the economy and compress equity sector margins.
 
     Args:
         prices: {ticker: fetch_commodity_prices() result | None}
@@ -581,7 +580,7 @@ def generate_macro_synthesis(
 ) -> List[str]:
     """Build a list of natural-language macro commentary paragraphs.
 
-    Engle (2003 Nobel) — volatility clustering informs the risk narrative.
+    Volatility clusters and persists (Engle 1982, ARCH) — informs the risk narrative.
 
     Args:
         prices:      {ticker: fetch_commodity_prices() result}
@@ -716,7 +715,9 @@ def fetch_stock_pick_data(
 ) -> Optional[Dict[str, Any]]:
     """Fetch price + fundamental quality metrics for a single equity.
 
-    Merton (1997 Nobel) — distance-to-default via debt/equity ratio.
+    Debt/equity ratio as a coarse leverage/solvency proxy. (Note: this is a
+    simple balance-sheet ratio, not Merton's distance-to-default, which requires
+    asset volatility and an option-pricing model.)
 
     Args:
         ticker:   Primary ticker to fetch.
