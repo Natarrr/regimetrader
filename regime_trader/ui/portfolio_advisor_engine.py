@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from backend.market_intel.generate_top_lists import WEIGHTS, FACTOR_FIELDS  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 _ROOT               = Path(__file__).parent.parent.parent
@@ -135,6 +137,38 @@ def _build_score_index(status: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _compute_final_score(row: Dict[str, Any]) -> tuple[float, Dict[str, float]]:
+    """Canonical 7-factor score with weight redistribution for missing factors.
+
+    Mirrors generate_top_lists exactly so the Portfolio Advisor, the Discord
+    payload, and top_lists.json all agree. A factor whose *_score field is
+    absent/None is excluded from the weight denominator (pro-rata redistribution),
+    so EU/Asia positions scored on momentum+volume only are not crushed by five
+    structurally-absent US-only factors.
+    """
+    raw: Dict[str, Optional[float]] = {}
+    for short_name, field_key in FACTOR_FIELDS.items():
+        v = row.get(field_key)
+        raw[short_name] = float(v) if v is not None else None
+
+    live = {k: WEIGHTS[k] for k, v in raw.items() if v is not None}
+    if not live:
+        return 0.0, {k: 0.0 for k in WEIGHTS}
+
+    live_total = sum(live.values())
+    eff = {k: w / live_total for k, w in live.items()}
+
+    factors_out: Dict[str, float] = {}
+    score = 0.0
+    for short_name in WEIGHTS:
+        val = raw.get(short_name)
+        fval = val if val is not None else 0.0
+        factors_out[short_name] = round(fval, 4)
+        score += eff.get(short_name, 0.0) * fval
+
+    return round(score, 4), factors_out
+
+
 def build_advice(
     positions: List[Dict[str, Any]],
     regime: str,
@@ -169,13 +203,7 @@ def build_advice(
             ))
             continue
 
-        final_score = float(
-            row.get("edgar_score", 0) * 0.28 +
-            row.get("insider_score", 0) * 0.23 +
-            row.get("congress_score", 0) * 0.22 +
-            row.get("news_score", 0) * 0.15 +
-            row.get("momentum_score", 0) * 0.12
-        )
+        final_score, factors = _compute_final_score(row)
         signal = compute_signal(final_score, regime)
         swap   = find_swap_candidate(ticker, row.get("sector", ""), held, top_lists) \
                  if signal in ("REDUCE", "EXIT") else None
@@ -188,14 +216,8 @@ def build_advice(
             currency        = pos.get("currency", "USD"),
             source          = pos.get("source", "revolut"),
             signal          = signal,
-            final_score     = round(final_score, 4),
-            factors         = {
-                "edgar":    round(float(row.get("edgar_score",   0)), 4),
-                "insider":  round(float(row.get("insider_score", 0)), 4),
-                "congress": round(float(row.get("congress_score",0)), 4),
-                "news":     round(float(row.get("news_score",    0)), 4),
-                "macro":    round(float(row.get("momentum_score",0)), 4),
-            },
+            final_score     = final_score,
+            factors         = factors,
             signal_age_days       = age_days,
             swap_candidate        = swap,
             narrative             = None,
