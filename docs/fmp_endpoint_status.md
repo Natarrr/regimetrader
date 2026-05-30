@@ -18,7 +18,7 @@
 | `price-target` | **PASS** | 1 row | New: price target consensus |
 | `key-metrics-ttm` | **PASS** | 1 row | New: quality metrics (P/E, etc.) |
 | `ratios-ttm` | **PASS** | 1 row | New: financial ratios (D/E, margins) |
-| `13f:summary` | **ERROR** | HTTP 400 | Institutional ownership — route broken |
+| `13f:summary` | **PASS** (year+quarter required) | Requires `?year=YYYY&quarter=Q` — HTTP 400 without them | Institutional ownership — fixed |
 | `batch-quote` | **PASS** | 3 rows | Bulk quote (throughput optimization) |
 | `cash-flow` | **PASS** | 4 rows | New: cash flow for cannibal filter |
 | `cot` | **PASS** | 536 rows | COT data — real feed available |
@@ -38,9 +38,9 @@
 
 | Endpoint | Verdict | Action |
 |---|---|---|
-| `congress:senate` (HTTP 404) | Route retired on stable/ | Use S3 Stock Watcher feeds (already in `run_pipeline.py`) as primary; FMP congress route is gone |
-| `congress:house` (HTTP 404) | Route retired on stable/ | Same — S3 is the correct primary |
-| `13f:summary` (HTTP 400) | Route broken / wrong params | Do not adopt; investigate separately. Institutional ownership factor deferred. |
+| `congress:senate` (HTTP 404) | FMP has not migrated senate-trading to stable/ yet | `get_congress_trades()` now fetches directly from public S3 Stock Watcher feeds (no API key needed). File FMP support ticket to request stable/ migration. |
+| `congress:house` (HTTP 404) | Same — house-trading not on stable/ | Same S3 fallback. |
+| `13f:summary` — **FIXED** | Required `year` + `quarter` params | Now uses `get_institutional_ownership()` in FMPClient with auto-computed quarter. |
 
 ### International — market_config.py claim is WRONG
 

@@ -397,71 +397,66 @@ def fmp_institutional_accumulation(
     candidate_symbols: List[str],
     limit: int = 50,
 ) -> List[Dict]:
-    """Institutional accumulation via yfinance 13F data.
+    """Institutional accumulation via FMP stable/institutional-ownership.
 
-    FMP stable/institutional-ownership/symbol-positions-summary returned HTTP 400
-    in the Phase-0 smoke-test (2026-05-30) — not available on current plan.
-    yfinance institutional_holders (quarterly 13F-sourced) is the documented
-    fallback until FMP restores the 13F endpoint. Keep return schema unchanged.
+    Uses FMPClient.get_institutional_ownership() which requires year+quarter
+    params (HTTP 400 without them — fixed in Phase-0 follow-up).
+
+    Accumulation score derived from:
+      - investorsHoldingChange: net change in number of institutional holders
+      - increasedPositions / (increasedPositions + reducedPositions): buy ratio
+      - ownershipPercentChange: direction of ownership change
 
     Args:
         candidate_symbols: Pool of tickers to check.
         limit:             Max symbols to query.
 
     Returns:
-        List of dicts sorted by accumulation_score descending:
+        List of dicts sorted by accumulation_score descending (same schema):
         {sym, net_shares_change, pct_change_avg, major_fund_count,
          holder_count, accumulation_score}
     """
-    try:
-        import yfinance as yf
-    except ImportError:
-        log.warning("[INST] yfinance not installed — institutional data skipped")
+    client = _FMPClient()
+    if not client._api_key:
+        log.warning("[INST] FMP_API_KEY not set — institutional data skipped")
         return []
 
     symbols = list(dict.fromkeys(s.upper() for s in candidate_symbols))[:limit]
-    _MAJOR = {"VANGUARD", "BLACKROCK", "STATE STREET", "FIDELITY",
-              "JP MORGAN", "RENAISSANCE", "CITADEL", "MILLENNIUM"}
 
     def _fetch_one(sym: str) -> Optional[Dict]:
         try:
-            ih = yf.Ticker(sym).institutional_holders
-            if ih is None or ih.empty:
+            data = client.get_institutional_ownership(sym)
+            if not data:
                 return None
 
-            pct_changes = ih["pctChange"].dropna().tolist() if "pctChange" in ih.columns else []
-            if not pct_changes:
-                return None
+            investors_change = int(data.get("investorsHoldingChange", 0) or 0)
+            total_investors   = int(data.get("investorsHolding", 1) or 1)
+            increased         = int(data.get("increasedPositions", 0) or 0)
+            reduced           = int(data.get("reducedPositions", 0) or 0)
+            shares_change     = int(data.get("numberOf13FsharesChange", 0) or 0)
+            ownership_chg     = float(data.get("ownershipPercentChange", 0) or 0)
 
-            total_shares = float(ih["Shares"].sum()) if "Shares" in ih.columns else 0.0
-            avg_pct = sum(pct_changes) / len(pct_changes)
-            net_change = avg_pct * total_shares / 100.0
+            buysell_total = increased + reduced
+            buy_ratio = (increased / buysell_total) if buysell_total > 0 else 0.5
 
-            major_count = 0
-            if "Holder" in ih.columns and "pctChange" in ih.columns:
-                for _, row in ih.iterrows():
-                    name = str(row.get("Holder", "")).upper()
-                    chg = float(row.get("pctChange", 0) or 0)
-                    if any(m in name for m in _MAJOR) and chg > 0:
-                        major_count += 1
-
-            raw_acc = 0.50 + min(0.40, max(-0.40, avg_pct * 8))
-            major_boost = min(0.15, major_count * 0.04)
-            acc_score = min(1.0, max(0.0, raw_acc + major_boost))
+            # Composite: 40% buy ratio, 30% ownership change direction, 30% holder change
+            holder_change_norm = max(-0.30, min(0.30, investors_change / max(total_investors, 1)))
+            raw_acc = 0.40 * buy_ratio + 0.30 * (0.5 + ownership_chg * 5) + 0.30 * (0.5 + holder_change_norm)
+            acc_score = min(1.0, max(0.0, raw_acc))
 
             return {
                 "sym": sym,
-                "net_shares_change": round(net_change, 0),
-                "pct_change_avg": round(avg_pct, 6),
-                "major_fund_count": major_count,
-                "holder_count": len(ih),
+                "net_shares_change": shares_change,
+                "pct_change_avg": round(ownership_chg, 6),
+                "major_fund_count": increased,   # proxy: # increased positions
+                "holder_count": total_investors,
                 "accumulation_score": round(acc_score, 4),
             }
         except Exception:
             return None
 
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
         futures = {pool.submit(_fetch_one, sym): sym for sym in symbols}
         for fut in concurrent.futures.as_completed(futures, timeout=90):
             r = fut.result()
@@ -469,7 +464,7 @@ def fmp_institutional_accumulation(
                 results.append(r)
 
     results.sort(key=lambda x: x["accumulation_score"], reverse=True)
-    log.info("[INST] Institutional data for %d/%d symbols", len(results), len(symbols))
+    log.info("[INST] FMP 13F institutional data for %d/%d symbols", len(results), len(symbols))
     return results
 
 

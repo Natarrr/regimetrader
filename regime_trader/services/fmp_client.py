@@ -199,21 +199,85 @@ class FMPClient:
     # ── Congress ───────────────────────────────────────────────────────────────
 
     def get_congress_trades(self, ticker: str, lookback_days: int = 180) -> Dict:
-        """Congress trades stub — FMP stable/ senate/house routes returned HTTP 404
-        in the Phase-0 smoke-test (2026-05-30). Congress scoring uses the S3
-        Stock Watcher feeds (run_pipeline.fetch_congress_buys) as primary.
+        """Congressional trading data from public S3 Stock Watcher feeds.
 
-        Returns {} so existing callers keep working without hitting a dead route.
-        If FMP restores these routes in a future plan, replace this stub with
-        the get_congress_trades implementation from the provided fmp_client.py.
+        FMP stable/ senate-trading and house-trading routes return HTTP 404 —
+        FMP has not migrated these endpoints from the deprecated v4 paths to
+        stable/ as of 2026-05-30. Contact FMP support to request migration.
+
+        Fallback: fetches directly from the free public S3 feeds maintained
+        by House/Senate Stock Watcher (no API key required, same source that
+        run_pipeline.fetch_congress_buys uses as primary).
+
+        Returns dict matching the 7-factor pipeline contract:
+            {purchases, sales, total, net, recency_days, representatives}
+        Returns {} when no trades found in the lookback window.
         """
-        if not self._api_key:
+        from datetime import timedelta as _td
+        import requests as _req
+
+        cutoff = (datetime.now(timezone.utc) - _td(days=lookback_days)).date().isoformat()
+        purchases = sales = total = 0
+        recency_days = 9999
+        reps: set[str] = set()
+        now_date = datetime.now(timezone.utc).date()
+
+        _HOUSE_URL  = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+        _SENATE_URL = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+
+        cached = self._cache_read("congress", ticker)
+        if cached is not None:
+            return cached
+
+        for url, name_key in [(_SENATE_URL, "senator"), (_HOUSE_URL, "representative")]:
+            try:
+                resp = _req.get(url, timeout=30)
+                if resp.status_code == 403:
+                    log.warning("S3 congress feed %s returned 403 — bucket restricted", name_key)
+                    continue
+                resp.raise_for_status()
+                for rec in resp.json():
+                    ticker_field = str(rec.get("ticker", "") or "").upper().strip()
+                    if ticker_field != ticker.upper():
+                        continue
+                    disclosure = (rec.get("disclosure_date")
+                                  or rec.get("transaction_date") or "")
+                    if not disclosure or disclosure[:10] < cutoff:
+                        continue
+                    tx_type = (rec.get("type") or rec.get("transaction_type") or "").lower()
+                    if "purchase" in tx_type or "buy" in tx_type:
+                        purchases += 1
+                    elif "sale" in tx_type or "sold" in tx_type or "sell" in tx_type:
+                        sales += 1
+                    else:
+                        continue
+                    total += 1
+                    rep = str(rec.get(name_key) or rec.get("name") or "").strip()
+                    if rep:
+                        reps.add(rep)
+                    try:
+                        from datetime import date as _date
+                        d = _date.fromisoformat(disclosure[:10])
+                        recency_days = min(recency_days, (now_date - d).days)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                log.debug("S3 congress feed %s failed: %s", name_key, exc)
+
+        if total == 0:
+            self._cache_write("congress", ticker, {})
             return {}
-        log.debug(
-            "get_congress_trades(%s): FMP congress routes are 404 on this plan — "
-            "returning {} (S3 Stock Watcher is the active source).", ticker
-        )
-        return {}
+
+        result = {
+            "purchases":      purchases,
+            "sales":          sales,
+            "total":          total,
+            "net":            purchases - sales,
+            "recency_days":   recency_days if recency_days < 9999 else None,
+            "representatives": sorted(reps),
+        }
+        self._cache_write("congress", ticker, result)
+        return result
 
     # ── Insider (stable/insider-trading/search) ────────────────────────────────
 
@@ -366,6 +430,41 @@ class FMPClient:
         data = self._get("ratios-ttm", {"symbol": ticker}, bucket="ratios") or []
         result = data[0] if isinstance(data, list) and data else {}
         self._cache_write("ratios", ticker, result)
+        return result
+
+    def get_institutional_ownership(self, ticker: str) -> Dict:
+        """13F institutional holdings summary.
+
+        Uses stable/institutional-ownership/symbol-positions-summary with
+        year + quarter params (required — returns HTTP 400 without them).
+        Fetches the most recently completed quarter automatically.
+
+        Returns aggregate fields: investorsHolding, investorsHoldingChange,
+        increasedPositions, reducedPositions, newPositions, closedPositions,
+        numberOf13FsharesChange, ownershipPercent, ownershipPercentChange.
+        Returns {} if no data or key absent.
+        """
+        if not self._api_key:
+            return {}
+        cached = self._cache_read("f13", ticker)
+        if cached is not None:
+            return cached
+
+        # Determine most recently completed quarter (13F lags ~45 days)
+        now = datetime.now(timezone.utc)
+        # Back off 45 days to ensure the quarter has been filed
+        as_of = now.date() - timedelta(days=45)
+        year = as_of.year
+        quarter = (as_of.month - 1) // 3 + 1
+
+        data = self._get(
+            "institutional-ownership/symbol-positions-summary",
+            {"symbol": ticker, "year": year, "quarter": quarter, "page": 0, "limit": 1},
+            bucket="f13",
+        ) or []
+        result = data[0] if isinstance(data, list) and data else {}
+        if result:
+            self._cache_write("f13", ticker, result)
         return result
 
     def get_price_target_consensus(self, ticker: str) -> Dict:
