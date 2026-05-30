@@ -149,106 +149,28 @@ def _fmp_get(path: str, params: Dict, timeout: int = 20) -> Any:
 
 
 def fetch_fmp_profiles(tickers: List[str]) -> Dict[str, float]:
-    """Fama (2013 Nobel): fetch market caps — FMP single-ticker then yfinance fallback.
+    """Fetch market caps via FMP stable/batch-quote (single call, all tickers).
 
-    FMP /stable/profile batch (comma-separated) is broken on the free tier (returns []).
-    We fetch one ticker at a time, then use yfinance for any misses to avoid
-    consuming the 250 calls/day FMP budget on repeated pipeline runs.
-
-    Strategy: FMP for up to 80 tickers (half of 160), yfinance for the rest.
-    This caps FMP usage at ≤160 calls/day for US market caps, leaving headroom
-    for the EU fetcher's 10 calls.  The shared .cache/fmp_usage.json counter
-    is persisted by the actions/cache step so EU FMPFetcher sees the real budget.
+    Uses FMPClient.get_batch_quotes() — confirmed PASS on Ultimate.
+    Replaces the old N-serial-calls + yfinance-fallback approach.
+    No quota tracking needed: batch-quote is one call regardless of ticker count.
     """
+    if not tickers:
+        return {}
+    client = _FMPClient()
+    if not client._api_key:
+        log.warning("FMP_API_KEY not set — market caps will be 0")
+        return {t: 0.0 for t in tickers}
+
+    batch = client.get_batch_quotes(tickers)
     result: Dict[str, float] = {}
-    api_key = os.getenv("FMP_API_KEY", "")
-
-    fmp_cap = 80   # max tickers to fetch via FMP per run (conserves daily budget)
-
-    if api_key:
-        try:
-            import requests as _req
-            from requests.adapters import HTTPAdapter
-            from urllib3.util.retry import Retry
-
-            # Load the shared daily quota counter (same file used by FMPFetcher EU path)
-            _usage_path = ROOT / ".cache" / "fmp_usage.json"
-            try:
-                _u = json.loads(_usage_path.read_text(encoding="utf-8"))
-                _quota_used = _u["count"] if _u.get("date") == str(datetime.now(timezone.utc).date()) else 0
-            except Exception:
-                _quota_used = 0
-
-            remaining = max(0, 250 - _quota_used)
-            effective_cap = min(fmp_cap, remaining)
-            if effective_cap < fmp_cap:
-                log.warning(
-                    "FMP quota: %d/%d used today — capping US profile fetch at %d (not %d)",
-                    _quota_used, 250, effective_cap, fmp_cap,
-                )
-
-            s = _req.Session()
-            retry_cfg = Retry(total=3, backoff_factor=2.0, status_forcelist=[429, 500, 502, 503])
-            s.mount("https://", HTTPAdapter(max_retries=retry_cfg))
-
-            _fetched = 0
-            for i, ticker in enumerate(tickers[:effective_cap]):
-                try:
-                    url = (
-                        f"https://financialmodelingprep.com/stable/profile"
-                        f"?symbol={ticker}&apikey={api_key}"
-                    )
-                    r = s.get(url, timeout=15)
-                    r.raise_for_status()
-                    data = r.json()
-                    if data and isinstance(data, list):
-                        row = data[0]
-                        cap = float(row.get("marketCap") or row.get("mktCap") or 0)
-                        result[ticker] = cap
-                    _fetched += 1
-                except Exception as exc:
-                    log.debug("FMP profile failed for %s: %s", ticker, exc)
-                if i < effective_cap - 1:
-                    time.sleep(1.0)   # 1 req/s — within FMP free tier (5 req/min)
-
-            # Write back updated quota so EU FMPFetcher sees the true remaining budget
-            try:
-                _usage_path.parent.mkdir(parents=True, exist_ok=True)
-                _usage_path.write_text(
-                    json.dumps({"date": str(datetime.now(timezone.utc).date()), "count": _quota_used + _fetched}),
-                    encoding="utf-8",
-                )
-            except Exception as exc:
-                log.warning("FMP usage persist failed: %s", exc)
-
-            fmp_hits = sum(1 for v in result.values() if v > 0)
-            log.info(
-                "FMP profiles: %d/%d tickers with market cap (quota used today: %d/250)",
-                fmp_hits, min(len(tickers), effective_cap), _quota_used + _fetched,
-            )
-        except Exception as exc:
-            log.warning("FMP profile fetch failed: %s", exc)
-    else:
-        log.warning("FMP_API_KEY not set — using yfinance for all market caps")
-
-    # yfinance fallback for tickers not covered by FMP (or when FMP key absent)
-    missing = [t for t in tickers if t not in result or result[t] == 0]
-    if missing:
-        try:
-            import yfinance as yf
-            log.info("yfinance market cap fallback for %d tickers…", len(missing))
-            for ticker in missing:
-                try:
-                    info = yf.Ticker(ticker).info
-                    cap = float(info.get("marketCap") or 0)
-                    result[ticker] = cap
-                except Exception:
-                    result[ticker] = 0.0
-        except Exception as exc:
-            log.warning("yfinance market cap fallback failed: %s", exc)
+    for ticker in tickers:
+        row = batch.get(ticker, {})
+        cap = float(row.get("marketCap", 0) or 0)
+        result[ticker] = cap
 
     nonzero = sum(1 for v in result.values() if v > 0)
-    log.info("Market cap complete: %d/%d tickers", nonzero, len(tickers))
+    log.info("FMP batch market caps: %d/%d tickers", nonzero, len(tickers))
     return result
 
 
@@ -421,31 +343,23 @@ def score_congress(data: Optional[Dict]) -> float:
 
 
 def _fetch_spy_return() -> float:
-    """Fetch SPY 12-1 month return (Jegadeesh-Titman period) once before thread pool.
+    """SPY 12-1 month return via FMP stable/historical-price-eod/full.
 
-    Called once in run() and passed as a closure to _score_ticker() so all
-    worker threads share the same SPY baseline. Returns 0.0 on any failure so
-    momentum still scores relative to flat market (symmetrical with ticker fallback).
-
+    Called once per pipeline run; result shared across all worker threads.
+    Returns 0.0 on failure (symmetrical with ticker fallback).
     Reference: Jegadeesh & Titman (1993), Journal of Finance 48(1).
     """
+    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
     try:
-        import yfinance as yf
-        spy_df = yf.download("SPY", period="13mo", interval="1d",
-                              progress=False, auto_adjust=True)
-        if spy_df is None or spy_df.empty or len(spy_df) < 22:
+        rows = _FC().get_historical_prices("SPY", limit=280)
+        closes, _, _ = fmp_prices_to_arrays(rows)
+        if len(closes) < 22:
             return 0.0
-        spy_close = spy_df["Close"].squeeze().dropna()
-        if len(spy_close) < 22:
-            return 0.0
-        # 12-1m: price at t-252 to price at t-21 (skip-month avoids reversal)
-        idx_far  = max(0, len(spy_close) - 252)
-        idx_near = max(1, len(spy_close) - 21)
-        return float(
-            (spy_close.iloc[idx_near] - spy_close.iloc[idx_far]) / spy_close.iloc[idx_far]
-        )
+        idx_far  = max(0, len(closes) - 252)
+        idx_near = max(1, len(closes) - 21)
+        return float((closes[idx_near] - closes[idx_far]) / closes[idx_far])
     except Exception as exc:
-        log.warning("SPY 12-1m baseline fetch failed: %s — momentum will use 0.0", exc)
+        log.warning("FMP SPY 12-1m baseline failed: %s — using 0.0", exc)
         return 0.0
 
 
@@ -469,44 +383,39 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
 
     Reference: Jegadeesh & Titman (1993), Journal of Finance 48(1).
     """
+    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
+
     _default: Dict[str, Any] = {
         "return_12_1m":     None,
         "spy_return_12_1m": spy_return,
         "volume_spike":     1.0,
     }
     try:
-        import yfinance as yf
+        rows = _FC().get_historical_prices(ticker, limit=280)
+        closes, volumes, _ = fmp_prices_to_arrays(rows)
 
-        df = yf.download(ticker, period="13mo", interval="1d",
-                         progress=False, auto_adjust=True)
-        if df is None or df.empty or len(df) < 5:
+        if len(closes) < 5:
+            return _default
+        if len(closes) < 22:
             return _default
 
-        close = df["Close"].squeeze().dropna()
-        if len(close) < 22:
-            return _default
-
-        if len(close) < 252:
+        if len(closes) < 252:
             log.info(
                 "fetch_price_data %s: %d bars < 252 — return_12_1m=None (recent IPO)",
-                ticker, len(close),
+                ticker, len(closes),
             )
             ret_12_1m = None
         else:
-            idx_far  = max(0, len(close) - 252)
-            idx_near = max(1, len(close) - 21)
-            ret_12_1m = float(
-                (close.iloc[idx_near] - close.iloc[idx_far]) / close.iloc[idx_far]
-            )
+            idx_far  = max(0, len(closes) - 252)
+            idx_near = max(1, len(closes) - 21)
+            ret_12_1m = float((closes[idx_near] - closes[idx_far]) / closes[idx_far])
 
         volume_spike = 1.0
-        if "Volume" in df.columns:
-            vol = df["Volume"].squeeze().dropna()
-            if len(vol) >= 95:   # need 90-bar baseline + 5 recent bars
-                recent_avg   = float(vol.iloc[-5:].mean())
-                baseline_avg = float(vol.iloc[-95:-5].mean())  # 90 bars, no leakage
-                if baseline_avg > 0:
-                    volume_spike = round(min(20.0, recent_avg / baseline_avg), 4)
+        if len(volumes) >= 95:
+            recent_avg   = sum(volumes[-5:]) / 5.0
+            baseline_avg = sum(volumes[-95:-5]) / 90.0
+            if baseline_avg > 0:
+                volume_spike = round(min(20.0, recent_avg / baseline_avg), 4)
 
         return {
             "return_12_1m":     round(ret_12_1m, 6) if ret_12_1m is not None else None,
@@ -678,8 +587,8 @@ def score_news_fmp(ticker: str) -> float:
 def score_news_sentiment_combined(ticker: str) -> tuple[float, str]:
     """Recency-weighted directional sentiment (Tetlock 2007).
 
-    Returns (score, source) where source ∈ {"fmp", "yfinance", "none"}.
-    FMP articles first; falls back to yfinance headline word-count.
+    Returns (score, source) where source ∈ {"fmp", "none"}.
+    Uses FMP stable/news/stock exclusively (FMP Ultimate, no yfinance fallback).
     """
     from regime_trader.scoring.news_signals import score_news_sentiment  # noqa: PLC0415
 
@@ -689,14 +598,14 @@ def score_news_sentiment_combined(ticker: str) -> tuple[float, str]:
         s = score_news_sentiment(articles)
         if s > 0.0:
             return s, "fmp"
-    s = _score_news_sentiment_yfinance(ticker)
-    return (s, "yfinance" if s > 0.0 else "none")
+    return 0.0, "none"
 
 
 def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
     """Attention/buzz signal — volume of recent coverage (Barber-Odean 2008).
 
-    Returns (score, source) where source ∈ {"fmp", "yfinance", "none"}.
+    Returns (score, source) where source ∈ {"fmp", "none"}.
+    Uses FMP stable/news/stock exclusively.
     """
     from regime_trader.scoring.news_signals import score_news_buzz  # noqa: PLC0415
 
@@ -706,8 +615,7 @@ def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
         s = score_news_buzz(articles)
         if s > 0.0:
             return s, "fmp"
-    s = _score_news_buzz_yfinance(ticker)
-    return (s, "yfinance" if s > 0.0 else "none")
+    return 0.0, "none"
 
 
 def fetch_fmp_insider_all(

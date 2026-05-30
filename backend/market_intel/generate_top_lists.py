@@ -525,17 +525,17 @@ def _read_vix(log_dir: Path) -> Optional[float]:
     except Exception:
         pass
 
-    # Fallback: direct yfinance fetch (adds ~1 s to pipeline but always fresh)
+    # Fallback: FMP stable/quote for ^VIX (real-time, no yfinance needed)
     try:
-        import yfinance as yf
-        df = yf.download("^VIX", period="2d", interval="1d",
-                         progress=False, auto_adjust=True)
-        if not df.empty:
-            vix = float(df["Close"].squeeze().dropna().iloc[-1])
-            log.info("VIX overlay: %.1f (from yfinance fallback)", vix)
-            return vix
+        from regime_trader.services.fmp_client import FMPClient as _FC
+        q = _FC().get_quote("^VIX")
+        if q:
+            vix = float(q.get("price") or q.get("previousClose") or 0)
+            if vix > 0:
+                log.info("VIX overlay: %.1f (from FMP quote)", vix)
+                return vix
     except Exception as exc:
-        log.warning("VIX fetch failed — no macro overlay applied: %s", exc)
+        log.warning("FMP VIX fetch failed — no macro overlay applied: %s", exc)
 
     return None
 

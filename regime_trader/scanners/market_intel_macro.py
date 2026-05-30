@@ -18,7 +18,6 @@ Public API:
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
@@ -112,28 +111,148 @@ _BEAR_WORDS: frozenset = frozenset([
 # ── Data fetching ──────────────────────────────────────────────────────────────
 
 def safe_download(ticker: str, period: str = "1y") -> Optional[Any]:
-    """Download OHLCV data via yfinance; return None on failure.
+    """Download OHLCV data via FMP stable/historical-price-eod/full.
 
-    Fama (2013 Nobel) — reliable price history is the foundation of any
-    market signal computation.
+    Works for US, EU, Asia, indices (^VIX, ^TNX), ETFs and futures (CL=F, GC=F).
+    Replaces yfinance.download — FMP Ultimate confirmed live for all these symbols.
 
     Args:
-        ticker: Yahoo Finance ticker symbol.
-        period: lookback period string (e.g. "1y", "60d").
+        ticker: FMP-compatible symbol (same as Yahoo Finance for most instruments).
+        period: lookback hint ("1y", "2y", "5y", "10y", "60d", "13mo").
 
     Returns:
-        pandas DataFrame or None.
+        _PriceArray with Close/Volume access, or None on failure.
     """
+    from regime_trader.services.fmp_client import FMPClient, fmp_prices_to_arrays  # noqa: PLC0415
+    _period_bars = {"1y": 252, "2y": 504, "5y": 1260, "10y": 2520, "60d": 60, "13mo": 280}
+    limit = _period_bars.get(period, 280)
     try:
-        import yfinance as yf
-        df = yf.download(ticker, period=period, interval="1d",
-                         progress=False, auto_adjust=True)
-        if df.empty or len(df) < 10:
+        rows = FMPClient().get_historical_prices(ticker, limit=limit)
+        if not rows or len(rows) < 10:
             return None
-        return df
+        closes, volumes, dates = fmp_prices_to_arrays(rows)
+        return _PriceArray(closes, volumes, dates)
     except Exception as exc:
         log.warning("safe_download(%s): %s", ticker, exc)
         return None
+
+
+class _PriceArray:
+    """Minimal DataFrame-like adapter over FMP price arrays for market_intel_macro callers."""
+
+    class _Col:
+        """List-backed column with the subset of pandas API used by this module."""
+
+        def __init__(self, data: list) -> None:
+            self._d = list(data)
+
+        def dropna(self) -> "_PriceArray._Col":
+            return _PriceArray._Col([x for x in self._d if x is not None])
+
+        def __len__(self) -> int:
+            return len(self._d)
+
+        def __bool__(self) -> bool:
+            return bool(self._d)
+
+        @property
+        def iloc(self) -> "_PriceArray._Iloc":
+            return _PriceArray._Iloc(self._d)
+
+        def rolling(self, w: int, min_periods: Optional[int] = None) -> "_PriceArray._Rolling":
+            return _PriceArray._Rolling(self._d, w)
+
+        def diff(self) -> "_PriceArray._Col":
+            return _PriceArray._Col(
+                [0.0] + [self._d[i] - self._d[i-1] for i in range(1, len(self._d))]
+            )
+
+        def clip(self, lower=None, upper=None) -> "_PriceArray._Col":
+            d = list(self._d)
+            if lower is not None:
+                d = [max(lower, x) for x in d]
+            if upper is not None:
+                d = [min(upper, x) for x in d]
+            return _PriceArray._Col(d)
+
+        def replace(self, val, rep) -> "_PriceArray._Col":
+            return _PriceArray._Col([rep if x == val else x for x in self._d])
+
+        def mean(self) -> float:
+            return sum(self._d) / max(len(self._d), 1)
+
+        def __truediv__(self, other) -> "_PriceArray._Col":
+            if isinstance(other, _PriceArray._Col):
+                return _PriceArray._Col([a/b if b else 0 for a, b in zip(self._d, other._d)])
+            return _PriceArray._Col([x / other for x in self._d])
+
+        def __sub__(self, other) -> "_PriceArray._Col":
+            if isinstance(other, _PriceArray._Col):
+                return _PriceArray._Col([a - b for a, b in zip(self._d, other._d)])
+            return _PriceArray._Col([x - other for x in self._d])
+
+        def __neg__(self) -> "_PriceArray._Col":
+            return _PriceArray._Col([-x for x in self._d])
+
+    class _Iloc:
+        def __init__(self, data: list) -> None:
+            self._d = data
+        def __getitem__(self, key):
+            return self._d[key]
+        def mean(self) -> float:
+            return sum(self._d) / max(len(self._d), 1)
+
+    class _Rolling:
+        def __init__(self, data: list, w: int) -> None:
+            self._d, self._w = data, w
+        def mean(self) -> "_PriceArray._Col":
+            result = []
+            for i in range(len(self._d)):
+                start = max(0, i - self._w + 1)
+                window = self._d[start:i+1]
+                result.append(sum(window) / len(window) if window else float("nan"))
+            return _PriceArray._Col(result)
+        def std(self) -> "_PriceArray._Col":
+            import math as _math
+            result = []
+            for i in range(len(self._d)):
+                start = max(0, i - self._w + 1)
+                window = self._d[start:i+1]
+                if len(window) < 2:
+                    result.append(float("nan"))
+                else:
+                    mu = sum(window) / len(window)
+                    result.append(_math.sqrt(sum((x-mu)**2 for x in window) / len(window)))
+            return _PriceArray._Col(result)
+
+    def __init__(self, closes: list, volumes: list, dates: list) -> None:
+        self._c, self._v, self._d = closes, volumes, dates
+
+    def __len__(self) -> int:
+        return len(self._c)
+
+    @property
+    def empty(self) -> bool:
+        return len(self._c) == 0
+
+    def __getitem__(self, key: str) -> "_PriceArray._Col":
+        if key in ("Close", "close"):
+            return _PriceArray._Col(self._c)
+        if key in ("Volume", "volume"):
+            return _PriceArray._Col(self._v)
+        if key in ("Open", "High", "Low"):
+            return _PriceArray._Col(self._c)   # proxy: use close
+        raise KeyError(key)
+
+    @property
+    def columns(self) -> list:
+        return ["Close", "Volume", "Open", "High", "Low"]
+
+    def squeeze(self) -> "_PriceArray._Col":
+        return _PriceArray._Col(self._c)
+
+    def dropna(self, subset=None) -> "_PriceArray":
+        return self
 
 
 def fetch_commodity_prices(commodity: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -781,61 +900,62 @@ def fetch_stock_pick_data(
     ticker: str,
     fallback: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Fetch price + fundamental quality metrics for a single equity.
+    """Fetch price + fundamental quality metrics via FMP Ultimate.
 
-    Merton (1997 Nobel) — distance-to-default via debt/equity ratio.
+    Uses stable/historical-price-eod/full for price/SMA200, stable/quote for
+    current price, and stable/ratios-ttm for D/E ratio + net margin.
+    Fully on FMP — no yfinance.
 
     Args:
-        ticker:   Primary ticker to fetch.
+        ticker:   Primary ticker.
         fallback: Secondary ticker if primary returns insufficient data.
 
     Returns:
         Dict with price, sma200, de_ratio, net_margin, stock_score; or None.
     """
-    try:
-        import yfinance as yf
-    except ImportError:
-        log.warning("yfinance not installed — fetch_stock_pick_data unavailable")
+    from regime_trader.services.fmp_client import FMPClient, fmp_prices_to_arrays  # noqa: PLC0415
+
+    client = FMPClient()
+    if not client._api_key:
+        log.warning("FMP_API_KEY not set — fetch_stock_pick_data unavailable")
         return None
 
     for tk in ([ticker] + ([fallback] if fallback else [])):
         try:
-            t = yf.Ticker(tk)
-            hist = t.history(period="1y", interval="1d", auto_adjust=True)
-            if hist.empty or len(hist) < 30:
-                continue
-            close = hist["Close"].dropna()
-            if len(close) < 2:
+            rows = client.get_historical_prices(tk, limit=252)
+            closes, _, _ = fmp_prices_to_arrays(rows)
+            if len(closes) < 2:
                 continue
 
-            price = float(close.iloc[-1])
-            prev1 = float(close.iloc[-2])
+            price  = closes[-1]
+            prev1  = closes[-2]
             ret_1d = (price / prev1 - 1.0) if prev1 > 0 else 0.0
 
-            sma_raw = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else float("nan")
-            sma200 = None if not math.isfinite(float(sma_raw)) else float(sma_raw)
+            sma200 = None
+            if len(closes) >= 200:
+                sma200 = round(sum(closes[-200:]) / 200, 2)
             above_sma200 = bool(price > sma200) if sma200 is not None else False
 
-            info: Dict[str, Any] = {}
-            try:
-                info = t.info or {}
-            except Exception:
-                pass
+            # Fundamentals from ratios-ttm
+            ratios = client.get_ratios_ttm(tk)
+            q      = client.get_quote(tk)
 
-            company_name = info.get("shortName", info.get("longName", tk))
-            de_raw = info.get("debtToEquity")
-            de_ratio = de_raw / 100.0 if de_raw is not None else None
-            net_mg_f = info.get("profitMargins")
-            net_margin = net_mg_f * 100.0 if net_mg_f is not None else None
+            company_name = q.get("name", tk)
+
+            de_raw = ratios.get("debtEquityRatioTTM") or ratios.get("debtToEquityRatioTTM")
+            de_ratio = float(de_raw) if de_raw is not None else None
+
+            nm_raw = ratios.get("netProfitMarginTTM")
+            net_margin = float(nm_raw) * 100.0 if nm_raw is not None else None
 
             momentum_c = 0.85 if above_sma200 else 0.25
             de_c = (
-                0.25 if de_ratio is None else   # missing data → penalized, not rewarded
+                0.25 if de_ratio is None else
                 0.50 if de_ratio < 0.50 else
                 0.35 if de_ratio < 1.00 else 0.10
             )
             mg_c = (
-                0.20 if net_margin is None else  # missing data → penalized, not rewarded
+                0.20 if net_margin is None else
                 0.50 if net_margin > 15 else
                 0.38 if net_margin > 5 else
                 0.20 if net_margin > 0 else 0.05
@@ -848,12 +968,12 @@ def fetch_stock_pick_data(
                 "name":         company_name,
                 "price":        round(price, 2),
                 "ret_1d":       round(ret_1d, 6),
-                "sma200":       round(sma200, 2) if sma200 is not None else None,
+                "sma200":       sma200,
                 "above_sma200": above_sma200,
                 "de_ratio":     round(de_ratio, 2) if de_ratio is not None else None,
                 "net_margin":   round(net_margin, 1) if net_margin is not None else None,
                 "stock_score":  stock_score,
-                "close_30d":    close.iloc[-30:],
+                "close_30d":    closes[-30:],
                 "is_fallback":  tk != ticker,
             }
         except Exception as exc:
