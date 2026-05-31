@@ -57,10 +57,10 @@ except ImportError:
 log = logging.getLogger("discord.send_toplists")
 
 # ── Color palette (severity-driven) ───────────────────────────────────────────
-_COLOR_GREEN  = 0x00FF00
+_COLOR_GREEN = 0x00FF00
 _COLOR_ORANGE = 0xFFA500
-_COLOR_RED    = 0xFF0000
-_COLOR_BLUE   = 0x3498DB
+_COLOR_RED = 0xFF0000
+_COLOR_BLUE = 0x3498DB
 
 _CRITICAL_FLAGS = frozenset({"STALE_SOURCE", "MISSING_AMOUNT", "DEAD_FEED"})
 
@@ -80,7 +80,7 @@ _FACTOR_DISPLAY: List[tuple] = [
 
 # ── VIX regime thresholds ─────────────────────────────────────────────────────
 _VIX_BEARISH = 25.0
-_VIX_STABLE  = 15.0
+_VIX_STABLE = 15.0
 
 # ── Sector normalisation ───────────────────────────────────────────────────────
 _SECTOR_SHORT: Dict[str, str] = {
@@ -103,10 +103,11 @@ _SECTOR_MISC = "🔲 Misc"
 
 # ── Buyback yield thresholds ───────────────────────────────────────────────────
 _BUYBACK_HIGH = 0.10
-_BUYBACK_LOW  = 0.05
+_BUYBACK_LOW = 0.05
 
 _MEDAL: Dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
-_MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸", "US": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
+_MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸",
+                                 "US": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
 
 _STALE_HOURS = 25
 _NO_CATALYST = "no primary catalyst detected"
@@ -128,6 +129,181 @@ def _fmt_cap(market_cap: float) -> str:
         v = market_cap / 1e9
         return f"${v:.0f}B" if v >= 10 else f"${v:.1f}B"
     return f"${market_cap/1e6:.0f}M"
+
+
+def _fmt_usd(usd: float) -> str:
+    if not usd or usd <= 0:
+        return "$0"
+    if usd >= 100_000:
+        return f"${usd/1000:.0f}k"
+    value = usd / 1000.0
+    formatted = f"${value:.1f}k"
+    return formatted.rstrip("0").rstrip(".")
+
+
+def _fmt_insider_badge(entry: Dict[str, Any]) -> Optional[str]:
+    usd = float(entry.get("insider_usd", 0) or 0)
+    if usd <= 0:
+        return None
+    label = f"Insider {_fmt_usd(usd)}"
+    ceo_tier = (entry.get("ceo_conviction_tier") or "").strip()
+    if ceo_tier and ceo_tier.lower() != "none":
+        return f"{label} CEO"
+    form4_count = int(entry.get("form4_count", 0) or 0)
+    if form4_count > 0:
+        return f"{label} · {form4_count} filings"
+    return label
+
+
+def _fmt_eps_badge(entry: Dict[str, Any]) -> str:
+    pct = entry.get("earnings_surprise_pct")
+    days = int(entry.get("earnings_surprise_days") or 0)
+    if pct is None or days > 90:
+        return "EPS —"
+    pct_value = float(pct)
+    if pct_value < 0:
+        return f"EPS miss {abs(pct_value * 100):.1f}%"
+    return f"EPS +{pct_value * 100:.1f}% · {days}d ago"
+
+
+def _fmt_pt_badge(entry: Dict[str, Any]) -> str:
+    target = entry.get("price_target") or entry.get("target_price")
+    if target is None:
+        target = entry.get("targetConsensus") or entry.get(
+            "price_target_consensus")
+    price = entry.get("current_price") or entry.get(
+        "quote_price") or entry.get("price")
+    try:
+        target_val = float(target) if target is not None else 0.0
+        price_val = float(price) if price is not None else 0.0
+    except Exception:
+        target_val = 0.0
+        price_val = 0.0
+    if target_val > 0 and price_val > 0:
+        upside = (target_val - price_val) / price_val * 100
+        sign = "+" if upside >= 0 else ""
+        return f"PT ${target_val:.0f} · {sign}{upside:.0f}% upside"
+    score = entry.get("price_target_upside_score")
+    try:
+        score_val = float(score) if score is not None else 0.0
+    except Exception:
+        score_val = 0.0
+    if score_val <= 0:
+        return "PT —"
+    upside_pct = score_val * 100 - 50
+    sign = "+" if upside_pct >= 0 else ""
+    return f"PT {sign}{upside_pct:.0f}% upside"
+
+
+def _fmt_analyst_badge(entry: Dict[str, Any]) -> str:
+    source = (entry.get("analyst_consensus_source") or "").strip()
+    label = source if source else "Consensus —"
+    n = int(entry.get("analyst_revision_n_analysts") or 0)
+    if n > 0:
+        label += f" · {n} upgrades"
+    try:
+        rev_score = float(entry.get("analyst_revision_score") or 0.0)
+    except Exception:
+        rev_score = 0.0
+    if rev_score > 0.6:
+        label += " · rev ↑"
+    elif rev_score < 0.4:
+        label += " · rev ↓"
+    return label
+
+
+def _fmt_transcript_badge(entry: Dict[str, Any]) -> str:
+    signals = entry.get("transcript_signals")
+    if not isinstance(signals, dict) or not signals:
+        return "No transcript"
+    tone = (signals.get("guidance_tone") or "").strip().lower()
+    tone_map = {
+        "raised":    "Guidance ↑",
+        "maintained": "Guidance →",
+        "lowered":   "Guidance ↓",
+    }
+    guidance = tone_map.get(tone, "Guidance")
+    extras: List[str] = []
+    if signals.get("buyback_mentioned"):
+        extras.append("Buyback")
+    elif (signals.get("management_confidence") or "").strip().lower() == "high":
+        extras.append("conf. high")
+    return " · ".join([guidance] + extras)
+
+
+def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
+    market_norm = (market or "US").upper()
+    factors = entry.get("factors") or {}
+    raw_values: Dict[str, float] = {
+        "analyst_revision": float(entry.get("analyst_revision_score") or 0.0),
+        "price_target_upside": float(entry.get("price_target_upside_score") or 0.0),
+    }
+    labels = [
+        ("insider_conviction", "IC"),
+        ("insider_breadth", "IB"),
+        ("congress", "CG"),
+        ("news_sentiment", "NS"),
+        ("news_buzz", "NB"),
+        ("momentum_long", "MO"),
+        ("volume_attention", "VA"),
+        ("analyst_revision", "AR"),
+        ("price_target_upside", "PT"),
+    ]
+    parts: List[str] = []
+    for key, label in labels:
+        if market_norm not in {"US", "USA"} and key not in {"momentum_long", "volume_attention", "price_target_upside"}:
+            parts.append(f"{label}:—")
+            continue
+        value = raw_values.get(key) if key in raw_values else float(
+            factors.get(key, 0) or 0)
+        parts.append(f"{label}:—" if value <= 0 else f"{label}:{value:.2f}")
+    qf = float(entry.get("quality_piotroski_score") or 0.0)
+    if qf > 0:
+        parts.append(f"QF:{qf:.2f}")
+    suffix = ""
+    if market_norm.startswith("EU"):
+        suffix = " [EU]"
+    elif market_norm == "ASIA":
+        suffix = " [Asia]"
+    return " ".join(parts) + suffix
+
+
+def _build_ticker_card(
+    rank: int,
+    entry: Dict[str, Any],
+    market: str = "US",
+    kill_switch: bool = False,
+    mid_cap: bool = False,
+) -> Dict[str, Any]:
+    ticker = entry.get("ticker", "?")
+    score = float(entry.get("final_score", 0) or 0)
+    pct = int(entry.get("percentile", 0) or 0)
+    badge = _badge_from_score(score)
+    if kill_switch:
+        badge = f"[DAMPENED] {badge}"
+    mktcap_str = ""
+    if mid_cap:
+        market_cap = float(entry.get("market_cap", 0) or 0)
+        if market_cap > 0:
+            mktcap_str = f" · ${market_cap / 1e9:.1f}B"
+    factor_matrix = _fmt_factor_matrix(entry, market)
+    badge_texts = [
+        _fmt_insider_badge(entry),
+        _fmt_eps_badge(entry),
+        _fmt_pt_badge(entry),
+        _fmt_analyst_badge(entry),
+        _fmt_transcript_badge(entry),
+    ]
+    badge_line = " ".join([b for b in badge_texts if b])
+    name = f"#{rank} {ticker} {badge} p{pct} · {score:.4f}{mktcap_str}"
+    if entry.get("esg_flag"):
+        name = f"{name} | ESG!"
+    value = _truncate(f"`{factor_matrix}`\n{badge_line}", 1024)
+    return {
+        "name": name,
+        "value": value,
+        "inline": False,
+    }
 
 
 def _truncate(text: str, max_chars: int = 1024) -> str:
@@ -169,7 +345,8 @@ def _embed_color(anomaly_map: Dict[str, List[str]], kill_switch: bool) -> int:
 
 def _data_age_hours(generated_at: str) -> Optional[float]:
     try:
-        ts = datetime.fromisoformat((generated_at or "").replace("Z", "+00:00"))
+        ts = datetime.fromisoformat(
+            (generated_at or "").replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
     except Exception:
         return None
@@ -203,56 +380,48 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
 
     Priority order (max 3 signals emitted):
       1. INSIDER: insider_usd > 0 → "Insider $Xk [CEO]"
-      2. EARNINGS (PEAD ≤90d): earnings_surprise_pct → "EPS beat/miss ±X% (Nd ago)"
+      2. EPS: earnings_surprise_pct → "EPS +X% · Nd ago" / "EPS miss X%"
       3. CONGRESS: quiver_evidence.congress.purchases > 0 → "Nx congress buy · rep"
       4. MOMENTUM: |momentum_spy_relative| > 0.05 → "±X% vs SPY 12m"
-      5. ANALYST REVISION (fallback only, no other signal): analyst_revision_n ≥ 5
-
-    Returns _NO_CATALYST when no signal fires.
+      5. ANALYST REVISION (fallback only): analyst_revision_n_analysts ≥ 5
     """
     signals: list[str] = []
 
-    # 1. INSIDER
     usd = float(entry.get("insider_usd", 0) or 0)
     if usd > 0:
-        if usd < 100_000:
-            usd_str = f"${round(usd / 1000, 1)}k"
+        usd_label = _fmt_usd(usd)
+        ceo_tier = (entry.get("ceo_conviction_tier") or "").strip()
+        if ceo_tier and ceo_tier.lower() != "none":
+            signals.append(f"Insider {usd_label} CEO")
         else:
-            usd_str = f"${round(usd / 1000, 0):.0f}k"
-        ceo_tier = entry.get("ceo_conviction_tier", "none") or "none"
-        ceo_part = " CEO" if ceo_tier != "none" else ""
-        signals.append(f"Insider {usd_str}{ceo_part}")
+            signals.append(f"Insider {usd_label}")
 
-    # 2. EARNINGS SURPRISE (PEAD — Bernard & Thomas 1989, ≤90d window)
-    eps_pct  = entry.get("earnings_surprise_pct")
+    eps_pct = entry.get("earnings_surprise_pct")
     eps_days = int(entry.get("earnings_surprise_days") or 0)
     if eps_pct is not None and eps_days <= 90:
-        verb    = "beat" if eps_pct >= 0 else "miss"
-        sign    = "+" if eps_pct >= 0 else "-"
-        pct_fmt = abs(eps_pct * 100)
-        signals.append(f"EPS {verb} {sign}{pct_fmt:.1f}% ({eps_days}d ago)")
+        pct = float(eps_pct)
+        if pct < 0:
+            signals.append(f"EPS miss {abs(pct * 100):.1f}%")
+        else:
+            signals.append(f"EPS +{pct * 100:.1f}% · {eps_days}d ago")
 
-    # 3. CONGRESS
-    congress   = (entry.get("quiver_evidence") or {}).get("congress", {})
-    cg_buys    = int(congress.get("purchases", 0) or 0)
+    congress = (entry.get("quiver_evidence") or {}).get("congress", {})
+    cg_buys = int(congress.get("purchases", 0) or 0)
     if cg_buys > 0:
-        reps       = congress.get("representatives") or []
-        rep_str    = reps[0][:12] if reps else "members"
-        recency    = congress.get("recency_days")
-        rec_part   = f" ({recency}d ago)" if recency is not None else ""
-        signals.append(f"{cg_buys}x congress buy · {rep_str}{rec_part}")
+        reps = congress.get("representatives") or []
+        rep_str = reps[0][:12] if reps else "members"
+        signals.append(f"{cg_buys}x congress buy · {rep_str}")
 
-    # 4. MOMENTUM
     rel = float(entry.get("momentum_spy_relative", 0) or 0)
     if abs(rel) > 0.05:
         sign = "+" if rel >= 0 else ""
         signals.append(f"{sign}{rel * 100:.1f}% vs SPY 12m")
 
-    # 5. ANALYST REVISION — fallback only (no other signal fired)
     if not signals:
-        n = int(entry.get("analyst_revision_n", 0) or 0)
+        n = int(entry.get("analyst_revision_n_analysts",
+                entry.get("analyst_revision_n", 0)) or 0)
         if n >= 5:
-            signals.append(f"analyst revision signal ({n} analysts)")
+            signals.append(f"analyst revision ({n} analysts)")
 
     result = " · ".join(signals[:3])
     return (result or _NO_CATALYST)[:80]
@@ -261,16 +430,15 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
     buckets: Dict[str, List[tuple]] = {}
     for e in entries:
-        raw    = (e.get("sector") or "").strip()
-        label  = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
+        raw = (e.get("sector") or "").strip()
+        label = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
         ticker = e.get("ticker", "?")
-        score  = float(e.get("final_score", 0))
+        score = float(e.get("final_score", 0))
         buckets.setdefault(label, []).append((ticker, score))
     return {
         lbl: sorted(pairs, key=lambda x: -x[1])[:2]
         for lbl, pairs in buckets.items()
     }
-
 
 
 # ── Field builders ─────────────────────────────────────────────────────────────
@@ -283,75 +451,26 @@ def _ticker_detail_field(
     buyback_conv: Optional[float] = None,
     mid_cap: bool = False,
     all_scores: Optional[List[float]] = None,
+    kill_switch: bool = False,
 ) -> Dict[str, Any]:
-    """Institutional 3-line ticker card.
-
-    Line 1: {score:.4f}  {bar8}  p{pct}  {badge}  [CEO tag]
-    Line 2: IC:{v}  IB:{v}  CG:{v}  NS:{v}  NB:{v}  MO:{v}  VA:{v}
-             (values < 0.05 display as — )
-    Line 3: {catalyst}
-    ─────────────────────
-    """
-    ticker       = entry.get("ticker", "?")
-    company_name = (entry.get("company_name") or "").strip()
-    score        = float(entry.get("final_score", 0))
-    badge        = entry.get("badge", "WATCHLIST")
-    factors      = entry.get("factors") or {}
-    market       = entry.get("market", "USA")
-
-    # Percentile
-    pct = _compute_percentile(score, all_scores) if all_scores else 0
-
-    # Bar
-    bar_str = _score_bar(score, width=8)
-
-    # CEO tag
-    ceo_tier = entry.get("ceo_conviction_tier", "none")
-    if ceo_tier and ceo_tier != "none":
-        ceo_tag = f"  | CEO {ceo_tier.upper()}"
-    elif entry.get("ceo_buy"):
-        ceo_tag = "  | CEO BUY"
-    else:
-        ceo_tag = ""
-
-    # Anomaly / boost tags
-    flag_tag    = "  ⚠️" if anomaly_flags else ""
-    buyback_tag = f"  🔄+{buyback_conv:.2f}" if buyback_conv is not None else ""
-    boost       = float(entry.get("congress_boost", 0.0))
-    boost_tag   = f"  🏛+{boost:.2f}" if boost > 0.0 else ""
-
-    if rank_delta and rank_delta > 0:
-        trend_tag = f"  🟢+{rank_delta}"
-    elif rank_delta and rank_delta < 0:
-        trend_tag = f"  🔴{rank_delta}"
-    else:
-        trend_tag = ""
-
-    line1 = f"{score:.4f}  {bar_str}  p{pct}  {badge}{ceo_tag}{boost_tag}{buyback_tag}{trend_tag}{flag_tag}"
-
-    # Line 2: 7-factor matrix — zeros as —
-    def _fmt(key: str) -> str:
-        v = float(factors.get(key, 0) or 0)
-        return "—" if v < 0.05 else f"{v:.2f}"
-
-    parts = [f"{lbl}:{_fmt(key)}" for key, lbl in _FACTOR_DISPLAY]
-    line2 = "  ".join(parts)
-
-    # Line 3: catalyst
-    line3 = _compute_catalyst(entry)
-
-    flag  = _MARKET_FLAGS.get(market, "🌐")
-    value = _truncate(f"{line1}\n{line2}\n{line3}\n─────────────────────", 1020)
-
-    name_base = f"#{rank} {flag} {ticker}"
-    if company_name:
-        available = 256 - len(name_base) - 3
-        safe_co   = company_name[:available] if len(company_name) > available else company_name
-        name = f"{name_base} | {safe_co}"
-    else:
-        name = name_base
-
-    return {"name": name, "value": value, "inline": False}
+    if all_scores is not None:
+        entry["percentile"] = _compute_percentile(
+            float(entry.get("final_score", 0) or 0), all_scores)
+    field = _build_ticker_card(
+        rank,
+        entry,
+        market=entry.get("market", "US"),
+        kill_switch=kill_switch,
+        mid_cap=mid_cap,
+    )
+    if anomaly_flags:
+        field["name"] = f"{field['name']} ⚠️"
+    if rank_delta is not None:
+        if rank_delta > 0:
+            field["name"] = f"{field['name']} ▲{rank_delta}"
+        elif rank_delta < 0:
+            field["name"] = f"{field['name']} ▼{abs(rank_delta)}"
+    return field
 
 
 def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> Optional[Dict[str, Any]]:
@@ -362,9 +481,9 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
     lines = []
     for e in entries[:3]:
         ticker = e.get("ticker", "?")
-        score  = float(e.get("final_score", 0))
-        pct    = _compute_percentile(score, all_scores)
-        cat    = _compute_catalyst(e)
+        score = float(e.get("final_score", 0))
+        pct = _compute_percentile(score, all_scores)
+        cat = _compute_catalyst(e)
         ceo_tier = e.get("ceo_conviction_tier", "none")
         ceo_note = f" · CEO {ceo_tier}" if ceo_tier and ceo_tier != "none" else ""
         if pct >= 95:
@@ -387,8 +506,8 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
 
 def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
     """Pipeline health summary from intel_source_status.json top-level fields."""
-    meta   = status.get("_edgar_meta", {})
-    orth   = status.get("factor_orthogonality", {})
+    meta = status.get("_edgar_meta", {})
+    orth = status.get("factor_orthogonality", {})
 
     # Latency
     generated_at = status.get("generated_at") or meta.get("last_run", "")
@@ -396,13 +515,13 @@ def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
     age_str = f"{age_h:.1f}h" if age_h is not None else "?"
 
     # Orthogonality
-    max_rho  = orth.get("max_abs_correlation", 0.0)
+    max_rho = orth.get("max_abs_correlation", 0.0)
     max_pair = orth.get("max_pair", [])
-    ldp      = orth.get("low_density_pairs", [])
+    ldp = orth.get("low_density_pairs", [])
     if max_pair and len(max_pair) == 2:
         pair_str = (
-            f"{max_pair[0].replace('_score','').replace('_','.')}"
-            f"<->{max_pair[1].replace('_score','').replace('_','.')}"
+            f"{max_pair[0].replace('_score', '').replace('_', '.')}"
+            f"<->{max_pair[1].replace('_score', '').replace('_', '.')}"
         )
         orth_line = f"Orthogonality: max rho={max_rho:.3f} ({pair_str})"
     else:
@@ -412,7 +531,8 @@ def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
 
     # Dead factors (density < 0.05)
     densities = orth.get("factor_densities", {})
-    dead = [f.replace("_score", "") for f, d in densities.items() if isinstance(d, float) and d < 0.05]
+    dead = [f.replace("_score", "") for f, d in densities.items()
+            if isinstance(d, float) and d < 0.05]
     dead_str = ", ".join(dead) if dead else "none"
 
     # CEO tiers
@@ -421,11 +541,12 @@ def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
     for r in results:
         t = r.get("ceo_conviction_tier", "none") or "none"
         tier_counts[t] = tier_counts.get(t, 0) + 1
-    tier_parts = [f"{n}x {t}" for t, n in sorted(tier_counts.items()) if t != "none" and n > 0]
+    tier_parts = [f"{n}x {t}" for t, n in sorted(
+        tier_counts.items()) if t != "none" and n > 0]
     ceo_str = ", ".join(tier_parts) if tier_parts else "none"
 
-    tickers  = meta.get("ticker_count", len(results))
-    errors   = meta.get("error_count", 0)
+    tickers = meta.get("ticker_count", len(results))
+    errors = meta.get("error_count", 0)
     quarantine = meta.get("quarantine_count", 0)
 
     lines = [
@@ -469,7 +590,7 @@ def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
             if not isinstance(rec, dict):
                 continue
             ticker = rec.get("ticker", "")
-            flag   = rec.get("flag", "")
+            flag = rec.get("flag", "")
             if ticker and flag:
                 result.setdefault(ticker, []).append(flag)
         return result
@@ -492,7 +613,7 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
 
     factors = {key: _get(key) for key, _ in _FACTOR_DISPLAY}
 
-    eps_pct  = raw.get("earnings_surprise_pct")   # float | None
+    eps_pct = raw.get("earnings_surprise_pct")   # float | None
     eps_days = int(raw.get("earnings_surprise_days") or 0)
 
     return {
@@ -542,23 +663,28 @@ def build_payload(
 
     if is_status_schema:
         generated_at = _timestamp_from_status(status)
-        run_id   = status.get("run_id", "")
-        vix_val  = status.get("vix")
+        run_id = status.get("run_id", "")
+        vix_val = status.get("vix")
         kill_switch = status.get("kill_switch", False)
 
         # Build per-market top-5 from top_by_market (already sorted by final_score)
         tbm = status.get("top_by_market", {})
         # top_by_market values are full result dicts
-        us_entries   = [_normalise_entry(e) for e in (tbm.get("US") or tbm.get("USA") or [])[:5]]
-        eu_entries   = [_normalise_entry(e) for e in (tbm.get("EUROPE") or [])[:5]]
-        asia_entries = [_normalise_entry(e) for e in (tbm.get("ASIA") or [])[:5]]
+        us_entries = [_normalise_entry(e) for e in (
+            tbm.get("US") or tbm.get("USA") or [])[:5]]
+        eu_entries = [_normalise_entry(e)
+                      for e in (tbm.get("EUROPE") or [])[:5]]
+        asia_entries = [_normalise_entry(e)
+                        for e in (tbm.get("ASIA") or [])[:5]]
 
         # All results for percentile calculation
-        all_results  = status.get("results", [])
-        all_scores   = sorted([float(r.get("final_score", 0) or 0) for r in all_results if r.get("final_score")])
+        all_results = status.get("results", [])
+        all_scores = sorted([float(r.get("final_score", 0) or 0)
+                            for r in all_results if r.get("final_score")])
 
         # Mid caps: non-top-5 entries with cap_tier == "mid", cross-market
-        top_tickers = {e["ticker"] for e in us_entries + eu_entries + asia_entries}
+        top_tickers = {e["ticker"]
+                       for e in us_entries + eu_entries + asia_entries}
         mid_caps = sorted(
             [_normalise_entry(r) for r in all_results
              if r.get("cap_tier") == "mid" and r.get("ticker") not in top_tickers],
@@ -568,16 +694,17 @@ def build_payload(
     else:
         # Legacy top_lists.json schema — graceful degradation
         generated_at = _timestamp_from_status(status)
-        run_id   = status.get("source_run_id", status.get("run_id", ""))
-        vix_val  = status.get("vix")
+        run_id = status.get("source_run_id", status.get("run_id", ""))
+        vix_val = status.get("vix")
         kill_switch = status.get("kill_switch", False)
 
         top_buys = status.get("top_buys") or []
-        us_entries   = top_buys[:5]
-        eu_entries   = list(status.get("top_buys_europe") or [])[:5]
+        us_entries = top_buys[:5]
+        eu_entries = list(status.get("top_buys_europe") or [])[:5]
         asia_entries = list(status.get("top_buys_asia") or [])[:5]
-        all_scores   = sorted([float(e.get("final_score", 0)) for e in top_buys if e.get("final_score")])
-        mid_caps     = list(status.get("mid_caps") or [])[:5]
+        all_scores = sorted([float(e.get("final_score", 0))
+                            for e in top_buys if e.get("final_score")])
+        mid_caps = list(status.get("mid_caps") or [])[:5]
 
     # ── Timing ───────────────────────────────────────────────────────────────
     age_h = _data_age_hours(generated_at)
@@ -597,8 +724,8 @@ def build_payload(
     try:
         if satellite:
             for c in (satellite.get("cannibals") or []):
-                t    = (c.get("ticker") or "").upper()
-                yld  = float(c.get("buyback_yield") or 0.0)
+                t = (c.get("ticker") or "").upper()
+                yld = float(c.get("buyback_yield") or 0.0)
                 conv = _buyback_conviction(yld)
                 if t and conv is not None:
                     buyback_conv_of[t] = conv
@@ -627,8 +754,9 @@ def build_payload(
     ) if alerts else ""
 
     # ── Description ──────────────────────────────────────────────────────────
-    vix_regime = get_market_regime(float(vix_val)) if vix_val is not None else "VIX —"
-    age_note   = f"  |  Data: {age_h:.1f}h ago" if age_h is not None else ""
+    vix_regime = get_market_regime(
+        float(vix_val)) if vix_val is not None else "VIX —"
+    age_note = f"  |  Data: {age_h:.1f}h ago" if age_h is not None else ""
     description = (
         f"**[REGIME TRADER]** Daily Market Report — **{date_str}**\n"
         f"{vix_regime}{age_note}"
@@ -636,57 +764,86 @@ def build_payload(
     )
 
     # ── Shadow rank map (for trend arrow) ────────────────────────────────────
-    shadow_buys    = status.get("shadow_top_buys") or []
-    shadow_rank_of = {e.get("ticker", ""): i for i, e in enumerate(shadow_buys, 1)}
+    shadow_buys = status.get("shadow_top_buys") or []
+    shadow_rank_of = {e.get("ticker", ""): i for i,
+                      e in enumerate(shadow_buys, 1)}
 
-    def _ticker_fields(entries: List[Dict], max_n: int, budget: int) -> List[Dict]:
+    def _ticker_fields(
+        entries: List[Dict],
+        max_n: int,
+        budget: int,
+        all_scores: Optional[List[float]] = None,
+        mid_cap: bool = False,
+    ) -> List[Dict]:
         result = []
-        used   = 0
-        added  = 0
+        used = 0
+        added = 0
         for i, e in enumerate(entries[:max_n], 1):
-            ticker_   = e.get("ticker", "")
-            shadow_r  = shadow_rank_of.get(ticker_)
+            ticker_ = e.get("ticker", "")
+            shadow_r = shadow_rank_of.get(ticker_)
             rank_delta = (shadow_r - i) if shadow_r is not None else None
             buyback_cv = buyback_conv_of.get(ticker_.upper())
             field = _ticker_detail_field(
-                i, e,
+                i,
+                e,
                 anomaly_flags=anomaly_map.get(ticker_),
                 rank_delta=rank_delta,
                 buyback_conv=buyback_cv,
-                mid_cap=False,
+                mid_cap=mid_cap,
                 all_scores=all_scores,
+                kill_switch=kill_switch,
             )
             flen = len(field["value"])
             if used + flen > budget and added > 0:
                 result.append({
-                    "name":   "…",
-                    "value":  f"... [{added}/{min(max_n, len(entries))}] shown — full report in logs",
+                    "name": "…",
+                    "value": f"... [{added}/{min(max_n, len(entries))}] shown — full report in logs",
                     "inline": False,
                 })
                 break
             result.append(field)
-            used  += flen
+            used += flen
             added += 1
         return result
 
     # ── Fields ────────────────────────────────────────────────────────────────
     fields: List[Dict[str, Any]] = []
+    overlay = f"x{float(status.get('vix_multiplier', 1.0)):.2f}"
+    kill_state = "ACTIVE" if kill_switch else "NORMAL"
+    fields.extend([
+        {"name": "VIX", "value": f"`{vix_val:.1f}`" if vix_val is not None else "`—`", "inline": True},
+        {"name": "Regime", "value": f"`{vix_regime}`", "inline": True},
+        {"name": "Overlay", "value": f"`{overlay}`", "inline": True},
+        {"name": "Kill switch", "value": f"`{kill_state}`", "inline": True},
+    ])
+    fields.append({
+        "name": "⚡ ACTION BAR",
+        "value": (
+            "🚫 NO TRADES — MACRO KILL SWITCH ACTIVE (VIX ≥ 30)"
+            if kill_switch else "✅ MARKET OPEN — signals are actionable"
+        ),
+        "inline": False,
+    })
 
     _MARKET_SECTIONS = [
-        ("🇺🇸 Top 5 — USA",    us_entries),
-        ("🇪🇺 Top 5 — Europe", eu_entries),
-        ("🇯🇵 Top 5 — Asia",   asia_entries),
+        ("🇺🇸 Top 3 — USA", us_entries),
+        ("🇪🇺 Top 3 — Europe", eu_entries),
+        ("🇯🇵 Top 3 — Asia", asia_entries),
     ]
     for section_name, section_entries in _MARKET_SECTIONS:
         if not section_entries:
             continue
         fields.append({"name": section_name, "value": "​", "inline": False})
-        fields.extend(_ticker_fields(section_entries, max_n=5, budget=1800))
+        fields.extend(_ticker_fields(section_entries, max_n=3,
+                      budget=1800, all_scores=all_scores, mid_cap=False))
 
-    # ── Mid caps ─────────────────────────────────────────────────────────────
     if mid_caps:
-        fields.append({"name": "📈 Mid Caps — Top 5 (All Markets)", "value": "​", "inline": False})
-        fields.extend(_ticker_fields(mid_caps, max_n=5, budget=1800))
+        mid_scores = sorted([float(e.get("final_score", 0) or 0)
+                            for e in mid_caps])
+        fields.append(
+            {"name": "📈 Mid-cap catalyst watch — top 3 cross-market", "value": "​", "inline": False})
+        fields.extend(_ticker_fields(mid_caps, max_n=3,
+                      budget=1800, all_scores=mid_scores, mid_cap=True))
 
     # ── Action today (before satellite — high priority) ───────────────────────
     all_top = us_entries + eu_entries + asia_entries
@@ -696,7 +853,7 @@ def build_payload(
 
     # ── Sector exposure ───────────────────────────────────────────────────────
     all_entries = all_top + mid_caps[:5]
-    structured  = _sector_heatmap_structured(all_entries)
+    structured = _sector_heatmap_structured(all_entries)
     if structured:
         sorted_sectors = sorted(
             structured.items(),
@@ -726,12 +883,12 @@ def build_payload(
     try:
         if satellite:
             month_label = satellite.get("month", "")
-            cyclicals   = satellite.get("cyclicals") or []
-            cannibals   = satellite.get("cannibals") or []
+            cyclicals = satellite.get("cyclicals") or []
+            cannibals = satellite.get("cannibals") or []
             if cyclicals and len(fields) < 24:
                 lines = [
                     f"**{c['ticker']}** {_score_bar(c['win_rate'], 6)} "
-                    f"`{c['win_rate']:.0%}` win  |  `{c['median_return']:+.1%}` med  |  `{c.get('years','?')}y`"
+                    f"`{c['win_rate']:.0%}` win  |  `{c['median_return']:+.1%}` med  |  `{c.get('years', '?')}y`"
                     for c in cyclicals
                 ]
                 fields.append({
@@ -741,8 +898,8 @@ def build_payload(
                 })
             if cannibals and len(fields) < 24:
                 lines = [
-                    f"**{c['ticker']}**  `{c.get('buyback_yield',0):.1%}` buyback"
-                    f"  |  P/E `{c.get('pe',0):.1f}`  |  `{c.get('price_vs_52w_low',0):.2f}x` vs 52w low"
+                    f"**{c['ticker']}**  `{c.get('buyback_yield', 0):.1%}` buyback"
+                    f"  |  P/E `{c.get('pe', 0):.1f}`  |  `{c.get('price_vs_52w_low', 0):.2f}x` vs 52w low"
                     for c in cannibals
                 ]
                 fields.append({
@@ -755,7 +912,8 @@ def build_payload(
 
     # ── Discord 25-field hard limit guard ─────────────────────────────────────
     if len(fields) > 25:
-        log.warning("Discord 25-field limit exceeded (%d fields) — truncating to 25", len(fields))
+        log.warning(
+            "Discord 25-field limit exceeded (%d fields) — truncating to 25", len(fields))
         fields = fields[:25]
 
     # ── Footer ────────────────────────────────────────────────────────────────
@@ -807,7 +965,8 @@ def run_tests() -> int:
             "weights":       {k: v for k, v in [
                 ("insider_conviction", 0.30), ("insider_breadth", 0.15),
                 ("congress", 0.22), ("news_sentiment", 0.10),
-                ("news_buzz", 0.05), ("momentum_long", 0.15), ("volume_attention", 0.03),
+                ("news_buzz", 0.05), ("momentum_long",
+                                      0.15), ("volume_attention", 0.03),
             ]},
             "top_by_market": {"US": [], "EUROPE": [], "ASIA": []},
             "results":       [],
@@ -839,30 +998,37 @@ def run_tests() -> int:
             **kw,
         }
 
-    # ── Test 1: factor matrix renders 7 factors ───────────────────────────────
+    # ── Test 1: factor matrix renders expected labels ────────────────────────
     try:
         e = _entry("AAPL", score=0.45)
         field = _ticker_detail_field(1, e, all_scores=[0.45])
         val = field["value"]
-        for _, lbl in _FACTOR_DISPLAY:
-            _check(f"factor_matrix_{lbl}", lbl in val, f"lbl={lbl!r} not in val={val!r}")
+        expected_labels = ["IC", "IB", "CG",
+                           "NS", "NB", "MO", "VA", "AR", "PT"]
+        for lbl in expected_labels:
+            _check(f"factor_matrix_{lbl}", lbl in val,
+                   f"lbl={lbl!r} not in val={val!r}")
     except Exception:
-        failures.append(f"FAIL [factor_matrix_7]: {traceback.format_exc()}")
+        failures.append(
+            f"FAIL [factor_matrix_labels]: {traceback.format_exc()}")
 
     # ── Test 2: zeros render as — ─────────────────────────────────────────────
     try:
         e = _entry("AAPL", score=0.45)
-        e["factors"]["congress"]           = 0.0
-        e["factors"]["volume_attention"]   = 0.0
+        e["factors"]["congress"] = 0.0
+        e["factors"]["volume_attention"] = 0.0
         field = _ticker_detail_field(1, e, all_scores=[0.45])
         val = field["value"]
         # congress and volume_attention should show — not 0.00
         lines = val.split("\n")
-        matrix_line = lines[1] if len(lines) > 1 else ""
-        _check("zero_congress_is_dash",         "CG:—" in matrix_line, f"matrix={matrix_line!r}")
-        _check("zero_volume_attention_is_dash",  "VA:—" in matrix_line, f"matrix={matrix_line!r}")
+        matrix_line = lines[0] if len(lines) > 0 else ""
+        _check("zero_congress_is_dash",
+               "CG:—" in matrix_line, f"matrix={matrix_line!r}")
+        _check("zero_volume_attention_is_dash",
+               "VA:—" in matrix_line, f"matrix={matrix_line!r}")
         # non-zero factors must NOT be dash
-        _check("nonzero_ic_not_dash", "IC:—" not in matrix_line, f"matrix={matrix_line!r}")
+        _check("nonzero_ic_not_dash", "IC:—" not in matrix_line,
+               f"matrix={matrix_line!r}")
     except Exception:
         failures.append(f"FAIL [zeros_as_dash]: {traceback.format_exc()}")
 
@@ -877,10 +1043,14 @@ def run_tests() -> int:
         all_sc = [0.10, 0.20, 0.30, 0.35, 0.38, 0.40, 0.42, 0.49]
         action = _action_section(entries, all_sc)
         _check("action_not_none",      action is not None)
-        _check("action_has_chtr",      action is not None and "CHTR" in action["value"])
-        _check("action_has_nke",       action is not None and "NKE"  in action["value"])
-        _check("action_has_psx",       action is not None and "PSX"  in action["value"])
-        _check("action_not_etn",       action is not None and "ETN"  not in action["value"])
+        _check("action_has_chtr",
+               action is not None and "CHTR" in action["value"])
+        _check("action_has_nke",
+               action is not None and "NKE" in action["value"])
+        _check("action_has_psx",
+               action is not None and "PSX" in action["value"])
+        _check("action_not_etn",
+               action is not None and "ETN" not in action["value"])
     except Exception:
         failures.append(f"FAIL [action_section]: {traceback.format_exc()}")
 
@@ -903,12 +1073,14 @@ def run_tests() -> int:
         st["top_by_market"] = {"US": [e]}
         st["results"] = [e]
         payload = build_payload(st)
-        embed   = payload["embeds"][0]
+        embed = payload["embeds"][0]
         _check("payload_has_title",   "Alpha Pipeline" in embed.get("title", ""))
         _check("payload_has_fields",  len(embed.get("fields", [])) > 0)
-        _check("payload_has_health",  any("PIPELINE HEALTH" in f["name"] for f in embed["fields"]))
+        _check("payload_has_health",  any(
+            "PIPELINE HEALTH" in f["name"] for f in embed["fields"]))
     except Exception:
-        failures.append(f"FAIL [build_payload_status]: {traceback.format_exc()}")
+        failures.append(
+            f"FAIL [build_payload_status]: {traceback.format_exc()}")
 
     # ── Test 6: build_payload with legacy top_lists schema — no crash ─────────
     try:
@@ -922,22 +1094,25 @@ def run_tests() -> int:
             "mid_caps":      [],
         }
         payload = build_payload(tl)
-        embed   = payload["embeds"][0]
+        embed = payload["embeds"][0]
         _check("legacy_payload_no_crash", True)
         _check("legacy_has_usa_section",
                any("USA" in f["name"] or "Top 5" in f["name"] for f in embed["fields"]))
     except Exception:
-        failures.append(f"FAIL [build_payload_legacy]: {traceback.format_exc()}")
+        failures.append(
+            f"FAIL [build_payload_legacy]: {traceback.format_exc()}")
 
     # ── Test 7: empty top_buys → no ticker fields ─────────────────────────────
     try:
         st = _base_status()
         payload = build_payload(st)
-        embed   = payload["embeds"][0]
+        embed = payload["embeds"][0]
         field_names = [f["name"] for f in embed["fields"]]
-        _check("empty_no_ticker_fields", not any(n.startswith("#") for n in field_names))
+        _check("empty_no_ticker_fields", not any(n.startswith("#")
+               for n in field_names))
     except Exception:
-        failures.append(f"FAIL [empty_no_ticker_fields]: {traceback.format_exc()}")
+        failures.append(
+            f"FAIL [empty_no_ticker_fields]: {traceback.format_exc()}")
 
     # ── Test 8: missing sector → Misc in heatmap ──────────────────────────────
     try:
@@ -950,7 +1125,7 @@ def run_tests() -> int:
     # ── Test 9: VIX regime labels ─────────────────────────────────────────────
     try:
         _check("vix_bullish",  "BULLISH" in get_market_regime(12.0))
-        _check("vix_stable",   "STABLE"  in get_market_regime(18.0))
+        _check("vix_stable",   "STABLE" in get_market_regime(18.0))
         _check("vix_bearish",  "BEARISH" in get_market_regime(28.0))
     except Exception:
         failures.append(f"FAIL [vix_regime]: {traceback.format_exc()}")
@@ -964,20 +1139,26 @@ def run_tests() -> int:
         st["results"] = [eu]
         payload = build_payload(st)
         names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        _check("europe_section_present", any("Europe" in n for n in names), f"names={names}")
-        _check("usa_section_absent",     not any("USA" in n for n in names), f"names={names}")
-        _check("asia_section_absent",    not any("Asia" in n for n in names),  f"names={names}")
+        _check("europe_section_present", any(
+            "Europe" in n for n in names), f"names={names}")
+        _check("usa_section_absent", not any(
+            "USA" in n for n in names), f"names={names}")
+        _check("asia_section_absent", not any(
+            "Asia" in n for n in names),  f"names={names}")
     except Exception:
         failures.append(f"FAIL [market_sections]: {traceback.format_exc()}")
 
     # ── Test 11: percentile badge on LINE 1 ───────────────────────────────────
     try:
         e = _entry("CHTR", score=0.49)
-        field = _ticker_detail_field(1, e, all_scores=[0.10, 0.20, 0.30, 0.40, 0.49])
-        line1 = field["value"].split("\n")[0]
-        _check("line1_has_percentile", "p" in line1 and any(c.isdigit() for c in line1), f"line1={line1!r}")
+        field = _ticker_detail_field(
+            1, e, all_scores=[0.10, 0.20, 0.30, 0.40, 0.49])
+        line1 = field["name"]
+        _check("line1_has_percentile", "p" in line1 and any(c.isdigit()
+               for c in line1), f"line1={line1!r}")
         _check("line1_has_score",      "0.4900" in line1, f"line1={line1!r}")
-        _check("line1_has_badge",      "WATCHLIST" in line1 or "BUY" in line1, f"line1={line1!r}")
+        _check("line1_has_badge",
+               "WATCHLIST" in line1 or "BUY" in line1, f"line1={line1!r}")
     except Exception:
         failures.append(f"FAIL [line1_format]: {traceback.format_exc()}")
 
@@ -986,54 +1167,57 @@ def run_tests() -> int:
         e = _entry("CHTR", score=0.49)
         field = _ticker_detail_field(1, e, all_scores=[0.49])
         lines = field["value"].split("\n")
-        _check("has_three_lines_plus_sep", len(lines) >= 3, f"lines={lines}")
+        _check("has_two_lines", len(lines) >= 2, f"lines={lines}")
         _check(
             "catalyst_line_present",
-            any(
-                any(kw in ln for kw in ["Insider", "EPS", "congress", "vs SPY", "no primary"])
-                for ln in lines
-            ),
-            f"Catalyst line missing expected pattern: lines={lines}",
+            any(kw in field["value"] for kw in ["Insider",
+                "EPS", "congress", "vs SPY", "no primary"]),
+            f"Catalyst line missing expected pattern: value={field['value']!r}",
         )
 
         # Zero-signal entry → _NO_CATALYST
         e_zero = _entry("ZERO", score=0.10)
-        e_zero["insider_usd"]           = 0.0
+        e_zero["insider_usd"] = 0.0
         e_zero["earnings_surprise_pct"] = None
         cat_zero = _compute_catalyst(e_zero)
-        _check("zero_signal_fallback", cat_zero == _NO_CATALYST, f"cat_zero={cat_zero!r}")
+        _check("zero_signal_fallback", cat_zero ==
+               _NO_CATALYST, f"cat_zero={cat_zero!r}")
     except Exception:
         failures.append(f"FAIL [catalyst_line]: {traceback.format_exc()}")
 
     # ── Test 13: EPS surprise appended to catalyst when within 90-day window ──
     try:
         e = _entry("NVDA", score=0.72)
-        e["earnings_surprise_pct"]   = 0.153   # +15.3% beat
-        e["earnings_surprise_days"]  = 8
-        e["momentum_spy_relative"]   = 0.20    # +20% vs SPY — triggers second signal → · separator
+        e["earnings_surprise_pct"] = 0.153   # +15.3% beat
+        e["earnings_surprise_days"] = 8
+        # +20% vs SPY — triggers second signal → · separator
+        e["momentum_spy_relative"] = 0.20
         cat = _compute_catalyst(e)
-        _check("eps_in_catalyst_beat",  "EPS beat +15.3%" in cat, f"cat={cat!r}")
-        _check("eps_days_in_catalyst",  "8d ago"     in cat, f"cat={cat!r}")
-        _check("eps_separator",         "·"          in cat, f"cat={cat!r}")
+        _check("eps_in_catalyst_beat",  "EPS +15.3%" in cat, f"cat={cat!r}")
+        _check("eps_days_in_catalyst",  "8d ago" in cat, f"cat={cat!r}")
+        _check("eps_separator",         "·" in cat, f"cat={cat!r}")
 
         # Negative surprise
         e2 = _entry("INTC", score=0.30)
-        e2["earnings_surprise_pct"]  = -0.087
+        e2["earnings_surprise_pct"] = -0.087
         e2["earnings_surprise_days"] = 45
         cat2 = _compute_catalyst(e2)
-        _check("eps_in_catalyst_miss",  "EPS miss -8.7%"  in cat2, f"cat2={cat2!r}")
-        _check("eps_days_miss",         "45d ago"    in cat2, f"cat2={cat2!r}")
+        _check("eps_in_catalyst_miss",
+               "EPS miss 8.7%" in cat2, f"cat2={cat2!r}")
+        _check("eps_days_miss",
+               "45d ago" not in cat2, f"cat2={cat2!r}")
 
         # Outside 90-day window → no EPS fragment
         e3 = _entry("AAPL", score=0.55)
-        e3["earnings_surprise_pct"]  = 0.20
+        e3["earnings_surprise_pct"] = 0.20
         e3["earnings_surprise_days"] = 95
         cat3 = _compute_catalyst(e3)
-        _check("eps_absent_outside_window", "EPS" not in cat3, f"cat3={cat3!r}")
+        _check("eps_absent_outside_window",
+               "EPS" not in cat3, f"cat3={cat3!r}")
 
         # None surprise → no EPS fragment
         e4 = _entry("MSFT", score=0.60)
-        e4["earnings_surprise_pct"]  = None
+        e4["earnings_surprise_pct"] = None
         e4["earnings_surprise_days"] = 0
         cat4 = _compute_catalyst(e4)
         _check("eps_absent_when_none", "EPS" not in cat4, f"cat4={cat4!r}")
@@ -1069,7 +1253,8 @@ def send_to_discord(
     for attempt in range(max_retries):
         if attempt > 0:
             wait = backoff_base_s * attempt
-            log.warning("Retry %d/%d in %.0fs ...", attempt + 1, max_retries, wait)
+            log.warning("Retry %d/%d in %.0fs ...",
+                        attempt + 1, max_retries, wait)
             time.sleep(wait)
         try:
             resp = requests.post(webhook, json=payload, timeout=15.0)
@@ -1083,7 +1268,8 @@ def send_to_discord(
                     retry_after = 0.0
                 if not retry_after:
                     retry_after = float(resp.headers.get("Retry-After", 30))
-                log.warning("Discord rate-limited — waiting %.1fs", retry_after)
+                log.warning(
+                    "Discord rate-limited — waiting %.1fs", retry_after)
                 time.sleep(retry_after)
                 continue
             log.warning(
@@ -1101,7 +1287,8 @@ def send_to_discord(
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Send daily market checkup to Discord")
+    parser = argparse.ArgumentParser(
+        description="Send daily market checkup to Discord")
     parser.add_argument(
         "--input", type=Path, default=Path("logs/intel_source_status.json"),
         help="Path to intel_source_status.json (default: logs/intel_source_status.json)",
@@ -1149,7 +1336,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not input_path.exists() and input_path.name == "intel_source_status.json":
         fallback = args.log_dir / "top_lists.json"
         if fallback.exists():
-            log.warning("intel_source_status.json not found — falling back to top_lists.json")
+            log.warning(
+                "intel_source_status.json not found — falling back to top_lists.json")
             input_path = fallback
 
     if not input_path.exists():
@@ -1175,9 +1363,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         send_to_discord(webhook, payload)
         return 1
 
-    satellite   = _load_satellite(args.log_dir)
+    satellite = _load_satellite(args.log_dir)
     anomaly_map = _load_anomaly_report(args.log_dir)
-    payload     = build_payload(status, satellite=satellite, anomaly_map=anomaly_map)
+    payload = build_payload(status, satellite=satellite,
+                            anomaly_map=anomaly_map)
 
     if args.dry_run:
         sys.stdout.buffer.write(

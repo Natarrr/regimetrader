@@ -44,7 +44,7 @@ def _make_results(n: int, overrides: dict | None = None) -> list:
 class TestCrossSectionalNormalize:
     def test_higher_raw_score_gives_higher_normalized_score(self):
         results = _make_results(2, {"insider_conviction_score": [0.30, 0.90]})
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         assert normed[0]["insider_conviction"] < normed[1]["insider_conviction"]
 
     def test_normalized_scores_bounded_0_to_1(self):
@@ -59,14 +59,14 @@ class TestCrossSectionalNormalize:
     def test_all_identical_scores_return_half(self):
         """When all tickers have the same raw score, normalized output is 0.5."""
         results = _make_results(5)   # all 0.50 by default
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         for row in normed:
             for v in row.values():
                 assert v == pytest.approx(0.5, abs=1e-4)
 
     def test_all_seven_factors_present_in_output(self):
         results = _make_results(3)
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         for row in normed:
             assert set(row.keys()) == {
                 "insider_conviction", "insider_breadth", "congress",
@@ -75,13 +75,13 @@ class TestCrossSectionalNormalize:
 
     def test_output_length_matches_input(self):
         results = _make_results(7)
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         assert len(normed) == 7
 
     def test_single_ticker_returns_neutral(self):
         """One ticker — no peer comparison possible — returns 0.5 for all factors."""
         results = _make_results(1, {"insider_conviction_score": [0.90]})
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         assert normed[0]["insider_conviction"] == pytest.approx(0.5, abs=1e-4)
 
     def test_congress_factor_key_present(self):
@@ -99,15 +99,16 @@ class TestCrossSectionalNormalize:
         """2020 COVID analog: one ticker with extreme momentum → others not collapsed to 0."""
         scores = [0.50] * 49 + [9999.0]   # 1 extreme outlier
         results = _make_results(50, {"momentum_long_score": scores})
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         # The 49 normal tickers should not all map to near-zero
         normal_scores = [normed[i]["momentum_long"] for i in range(49)]
         assert max(normal_scores) > 0.30   # not all collapsed
 
     def test_all_zero_values_penalised_not_neutral(self):
         """A fully dead API feed (all 0.0) must return 0.0, not the neutral 0.5."""
-        results = _make_results(5, {"insider_conviction_score": [0.0, 0.0, 0.0, 0.0, 0.0]})
-        normed  = _cross_sectional_normalize(results)
+        results = _make_results(
+            5, {"insider_conviction_score": [0.0, 0.0, 0.0, 0.0, 0.0]})
+        normed = _cross_sectional_normalize(results)
         for row in normed:
             assert row["insider_conviction"] == pytest.approx(0.0, abs=1e-9)
 
@@ -120,15 +121,16 @@ class TestCrossSectionalNormalize:
             "volume_attention_score": None,
         }
         results = [dict(base) for _ in range(4)]
-        normed  = _cross_sectional_normalize(results)
+        normed = _cross_sectional_normalize(results)
         for row in normed:
             for v in row.values():
                 assert v == pytest.approx(0.0, abs=1e-9)
 
     def test_null_mixed_with_real_values_does_not_get_neutral_credit(self):
         """Tickers with None score must rank below tickers with a real positive score."""
-        results = _make_results(3, {"insider_conviction_score": [None, None, 0.80]})
-        normed  = _cross_sectional_normalize(results)
+        results = _make_results(
+            3, {"insider_conviction_score": [None, None, 0.80]})
+        normed = _cross_sectional_normalize(results)
         # Real score should normalise higher than null-coerced 0.0
         assert normed[2]["insider_conviction"] > normed[0]["insider_conviction"]
         assert normed[2]["insider_conviction"] > normed[1]["insider_conviction"]
@@ -145,7 +147,8 @@ class TestScoreCongress:
 
     def test_equal_buys_sells_is_neutral(self):
         """When congress has traded but bought = sold, result is 0.5 (genuine neutral)."""
-        assert score_congress({"purchases": 2, "sales": 2, "total": 4}) == pytest.approx(0.5, abs=1e-4)
+        assert score_congress(
+            {"purchases": 2, "sales": 2, "total": 4}) == pytest.approx(0.5, abs=1e-4)
 
     def test_all_purchases_high_signal(self):
         result = score_congress({"purchases": 5, "sales": 0, "total": 5})
@@ -228,7 +231,7 @@ class TestVixOverlay:
     def test_dampening_preserves_relative_ranking(self):
         """Higher raw score stays higher after dampening (monotone transform)."""
         high = _apply_vix_overlay(0.80, 35.0)
-        low  = _apply_vix_overlay(0.40, 35.0)
+        low = _apply_vix_overlay(0.40, 35.0)
         assert high > low
 
 
@@ -254,7 +257,8 @@ class TestQuiverEvidence:
     def test_to_entry_includes_quiver_evidence(self):
         from backend.market_intel.generate_top_lists import _to_entry
         evidence = {"politicians": ["Nancy Pelosi"], "recency_days": 5}
-        entry = _to_entry(self._make_row(), self._make_norm(), vix=None, quiver_evidence=evidence)
+        entry = _to_entry(self._make_row(), self._make_norm(),
+                          vix=None, quiver_evidence=evidence)
         assert entry["quiver_evidence"]["politicians"] == ["Nancy Pelosi"]
         assert entry["quiver_evidence"]["recency_days"] == 5
 
@@ -265,7 +269,8 @@ class TestQuiverEvidence:
 
     def test_to_entry_none_evidence_gives_empty_dict(self):
         from backend.market_intel.generate_top_lists import _to_entry
-        entry = _to_entry(self._make_row(), self._make_norm(), vix=None, quiver_evidence=None)
+        entry = _to_entry(self._make_row(), self._make_norm(),
+                          vix=None, quiver_evidence=None)
         assert entry.get("quiver_evidence") == {}
 
     def test_to_entry_row_quiver_evidence_passthrough(self):
@@ -273,7 +278,8 @@ class TestQuiverEvidence:
         from backend.market_intel.generate_top_lists import _to_entry
         row = self._make_row()
         row["quiver_evidence"] = {"congress": {"purchases": 3, "sales": 0}}
-        entry = _to_entry(row, self._make_norm(), vix=None, quiver_evidence=row.get("quiver_evidence"))
+        entry = _to_entry(row, self._make_norm(), vix=None,
+                          quiver_evidence=row.get("quiver_evidence"))
         assert entry["quiver_evidence"]["congress"]["purchases"] == 3
 
 
@@ -306,13 +312,27 @@ class TestToEntryEvidencePassthrough:
     def test_evidence_fields_default_when_absent(self):
         from backend.market_intel.generate_top_lists import _to_entry
 
-        row = {"ticker": "X", "sector": "?", "cap_tier": "large", "market_cap": 0}
+        row = {"ticker": "X", "sector": "?",
+               "cap_tier": "large", "market_cap": 0}
         entry = _to_entry(row, self._make_norm())
 
         assert entry["news_source"] == "none"
         assert entry["insider_usd"] == pytest.approx(0.0)
         assert entry["momentum_spy_relative"] == pytest.approx(0.0)
         assert entry["volume_spike"] == pytest.approx(1.0)
+
+    def test_esg_metadata_propagates_to_entry(self):
+        from backend.market_intel.generate_top_lists import _to_entry
+
+        row = {
+            "ticker": "X", "sector": "?", "cap_tier": "large", "market_cap": 0,
+            "esg_score": 22.5, "environmentalScore": 18.3,
+        }
+        entry = _to_entry(row, self._make_norm())
+
+        assert entry["esg_score"] == pytest.approx(22.5)
+        assert entry["esg_e_score"] == pytest.approx(18.3)
+        assert entry["esg_flag"] is True
 
 
 def _make_schema_row(ticker: str = "AAPL", **scores) -> dict:
@@ -348,7 +368,8 @@ class TestSchemaGate:
         assert "insider_breadth" in v["missing_sources"]
 
     def test_ticker_with_two_zeros_is_still_complete(self):
-        rows = [_make_schema_row(insider_breadth_score=0.0, congress_score=0.0)]
+        rows = [_make_schema_row(
+            insider_breadth_score=0.0, congress_score=0.0)]
         _schema_gate(rows, universe_size=2)
         v = rows[0]["_validation"]
         assert v["is_complete"] is True
@@ -371,7 +392,8 @@ class TestSchemaGate:
 
     def test_ticker_with_three_zeros_is_now_complete(self):
         # With threshold=4, 3 zero factors is within tolerance (normal pattern).
-        rows = [_make_schema_row(insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)]
+        rows = [_make_schema_row(
+            insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)]
         complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
         all_rows = rows + complete_rows
         _schema_gate(all_rows, universe_size=len(all_rows))
@@ -387,7 +409,8 @@ class TestSchemaGate:
         all_rows = rows + complete_rows
         _schema_gate(all_rows, universe_size=len(all_rows))
         missing = set(all_rows[0]["_validation"]["missing_sources"])
-        assert missing == {"insider_conviction", "momentum_long", "news_sentiment"}
+        assert missing == {"insider_conviction",
+                           "momentum_long", "news_sentiment"}
 
     def test_none_score_counts_as_missing(self):
         row = _make_schema_row()
@@ -416,11 +439,13 @@ class TestSchemaGate:
         # 10/10 = 100% ≥ 5% → should NOT raise
         complete = [_make_schema_row(f"C{i}") for i in range(3)]
         incomplete = [
-            _make_schema_row(f"I{i}", insider_breadth_score=0.0, congress_score=0.0, news_sentiment_score=0.0)
+            _make_schema_row(f"I{i}", insider_breadth_score=0.0,
+                             congress_score=0.0, news_sentiment_score=0.0)
             for i in range(7)
         ]
         rows = complete + incomplete
-        _schema_gate(rows, universe_size=10)   # must not raise (all 10 are "complete" with threshold=4)
+        # must not raise (all 10 are "complete" with threshold=4)
+        _schema_gate(rows, universe_size=10)
 
     def test_circuit_breaker_raises_pipeline_integrity_error_type(self):
         # Need >4 zeros to be incomplete; use 5 zero factors.
@@ -438,6 +463,12 @@ class TestSchemaGate:
             assert "_validation" in row
             assert "is_complete" in row["_validation"]
             assert "missing_sources" in row["_validation"]
+
+    def test_esg_exclusion_candidate_flag_added_when_esg_flag_true(self):
+        rows = [_make_schema_row(f"T{i}") for i in range(5)]
+        rows[0]["esg_flag"] = True
+        _schema_gate(rows, universe_size=5)
+        assert rows[0]["_validation"].get("esg_exclusion_candidate") is True
 
     def test_returns_same_list_in_place(self):
         rows = [_make_schema_row()]

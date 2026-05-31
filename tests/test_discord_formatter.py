@@ -60,17 +60,20 @@ class TestTickerDetailField:
 
     def test_ticker_in_field(self):
         from scripts.send_toplists_discord import _ticker_detail_field
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        f = _ticker_detail_field(
+            1, self._entry(), all_scores=self._all_scores())
         assert "AAPL" in f["name"]
 
     def test_score_in_field(self):
         from scripts.send_toplists_discord import _ticker_detail_field
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
-        assert "0.8200" in f["value"]
+        f = _ticker_detail_field(
+            1, self._entry(), all_scores=self._all_scores())
+        assert "0.8200" in f["name"]
 
     def test_7factor_matrix_rendered(self):
         from scripts.send_toplists_discord import _ticker_detail_field
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        f = _ticker_detail_field(
+            1, self._entry(), all_scores=self._all_scores())
         val = f["value"]
         assert "IC:" in val
         assert "IB:" in val
@@ -82,7 +85,8 @@ class TestTickerDetailField:
 
     def test_zero_factors_rendered_as_dash(self):
         from scripts.send_toplists_discord import _ticker_detail_field
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
+        f = _ticker_detail_field(
+            1, self._entry(), all_scores=self._all_scores())
         val = f["value"]
         # congress=0.0 and volume_attention=0.0 → should render as "—"
         assert "CG:—" in val
@@ -90,8 +94,10 @@ class TestTickerDetailField:
 
     def test_ceo_tier_shown(self):
         from scripts.send_toplists_discord import _ticker_detail_field
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
-        assert "CEO BUY" in f["value"]
+        entry = self._entry(insider_usd=22000, ceo_conviction_tier="CEO BUY")
+        f = _ticker_detail_field(1, entry, all_scores=self._all_scores())
+        assert "Insider" in f["value"]
+        assert "CEO" in f["value"]
 
     def test_ceo_tier_absent_when_none(self):
         from scripts.send_toplists_discord import _ticker_detail_field
@@ -102,13 +108,16 @@ class TestTickerDetailField:
     def test_percentile_in_field(self):
         from scripts.send_toplists_discord import _ticker_detail_field
         # all_scores has 9 values, 0.82 is 8th → p88
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
-        assert "p8" in f["value"]  # p80–p89 range
+        f = _ticker_detail_field(
+            1, self._entry(), all_scores=self._all_scores())
+        assert "p8" in f["name"]  # p80–p89 range
 
     def test_catalyst_line_present(self):
         from scripts.send_toplists_discord import _ticker_detail_field
-        f = _ticker_detail_field(1, self._entry(), all_scores=self._all_scores())
-        assert "driven by" in f["value"]
+        f = _ticker_detail_field(
+            1, self._entry(), all_scores=self._all_scores())
+        assert any(kw in f["value"] for kw in ["Insider",
+                   "EPS", "congress", "vs SPY", "no primary"])
 
 
 class TestComputePercentile:
@@ -135,12 +144,15 @@ class TestComputeCatalyst:
 
     def test_returns_top_two_drivers(self):
         from scripts.send_toplists_discord import _compute_catalyst
-        entry = {"factors": {"insider_conviction": 0.9, "insider_breadth": 0.8,
-                              "congress": 0.0, "news_sentiment": 0.7}}
+        entry = {
+            "insider_usd": 12500,
+            "ceo_conviction_tier": "CEO BUY",
+            "earnings_surprise_pct": 0.12,
+            "earnings_surprise_days": 8,
+        }
         cat = _compute_catalyst(entry)
-        assert "IC" in cat
-        assert "IB" in cat
-        assert "driven by" in cat
+        assert "Insider" in cat
+        assert "EPS" in cat
 
     def test_no_active_factors_returns_no_catalyst(self):
         from scripts.send_toplists_discord import _compute_catalyst
@@ -151,7 +163,7 @@ class TestComputeCatalyst:
     def test_zeros_excluded_from_catalyst(self):
         from scripts.send_toplists_discord import _compute_catalyst
         entry = {"factors": {"insider_conviction": 0.9, "congress": 0.0,
-                              "news_sentiment": 0.0}}
+                             "news_sentiment": 0.0}}
         cat = _compute_catalyst(entry)
         assert "CG" not in cat
 

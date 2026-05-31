@@ -79,9 +79,9 @@ def fmp_prices_to_arrays(
     if not rows:
         return [], [], []
     ordered = list(reversed(rows))   # oldest-first
-    closes  = [float(r.get("close",  0) or 0) for r in ordered]
+    closes = [float(r.get("close",  0) or 0) for r in ordered]
     volumes = [float(r.get("volume", 0) or 0) for r in ordered]
-    dates   = [str(r.get("date", ""))          for r in ordered]
+    dates = [str(r.get("date", "")) for r in ordered]
     return closes, volumes, dates
 
 
@@ -111,8 +111,10 @@ def _make_session() -> requests.Session:
     try:
         retry = Retry(**retry_kwargs, allowed_methods={"GET"})
     except TypeError:
-        retry = Retry(**retry_kwargs, method_whitelist={"GET"})  # type: ignore[call-arg]
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=20)
+        # type: ignore[call-arg]
+        retry = Retry(**retry_kwargs, method_whitelist={"GET"})
+    adapter = HTTPAdapter(
+        max_retries=retry, pool_connections=20, pool_maxsize=20)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
@@ -131,8 +133,10 @@ class FMPClient:
         api_key: Optional[str] = None,
         cache_root: Optional[Path] = None,
     ) -> None:
-        self._api_key = api_key if api_key is not None else os.getenv("FMP_API_KEY", "")
-        self._cache_root = Path(cache_root) if cache_root else _DEFAULT_CACHE_ROOT
+        self._api_key = api_key if api_key is not None else os.getenv(
+            "FMP_API_KEY", "")
+        self._cache_root = Path(
+            cache_root) if cache_root else _DEFAULT_CACHE_ROOT
         self._session = _make_session() if self._api_key else None
         max_rps = float(os.getenv("FMP_MAX_RPS", _DEFAULT_MAX_RPS))
         self._min_delay = 1.0 / max(max_rps, 0.001)
@@ -271,13 +275,14 @@ class FMPClient:
         from datetime import timedelta as _td
         import requests as _req
 
-        cutoff = (datetime.now(timezone.utc) - _td(days=lookback_days)).date().isoformat()
+        cutoff = (datetime.now(timezone.utc) -
+                  _td(days=lookback_days)).date().isoformat()
         purchases = sales = total = 0
         recency_days = 9999
         reps: set[str] = set()
         now_date = datetime.now(timezone.utc).date()
 
-        _HOUSE_URL  = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+        _HOUSE_URL = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
         _SENATE_URL = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 
         cached = self._cache_read("congress", ticker)
@@ -288,18 +293,21 @@ class FMPClient:
             try:
                 resp = _req.get(url, timeout=30)
                 if resp.status_code == 403:
-                    log.warning("S3 congress feed %s returned 403 — bucket restricted", name_key)
+                    log.warning(
+                        "S3 congress feed %s returned 403 — bucket restricted", name_key)
                     continue
                 resp.raise_for_status()
                 for rec in resp.json():
-                    ticker_field = str(rec.get("ticker", "") or "").upper().strip()
+                    ticker_field = str(rec.get("ticker", "")
+                                       or "").upper().strip()
                     if ticker_field != ticker.upper():
                         continue
                     disclosure = (rec.get("disclosure_date")
                                   or rec.get("transaction_date") or "")
                     if not disclosure or disclosure[:10] < cutoff:
                         continue
-                    tx_type = (rec.get("type") or rec.get("transaction_type") or "").lower()
+                    tx_type = (rec.get("type") or rec.get(
+                        "transaction_type") or "").lower()
                     if "purchase" in tx_type or "buy" in tx_type:
                         purchases += 1
                     elif "sale" in tx_type or "sold" in tx_type or "sell" in tx_type:
@@ -307,7 +315,8 @@ class FMPClient:
                     else:
                         continue
                     total += 1
-                    rep = str(rec.get(name_key) or rec.get("name") or "").strip()
+                    rep = str(rec.get(name_key) or rec.get(
+                        "name") or "").strip()
                     if rep:
                         reps.add(rep)
                     try:
@@ -349,7 +358,8 @@ class FMPClient:
         if cached is not None:
             return tuple(cached)  # type: ignore[return-value]
 
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+        cutoff = (datetime.now(timezone.utc) -
+                  timedelta(days=lookback_days)).date().isoformat()
         data = self._get("insider-trading/search",
                          {"symbol": ticker, "page": 0, "limit": 500},
                          bucket="insider") or []
@@ -393,7 +403,8 @@ class FMPClient:
         data = self._get("insider-trading/search",
                          {"symbol": ticker, "page": 0, "limit": 500},
                          bucket="insider") or []
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+        cutoff = (datetime.now(timezone.utc) -
+                  timedelta(days=lookback_days)).date().isoformat()
         out: Dict[str, List[Dict]] = {"P": [], "S": []}
         for r in data:
             tx_date = str(r.get("transactionDate", ""))[:10]
@@ -463,7 +474,7 @@ class FMPClient:
 
             # FMP returns newest-first; index 0 is the most recent quarter.
             most_recent = data[0]
-            actual   = most_recent.get("actualEarningResult")
+            actual = most_recent.get("actualEarningResult")
             estimate = most_recent.get("estimatedEarning")
             date_str = str(most_recent.get("date") or "")
 
@@ -471,7 +482,7 @@ class FMPClient:
                 self._cache_write("news", cache_key, [None, 0])
                 return None, 0
 
-            actual   = float(actual)
+            actual = float(actual)
             estimate = float(estimate)
 
             # Guard: zero or near-zero estimate → undefined surprise % (pre-revenue)
@@ -486,7 +497,8 @@ class FMPClient:
                 try:
                     from datetime import date as _date
                     announcement = _date.fromisoformat(date_str[:10])
-                    days_since = max(0, (datetime.now(timezone.utc).date() - announcement).days)
+                    days_since = max(
+                        0, (datetime.now(timezone.utc).date() - announcement).days)
                 except Exception:
                     days_since = 0
 
@@ -553,17 +565,17 @@ class FMPClient:
 
             # FMP returns newest-first; [0] = most recent, [2] = ~3 quarters ago.
             recent = data[0]
-            base   = data[2]
+            base = data[2]
 
             recent_eps = recent.get("estimatedEpsAvg")
-            base_eps   = base.get("estimatedEpsAvg")
+            base_eps = base.get("estimatedEpsAvg")
 
             if recent_eps is None or base_eps is None:
                 self._cache_write("ratings", cache_key, _null)
                 return None, 0
 
             recent_eps = float(recent_eps)
-            base_eps   = float(base_eps)
+            base_eps = float(base_eps)
 
             # Guard against pre-revenue or near-zero base (undefined revision %)
             if abs(base_eps) < 1e-6:
@@ -614,7 +626,8 @@ class FMPClient:
         cached = self._cache_read("ratings", ticker)
         if cached is not None:
             return cached
-        data = self._get("grades-consensus", {"symbol": ticker}, bucket="ratings") or []
+        data = self._get("grades-consensus",
+                         {"symbol": ticker}, bucket="ratings") or []
         result = data[0] if isinstance(data, list) and data else (data or {})
         self._cache_write("ratings", ticker, result)
         return result
@@ -629,9 +642,32 @@ class FMPClient:
         cached = self._cache_read("key_metrics", ticker)
         if cached is not None:
             return cached
-        data = self._get("key-metrics-ttm", {"symbol": ticker}, bucket="key_metrics") or []
+        data = self._get("key-metrics-ttm",
+                         {"symbol": ticker}, bucket="key_metrics") or []
         result = data[0] if isinstance(data, list) and data else {}
         self._cache_write("key_metrics", ticker, result)
+        return result
+
+    def get_esg_score(self, ticker: str) -> Dict:
+        """ESG score record (stable/esg-scores). PASS in smoke-test.
+
+        ESG is used as a negative screen only — per Harvey, Liu & Zhu (2016):
+        ESG does not generate alpha, only manages risk.
+        """
+        if not self._api_key:
+            return {}
+        cache_key = f"esg_{ticker}"
+        cached = self._cache_read("key_metrics", cache_key)
+        if cached is not None:
+            return cached
+        data = self._get(
+            "esg-scores", {"symbol": ticker}, bucket="key_metrics") or []
+        if isinstance(data, dict):
+            result = data
+        else:
+            result = data[0] if isinstance(data, list) and data else {}
+        if result:
+            self._cache_write("key_metrics", cache_key, result)
         return result
 
     def get_ratios_ttm(self, ticker: str) -> Dict:
@@ -641,7 +677,8 @@ class FMPClient:
         cached = self._cache_read("ratios", ticker)
         if cached is not None:
             return cached
-        data = self._get("ratios-ttm", {"symbol": ticker}, bucket="ratios") or []
+        data = self._get(
+            "ratios-ttm", {"symbol": ticker}, bucket="ratios") or []
         result = data[0] if isinstance(data, list) and data else {}
         self._cache_write("ratios", ticker, result)
         return result
@@ -699,7 +736,8 @@ class FMPClient:
 
         data = self._get(
             "institutional-ownership/symbol-positions-summary",
-            {"symbol": ticker, "year": year, "quarter": quarter, "page": 0, "limit": 1},
+            {"symbol": ticker, "year": year,
+                "quarter": quarter, "page": 0, "limit": 1},
             bucket="f13",
         ) or []
         result = data[0] if isinstance(data, list) and data else {}
@@ -741,9 +779,9 @@ class FMPClient:
         try:
             from regime_trader.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
             target_data = self.get_price_target_consensus(ticker)
-            quote_data  = self.get_quote(ticker)
+            quote_data = self.get_quote(ticker)
             target = target_data.get("targetConsensus")
-            price  = quote_data.get("price")
+            price = quote_data.get("price")
             if not target or not price:
                 return None
             return score_price_target_upside(float(target), float(price))
@@ -785,7 +823,8 @@ class FMPClient:
         cached = self._cache_read("key_metrics", "_cot_full")
         if cached is not None:
             return cached
-        data = self._get("commitment-of-traders-report", {}, bucket="key_metrics") or []
+        data = self._get("commitment-of-traders-report",
+                         {}, bucket="key_metrics") or []
         result = data if isinstance(data, list) else []
         self._cache_write("key_metrics", "_cot_full", result)
         return result

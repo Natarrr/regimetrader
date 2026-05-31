@@ -55,15 +55,19 @@ log = logging.getLogger("generate_top_lists")
 WEIGHTS: Dict[str, float] = {
     "insider_conviction": 0.30,
     "insider_breadth":    0.09,   # reduced 0.12→0.09 to fund quality_piotroski
-    "congress":           0.10,   # reduced 0.13→0.10 (structurally sparse, ~5% density)
+    # reduced 0.13→0.10 (structurally sparse, ~5% density)
+    "congress":           0.10,
     "news_sentiment":     0.10,
     "news_buzz":          0.03,
     "momentum_long":      0.15,
     "volume_attention":   0.03,
-    "analyst_consensus":  0.04,   # Womack (1996 JF) — sell-side rating direction
-    "analyst_revision":   0.06,   # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS revision momentum
+    # Womack (1996 JF) — sell-side rating direction
+    "analyst_consensus":  0.04,
+    # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS revision momentum
+    "analyst_revision":   0.06,
     "price_target_upside": 0.04,  # forward-looking analyst target signal
-    "quality_piotroski":  0.06,   # Piotroski (2000) / Novy-Marx (2013) quality gate
+    # Piotroski (2000) / Novy-Marx (2013) quality gate
+    "quality_piotroski":  0.06,
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -109,7 +113,7 @@ _BADGES = [
 
 # Absolute market-cap thresholds (standard institutional definitions)
 _LARGE_FLOOR = 10_000_000_000   # >= $10B  → large cap
-_MID_FLOOR   =  2_000_000_000   # $2B–$10B → mid cap
+_MID_FLOOR = 2_000_000_000   # $2B–$10B → mid cap
 #                                 < $2B    → small cap
 
 _TARGET_SECTORS = [
@@ -161,11 +165,24 @@ def _schema_gate(
             if val is None or float(val) == 0.0:
                 missing.append(factor)
 
+        esg_score = row.get("esg_flag")
+        if esg_score is None:
+            esg_score = row.get("esg_score")
+            if esg_score is None:
+                esg_score = row.get("ESGScore")
+        try:
+            esg_flag = bool(esg_score is not None and float(esg_score) < 30)
+        except Exception:
+            esg_flag = False
+
         is_complete = len(missing) <= _SCHEMA_MISSING_THRESHOLD
         row["_validation"] = {
             "is_complete":    is_complete,
             "missing_sources": missing,
         }
+        if esg_flag:
+            row["_validation"]["esg_exclusion_candidate"] = True
+
         if is_complete:
             complete_count += 1
         else:
@@ -215,7 +232,8 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     for factor, field in FACTOR_FIELDS.items():
         # Fix #1 + #2: safe None handling — explicit null → 0.0 (penalise, not neutral)
         raw_values = [r.get(field) for r in results]
-        raw = np.array([float(v) if v is not None else 0.0 for v in raw_values])
+        raw = np.array(
+            [float(v) if v is not None else 0.0 for v in raw_values])
 
         rmax, rmin = float(np.nanmax(raw)), float(np.nanmin(raw))
 
@@ -326,7 +344,28 @@ def _to_entry(
     )
     score = round(_apply_vix_overlay(raw_score, vix), 4)
     # Carry schema-gate result into the entry so it appears in top_lists.json
-    validation = row.get("_validation", {"is_complete": True, "missing_sources": []})
+    validation = row.get(
+        "_validation", {"is_complete": True, "missing_sources": []})
+    esg_score_value = row.get("esg_score")
+    if esg_score_value is None:
+        esg_score_value = row.get("ESGScore")
+    if esg_score_value is not None:
+        try:
+            esg_score_value = float(esg_score_value)
+        except Exception:
+            esg_score_value = None
+
+    esg_e_score_value = row.get("esg_e_score")
+    if esg_e_score_value is None:
+        esg_e_score_value = row.get("environmentalScore")
+    if esg_e_score_value is not None:
+        try:
+            esg_e_score_value = float(esg_e_score_value)
+        except Exception:
+            esg_e_score_value = None
+
+    esg_flag_value = bool(esg_score_value is not None and esg_score_value < 30)
+
     return {
         "ticker":          row.get("ticker", "?"),
         "sector":          row.get("sector", "Unknown"),
@@ -345,6 +384,9 @@ def _to_entry(
         "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
         "volume_spike":            float(row.get("volume_spike", 1.0)),
         "market":                  row.get("market", "USA"),
+        "esg_score":               esg_score_value,
+        "esg_e_score":             esg_e_score_value,
+        "esg_flag":                esg_flag_value,
     }
 
 
@@ -401,7 +443,8 @@ def _apply_congress_boost(
             if rec.get("flag") == "CONGRESS_CLUSTER":
                 ticker = rec.get("ticker", "")
                 if ticker:
-                    conviction_map[ticker] = float(rec.get("conviction_score", 0.0))
+                    conviction_map[ticker] = float(
+                        rec.get("conviction_score", 0.0))
     except FileNotFoundError:
         pass   # no anomalies detected this run → no boost → correct
     except Exception as exc:
@@ -453,8 +496,10 @@ def _log_promoted(
     `jq -r '...'` pass produces the full promotion history for backtesting.
     Never raises — log failures are silently swallowed.
     """
-    shadow_index: Dict[str, int] = {e["ticker"]: i + 1 for i, e in enumerate(shadow_top_buys)}
-    shadow_scores: Dict[str, float] = {e["ticker"]: e["final_score"] for e in shadow_top_buys}
+    shadow_index: Dict[str, int] = {
+        e["ticker"]: i + 1 for i, e in enumerate(shadow_top_buys)}
+    shadow_scores: Dict[str, float] = {
+        e["ticker"]: e["final_score"] for e in shadow_top_buys}
     now_str = datetime.now(timezone.utc).isoformat()
 
     lines: List[str] = []
@@ -466,10 +511,12 @@ def _log_promoted(
 
         shadow_rank = shadow_index.get(ticker)
         # score_delta: how much the boost moved the final_score
-        score_delta = round(boost * entry["final_score"] / (1.0 + boost), 4) if boost > 0 else 0.0
+        score_delta = round(
+            boost * entry["final_score"] / (1.0 + boost), 4) if boost > 0 else 0.0
         # if ticker was already in shadow top_buys, delta is boosted - shadow score
         if ticker in shadow_scores:
-            score_delta = round(entry["final_score"] - shadow_scores[ticker], 4)
+            score_delta = round(
+                entry["final_score"] - shadow_scores[ticker], 4)
 
         record = {
             "run_id":        run_id,
@@ -510,7 +557,8 @@ def _sector_picks(entries: List[Dict[str, Any]], n: int = 3) -> Dict[str, List[D
     result: Dict[str, List[Dict[str, Any]]] = {}
     for sector in _TARGET_SECTORS:
         candidates = [e for e in entries if e.get("sector") == sector]
-        result[sector] = sorted(candidates, key=lambda e: e["final_score"], reverse=True)[:n]
+        result[sector] = sorted(
+            candidates, key=lambda e: e["final_score"], reverse=True)[:n]
     return result
 
 
@@ -525,7 +573,8 @@ def _read_vix(log_dir: Path) -> Optional[float]:
     # Primary: market_state.json produced by engine_worker (avoids redundant API call)
     market_state_path = log_dir / ".." / "data" / "market_state.json"
     try:
-        ms = json.loads(market_state_path.resolve().read_text(encoding="utf-8"))
+        ms = json.loads(
+            market_state_path.resolve().read_text(encoding="utf-8"))
         vix = ms.get("macro_status", {}).get("vix_latest")
         if vix is not None:
             log.info("VIX overlay: %.1f (from market_state.json)", float(vix))
@@ -556,7 +605,8 @@ def generate(
     """Score, rank, and tier the full ticker universe."""
     results = status.get("results", [])
     if not results:
-        log.warning("No results found in intel_source_status.json — producing empty top_lists")
+        log.warning(
+            "No results found in intel_source_status.json — producing empty top_lists")
 
     # Fix #3: read current VIX once; passed into _to_entry for the macro overlay
     current_vix = _read_vix(log_dir)
@@ -570,7 +620,7 @@ def generate(
     # EU/Asia rows carry a pre-scored final_score and must NOT enter cross-sectional
     # normalization — they have structural zeros in edgar/congress/news which would
     # corrupt the US peer-group min/max and distort all US scores.
-    us_results  = [r for r in results if r.get("market", "USA") == "USA"]
+    us_results = [r for r in results if r.get("market", "USA") == "USA"]
     intl_results = [r for r in results if r.get("market", "USA") != "USA"]
 
     # Schema gate: attach validation_metadata + circuit-breaker check.
@@ -637,8 +687,10 @@ def generate(
                 "news_buzz":          0.0,
                 "momentum_long":      float(row.get("momentum_long_score") or 0.0),
                 "volume_attention":   float(row.get("volume_attention_score") or 0.0),
-                "analyst_consensus":  0.0,  # structurally absent for non-US (FMP 403)
-                "analyst_revision":   0.0,  # structurally absent for non-US (FMP 403)
+                # structurally absent for non-US (FMP 403)
+                "analyst_consensus":  0.0,
+                # structurally absent for non-US (FMP 403)
+                "analyst_revision":   0.0,
             },
             "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
             "quiver_evidence":         {},
@@ -646,12 +698,15 @@ def generate(
             "insider_usd":             0.0,
             "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
             "volume_spike":            float(row.get("volume_spike", 1.0)),
-            "source_reliability":      1.0,   # dampening pre-applied by scorer; avoid double-penalty
-            "data_source_reliability": float(row.get("source_reliability", 1.0)),  # audit field
+            # dampening pre-applied by scorer; avoid double-penalty
+            "source_reliability":      1.0,
+            # audit field
+            "data_source_reliability": float(row.get("source_reliability", 1.0)),
             "market":                  row.get("market", "USA"),
         })
     if intl_results:
-        log.info("Merged %d EU/Asia entries into ranked universe (pre-scored, bypass normalize)", len(intl_results))
+        log.info(
+            "Merged %d EU/Asia entries into ranked universe (pre-scored, bypass normalize)", len(intl_results))
 
     _assign_cap_tiers(entries)
 
@@ -687,7 +742,7 @@ def generate(
     # detect_anomalies so the report is fresh.  No-op when feed is dead.
     _apply_congress_boost(valid_entries, log_dir)
 
-    score_desc = lambda e: e["final_score"]  # noqa: E731
+    def score_desc(e): return e["final_score"]  # noqa: E731
 
     top_buys = sorted(valid_entries, key=score_desc, reverse=True)[:5]
 
@@ -723,7 +778,8 @@ def generate(
         "generated_at":    datetime.now(timezone.utc).isoformat(),
         "source_run_id":   run_id,
         "ticker_count":    len(entries),
-        "weights":         eff_weights,   # actual weights used (may differ from WEIGHTS if dead factors)
+        # actual weights used (may differ from WEIGHTS if dead factors)
+        "weights":         eff_weights,
         "vix":             current_vix,
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
@@ -828,7 +884,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ts = datetime.fromisoformat(
                     existing.get("generated_at", "").replace("Z", "+00:00")
                 )
-                age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+                age_h = (datetime.now(timezone.utc) -
+                         ts).total_seconds() / 3600
                 if age_h < 2.0:
                     log.info(
                         "top_lists.json is %.1fh old and valid — skipping (use --force to override)",
@@ -836,7 +893,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                     return 0
         except Exception:
-            log.warning("top_lists.json unreadable or malformed — forcing regeneration")
+            log.warning(
+                "top_lists.json unreadable or malformed — forcing regeneration")
 
     try:
         generate(status, args.run_id, args.log_dir)
