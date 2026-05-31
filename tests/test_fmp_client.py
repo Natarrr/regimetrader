@@ -486,3 +486,59 @@ class TestGetUpsideToTarget:
             with patch.object(client, "get_quote", return_value={"price": 100.0}):
                 result = client.get_upside_to_target("AAPL")
         assert result == 0.50
+
+
+class TestGetQualityScore:
+    """get_quality_score delegates to get_ratios_ttm() and score_quality_piotroski().
+
+    Returns float (not Optional) — dead signal is 0.0, not None.
+    """
+
+    def _perfect_ratios(self) -> dict:
+        return {
+            "returnOnAssetsTTM":        0.10,
+            "operatingProfitMarginTTM": 0.15,
+            "debtEquityRatioTTM":       0.30,
+            "currentRatioTTM":          2.0,
+            "grossProfitMarginTTM":     0.45,
+            "netProfitMarginTTM":       0.08,
+        }
+
+    def test_returns_perfect_score_for_quality_ratios(self, client):
+        with patch.object(client, "get_ratios_ttm", return_value=self._perfect_ratios()):
+            result = client.get_quality_score("AAPL")
+        assert result == 1.0
+
+    def test_returns_float_not_optional(self, client):
+        with patch.object(client, "get_ratios_ttm", return_value=self._perfect_ratios()):
+            result = client.get_quality_score("AAPL")
+        assert isinstance(result, float)
+
+    def test_returns_0_when_no_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        c = FMPClient(api_key="", cache_root=tmp_path / "fmp")
+        assert c.get_quality_score("AAPL") == 0.0
+
+    def test_returns_0_when_ratios_empty(self, client):
+        with patch.object(client, "get_ratios_ttm", return_value={}):
+            result = client.get_quality_score("AAPL")
+        assert result == 0.0
+
+    def test_returns_0_on_exception(self, client):
+        with patch.object(client, "get_ratios_ttm", side_effect=RuntimeError("timeout")):
+            result = client.get_quality_score("AAPL")
+        assert result == 0.0
+
+    def test_partial_quality_ratios(self, client):
+        """5 of 8 points passing → 5/8 = 0.625."""
+        ratios = {
+            "returnOnAssetsTTM":        0.02,   # point 1 only (not > 0.05)
+            "operatingProfitMarginTTM": 0.10,   # point 3
+            "debtEquityRatioTTM":       0.70,   # point 4 only (not < 0.5)
+            "currentRatioTTM":          2.0,    # point 6
+            "grossProfitMarginTTM":     0.40,   # point 7
+            "netProfitMarginTTM":       0.02,   # fails point 8
+        }
+        with patch.object(client, "get_ratios_ttm", return_value=ratios):
+            result = client.get_quality_score("AAPL")
+        assert result == round(5 / 8, 4)

@@ -646,6 +646,32 @@ class FMPClient:
         self._cache_write("ratios", ticker, result)
         return result
 
+    def get_quality_score(self, ticker: str) -> float:
+        """Piotroski F-score quality gate from cached ratios-ttm data.
+
+        Calls get_ratios_ttm(ticker) — already cached in "ratios" bucket (24h TTL).
+        Zero additional API calls.
+
+        Returns float in [0, 1] — NOT Optional. Dead signal is 0.0, not None.
+        This differs from get_upside_to_target (which returns None for missing
+        analyst coverage) because quality data is universally available for any
+        listed company. A missing ratios response means a broken endpoint, not
+        "no quality data for this ticker."
+
+        Returns 0.0 on exception or when get_ratios_ttm() returns empty dict.
+
+        References: Piotroski (2000) JAR; Novy-Marx (2013) JFE.
+        """
+        if not self._api_key:
+            return 0.0
+        try:
+            from regime_trader.scoring.momentum_signals import score_quality_piotroski  # noqa: PLC0415
+            ratios = self.get_ratios_ttm(ticker)
+            return score_quality_piotroski(ratios)
+        except Exception as exc:
+            log.debug("get_quality_score %s failed: %s", ticker, exc)
+            return 0.0
+
     def get_institutional_ownership(self, ticker: str) -> Dict:
         """13F institutional holdings summary.
 
