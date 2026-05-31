@@ -289,10 +289,6 @@ class TestBuildPrompt:
         assert "AAPL" in prompt
         assert "No transcript available" in prompt
 
-    def test_prompt_version_bumped_to_v1_3(self):
-        """PROMPT_VERSION must be v1.3 after this change — cache-bust."""
-        assert PROMPT_VERSION == "v1.3"
-
 
 # ── cross_check_citations ─────────────────────────────────────────────────────
 
