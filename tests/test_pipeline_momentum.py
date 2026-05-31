@@ -110,12 +110,20 @@ class TestFetchFmpProfilesBatch:
     def test_returns_market_caps_for_all_tickers(self):
         """fetch_fmp_profiles returns a market cap for each ticker via batch-quote."""
         tickers = ["AAPL", "MSFT", "GOOGL"]
-        batch = {t: {"symbol": t, "marketCap": 1e12} for t in tickers}
+
+        def fake_get(self, *args, **kwargs):
+            params = kwargs.get("params", {}) or {}
+            symbols = params.get("symbols", "")
+            syms = [s for s in symbols.split(",") if s]
+            mock = MagicMock()
+            mock.status_code = 200
+            mock.raise_for_status = MagicMock()
+            mock.json.return_value = [{"symbol": sym, "marketCap": 1e12} for sym in syms]
+            return mock
 
         import os
         with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}), \
-             patch("regime_trader.services.fmp_client.FMPClient.get_batch_quotes",
-                   return_value=batch):
+             patch("requests.Session.get", side_effect=fake_get):
             result = fetch_fmp_profiles(tickers)
 
         assert all(result.get(t, 0) > 0 for t in tickers), f"Missing caps: {result}"

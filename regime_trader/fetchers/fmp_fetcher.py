@@ -43,7 +43,7 @@ class FMPFetcher(BaseMarketFetcher):
         return self._market
 
     def source_reliability(self, ticker: str) -> float:
-        return 0.85   # FMP exchange data — higher than yfinance scraping
+        return 0.60   # FMP has reduced reliability for non-US markets and fallback limitations
 
     def prepare(self, tickers: list[str]) -> list[TickerEntry]:
         """Fetch price/volume for EU/Asia tickers via FMP historical prices.
