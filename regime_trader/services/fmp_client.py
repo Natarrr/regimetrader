@@ -689,6 +689,42 @@ class FMPClient:
                          bucket="ratings") or []
         return data[0] if isinstance(data, list) and data else {}
 
+    def get_upside_to_target(self, ticker: str) -> Optional[float]:
+        """Analyst consensus price target upside score in [0, 1], or None.
+
+        Computes score_price_target_upside(targetConsensus, currentPrice)
+        using two already-cached FMP calls:
+          - get_price_target_consensus() → stable/price-target-consensus (ratings bucket, 6h TTL)
+          - get_quote()                  → stable/quote (quote bucket, 5min TTL)
+
+        Writes nothing to cache — delegates entirely to those two methods.
+        Zero additional API calls: both results are cached from earlier in the
+        pipeline run.
+
+        Returns None when:
+          - No API key
+          - targetConsensus or price is missing, zero, or non-numeric
+          - Either delegated call raises an exception
+
+        None signals "no analyst coverage / data missing" — the caller converts
+        this to 0.0 (dead signal) via `or 0.0`, which the cross-sectional
+        normalizer penalizes. This is distinct from 0.50 (at-target, valid data).
+        """
+        if not self._api_key:
+            return None
+        try:
+            from regime_trader.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
+            target_data = self.get_price_target_consensus(ticker)
+            quote_data  = self.get_quote(ticker)
+            target = target_data.get("targetConsensus")
+            price  = quote_data.get("price")
+            if not target or not price:
+                return None
+            return score_price_target_upside(float(target), float(price))
+        except Exception as exc:
+            log.debug("get_upside_to_target %s failed: %s", ticker, exc)
+            return None
+
     def get_batch_quotes(self, tickers: List[str]) -> Dict[str, Dict]:
         """Batch quote (stable/batch-quote). PASS in smoke-test.
 

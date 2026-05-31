@@ -414,3 +414,75 @@ class TestGetEarningsTranscript:
         assert result1 is None  # First call: no content, so returns None
         assert result2 == ""    # Second call: cached sentinel empty string
         assert mock_get.call_count == 1  # second call served from cache sentinel
+
+
+class TestGetUpsideToTarget:
+    """get_upside_to_target computes score from two already-cached calls.
+
+    Delegates entirely to get_price_target_consensus() and get_quote().
+    Writes nothing to cache itself. Returns None on missing/zero data.
+    """
+
+    def test_returns_score_when_both_values_present(self, client):
+        """25% upside → score 0.75."""
+        with patch.object(client, "get_price_target_consensus",
+                          return_value={"targetConsensus": 125.0}):
+            with patch.object(client, "get_quote",
+                              return_value={"price": 100.0}):
+                result = client.get_upside_to_target("AAPL")
+        assert result == 0.75
+
+    def test_returns_none_when_no_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        c = FMPClient(api_key="", cache_root=tmp_path / "fmp")
+        result = c.get_upside_to_target("AAPL")
+        assert result is None
+
+    def test_returns_none_when_target_missing(self, client):
+        with patch.object(client, "get_price_target_consensus", return_value={}):
+            with patch.object(client, "get_quote", return_value={"price": 100.0}):
+                result = client.get_upside_to_target("AAPL")
+        assert result is None
+
+    def test_returns_none_when_price_missing(self, client):
+        with patch.object(client, "get_price_target_consensus",
+                          return_value={"targetConsensus": 125.0}):
+            with patch.object(client, "get_quote", return_value={}):
+                result = client.get_upside_to_target("AAPL")
+        assert result is None
+
+    def test_returns_none_when_target_is_zero(self, client):
+        with patch.object(client, "get_price_target_consensus",
+                          return_value={"targetConsensus": 0.0}):
+            with patch.object(client, "get_quote", return_value={"price": 100.0}):
+                result = client.get_upside_to_target("AAPL")
+        assert result is None
+
+    def test_returns_none_when_price_is_zero(self, client):
+        with patch.object(client, "get_price_target_consensus",
+                          return_value={"targetConsensus": 125.0}):
+            with patch.object(client, "get_quote", return_value={"price": 0.0}):
+                result = client.get_upside_to_target("AAPL")
+        assert result is None
+
+    def test_returns_none_on_exception(self, client):
+        with patch.object(client, "get_price_target_consensus",
+                          side_effect=RuntimeError("network error")):
+            result = client.get_upside_to_target("AAPL")
+        assert result is None
+
+    def test_does_not_write_to_cache(self, client, tmp_path):
+        """get_upside_to_target is a pure computation wrapper — writes nothing."""
+        with patch.object(client, "get_price_target_consensus",
+                          return_value={"targetConsensus": 125.0}):
+            with patch.object(client, "get_quote", return_value={"price": 100.0}):
+                with patch.object(client, "_cache_write") as mock_write:
+                    client.get_upside_to_target("AAPL")
+        mock_write.assert_not_called()
+
+    def test_at_target_scores_0_50(self, client):
+        with patch.object(client, "get_price_target_consensus",
+                          return_value={"targetConsensus": 100.0}):
+            with patch.object(client, "get_quote", return_value={"price": 100.0}):
+                result = client.get_upside_to_target("AAPL")
+        assert result == 0.50
