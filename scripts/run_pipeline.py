@@ -1152,6 +1152,7 @@ def _score_ticker_international(
             "news_sentiment_score":      None,
             "news_buzz_score":           None,
             "price_target_upside_score": None,
+            "quality_piotroski_score":   None,
             # Raw inputs (diagnostic)
             "return_12_1m":              return_12_1m,
             "volume_spike":              volume_spike,
@@ -1352,6 +1353,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             # Not the same as 0.50 (at-target with valid data).
             price_target_upside_score = _fmp_client.get_upside_to_target(ticker) or 0.0
 
+            # quality_piotroski: Piotroski (2000) / Novy-Marx (2013) fundamental quality gate
+            quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+
             # ── Congress ─────────────────────────────────────────────────
             c_score = score_congress(congress_raw)
 
@@ -1415,6 +1419,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "analyst_revision_score":   analyst_revision_score,
                 "analyst_revision_n":       _rev_n,
                 "price_target_upside_score": price_target_upside_score,
+                "quality_piotroski_score":  quality_piotroski_score,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":           c_score,
                 # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
@@ -1459,6 +1464,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "analyst_revision_score":   0.0,
                 "analyst_revision_n":       0,
                 "price_target_upside_score": 0.0,
+                "quality_piotroski_score":  0.0,
                 "congress_score":           0.0,
                 "edgar_score_legacy":       0.0,
                 "insider_score_legacy":     0.0,
