@@ -476,3 +476,25 @@ class TestClaudeClientMocked:
 
         with pytest.raises(CostBudgetExceeded):
             client.analyze("AAPL", "expensive prompt", bypass_cache=True)
+
+
+# ── transcript_signals optional property ──────────────────────────────────────
+
+def test_transcript_signals_not_in_required():
+    """transcript_signals must be optional — not in required array."""
+    from analysis.claude_client import ANALYSIS_TOOL_SCHEMA
+    required = ANALYSIS_TOOL_SCHEMA["input_schema"]["required"]
+    assert "transcript_signals" not in required
+
+
+def test_transcript_signals_schema_shape():
+    """transcript_signals property must exist with correct sub-properties."""
+    from analysis.claude_client import ANALYSIS_TOOL_SCHEMA
+    props = ANALYSIS_TOOL_SCHEMA["input_schema"]["properties"]
+    assert "transcript_signals" in props
+    ts = props["transcript_signals"]
+    assert ts["type"] == "object"
+    sub = ts["properties"]
+    assert sub["guidance_tone"]["enum"] == ["raised", "maintained", "lowered", "not_mentioned"]
+    assert sub["management_confidence"]["enum"] == ["high", "neutral", "low"]
+    assert sub["buyback_mentioned"]["type"] == "boolean"

@@ -92,6 +92,29 @@ ANALYSIS_TOOL_SCHEMA: Dict[str, Any] = {
                 "enum": ["BUY", "SELL", "HOLD", "REDUCE", "WATCH"],
                 "description": "Recommended portfolio action.",
             },
+            "transcript_signals": {
+                "type": "object",
+                "description": (
+                    "Qualitative signals extracted from the earnings transcript. "
+                    "Omit entirely when no transcript was provided."
+                ),
+                "properties": {
+                    "guidance_tone": {
+                        "type": "string",
+                        "enum": ["raised", "maintained", "lowered", "not_mentioned"],
+                        "description": "Whether management raised, maintained, or lowered forward guidance.",
+                    },
+                    "management_confidence": {
+                        "type": "string",
+                        "enum": ["high", "neutral", "low"],
+                        "description": "Overall confidence tone (hedging language vs conviction).",
+                    },
+                    "buyback_mentioned": {
+                        "type": "boolean",
+                        "description": "True if buybacks, M&A, or restructuring were mentioned.",
+                    },
+                },
+            },
         },
         "required": ["score", "confidence", "reasons", "citations", "recommended_action"],
     },
