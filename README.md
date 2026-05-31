@@ -27,7 +27,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # Run the canary locally
-powershell -ExecutionPolicy Bypass -File run_canary.ps1
+powershell -ExecutionPolicy Bypass -File run_canary.ps1  # loads .env values like FMP_API_KEY if present
 
 # Generate top_lists locally (after an EDGAR run)
 python -m backend.market_intel.generate_top_lists --log-dir logs --force
