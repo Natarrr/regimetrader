@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .claude_client import ClaudeClient, CostTracker, validate_analysis_schema
+from regime_trader.services.fmp_client import FMPClient
 
 log = logging.getLogger(__name__)
 
@@ -428,6 +429,7 @@ def run_analysis(
     regime: str = "Unknown",
     *,
     client: Optional[ClaudeClient] = None,
+    fmp_client: Optional[FMPClient] = None,
     run_id: Optional[str] = None,
     bypass_cache: bool = False,
 ) -> List[AnalysisResult]:
@@ -448,6 +450,9 @@ def run_analysis(
     if client is None:
         client = ClaudeClient(run_id=run_id)
 
+    if fmp_client is None:
+        fmp_client = FMPClient()
+
     results: List[AnalysisResult] = []
 
     for symbol in shortlist:
@@ -456,7 +461,13 @@ def run_analysis(
         quant_score = quant_data.get("smart_money_score", 0.0) * 100
 
         try:
-            prompt = build_prompt(symbol, quant_data, parsed_events, regime)
+            try:
+                transcript = fmp_client.get_earnings_transcript(symbol)
+            except Exception as exc:
+                log.warning("[ANALYZER] transcript fetch failed for %s: %s", symbol, exc)
+                transcript = None
+            prompt = build_prompt(symbol, quant_data, parsed_events, regime,
+                                  transcript=transcript)
             analysis = client.analyze(
                 symbol=symbol,
                 prompt=prompt,

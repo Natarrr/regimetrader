@@ -461,3 +461,94 @@ class TestShouldAutoExecute:
             claude_score_min=55,
         )
         assert result is False
+
+
+# ── run_analysis transcript injection ─────────────────────────────────────────
+
+class TestRunAnalysisTranscript:
+    """Verify run_analysis fetches transcripts and passes them to build_prompt."""
+
+    def _mock_claude_client(self):
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        client.analyze.return_value = _valid_analysis()
+        return client
+
+    def _mock_fmp_client(self, transcript="Transcript text."):
+        from unittest.mock import MagicMock
+        fmp = MagicMock()
+        fmp.get_earnings_transcript.return_value = transcript
+        return fmp
+
+    def test_fmp_client_injected_and_called_per_symbol(self):
+        from analysis.earnings_analyzer import run_analysis
+        fmp = self._mock_fmp_client()
+        claude = self._mock_claude_client()
+
+        run_analysis(
+            shortlist=["AAPL", "MSFT"],
+            quant_map={"AAPL": _candidate("AAPL"), "MSFT": _candidate("MSFT")},
+            filings_map={},
+            client=claude,
+            fmp_client=fmp,
+        )
+
+        assert fmp.get_earnings_transcript.call_count == 2
+        fmp.get_earnings_transcript.assert_any_call("AAPL")
+        fmp.get_earnings_transcript.assert_any_call("MSFT")
+
+    def test_transcript_none_does_not_abort_analysis(self):
+        from analysis.earnings_analyzer import run_analysis
+        fmp = self._mock_fmp_client(transcript=None)
+        claude = self._mock_claude_client()
+
+        results = run_analysis(
+            shortlist=["AAPL"],
+            quant_map={"AAPL": _candidate("AAPL")},
+            filings_map={},
+            client=claude,
+            fmp_client=fmp,
+        )
+
+        assert len(results) == 1
+        assert results[0].error is None
+
+    def test_transcript_fetch_exception_does_not_abort_analysis(self):
+        from analysis.earnings_analyzer import run_analysis
+        from unittest.mock import MagicMock
+        fmp = MagicMock()
+        fmp.get_earnings_transcript.side_effect = RuntimeError("network error")
+        claude = self._mock_claude_client()
+
+        results = run_analysis(
+            shortlist=["AAPL"],
+            quant_map={"AAPL": _candidate("AAPL")},
+            filings_map={},
+            client=claude,
+            fmp_client=fmp,
+        )
+
+        assert len(results) == 1
+        assert results[0].error is None  # transcript failure != analysis failure
+
+    def test_fmp_client_instantiated_when_not_provided(self):
+        """When fmp_client is None, run_analysis creates one internally."""
+        from analysis.earnings_analyzer import run_analysis
+        from unittest.mock import MagicMock, patch
+        claude = self._mock_claude_client()
+
+        with patch("analysis.earnings_analyzer.FMPClient") as MockFMP:
+            mock_instance = MagicMock()
+            mock_instance.get_earnings_transcript.return_value = None
+            MockFMP.return_value = mock_instance
+
+            run_analysis(
+                shortlist=["AAPL"],
+                quant_map={"AAPL": _candidate("AAPL")},
+                filings_map={},
+                client=claude,
+                fmp_client=None,
+            )
+
+        MockFMP.assert_called_once()
+        mock_instance.get_earnings_transcript.assert_called_once_with("AAPL")
