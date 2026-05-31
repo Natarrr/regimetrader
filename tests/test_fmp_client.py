@@ -404,3 +404,13 @@ class TestGetEarningsTranscript:
         with patch.object(client, "_get", side_effect=RuntimeError("timeout")):
             result = client.get_earnings_transcript("AAPL")
         assert result is None
+
+    def test_caches_sentinel_when_no_content(self, client):
+        """Missing content writes empty-string sentinel so we don't re-fetch."""
+        payload = [{"symbol": "AAPL", "quarter": 1, "year": 2026, "date": "2026-01-15"}]
+        with patch.object(client._session, "get", return_value=_ok_resp(payload)) as mock_get:
+            result1 = client.get_earnings_transcript("AAPL")
+            result2 = client.get_earnings_transcript("AAPL")
+        assert result1 is None  # First call: no content, so returns None
+        assert result2 == ""    # Second call: cached sentinel empty string
+        assert mock_get.call_count == 1  # second call served from cache sentinel

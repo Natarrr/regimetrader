@@ -769,6 +769,9 @@ class FMPClient:
                 return None
             content = data[0].get("content")
             if not content:
+                # FMP returned a record but without transcript text yet.
+                # Cache empty sentinel so we don't re-fetch within the 24h TTL.
+                self._cache_write("transcript", ticker, "")
                 return None
             result = content[:max_chars]
             self._cache_write("transcript", ticker, result)
