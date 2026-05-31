@@ -54,12 +54,15 @@ log = logging.getLogger("generate_top_lists")
 # intentional and documented.  cross_sectional_normalize reads FACTOR_FIELDS.
 WEIGHTS: Dict[str, float] = {
     "insider_conviction": 0.30,
-    "insider_breadth":    0.15,
-    "congress":           0.22,
+    "insider_breadth":    0.12,   # reduced 0.15→0.12 to fund analyst_revision
+    "congress":           0.13,   # reduced 0.17→0.13 to fund price_target_upside
     "news_sentiment":     0.10,
-    "news_buzz":          0.05,
+    "news_buzz":          0.03,
     "momentum_long":      0.15,
     "volume_attention":   0.03,
+    "analyst_consensus":  0.04,   # Womack (1996 JF) — sell-side rating direction
+    "analyst_revision":   0.06,   # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS revision momentum
+    "price_target_upside": 0.04,  # forward-looking analyst target signal
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -71,6 +74,9 @@ FACTOR_FIELDS: Dict[str, str] = {
     "news_buzz":          "news_buzz_score",
     "momentum_long":      "momentum_long_score",
     "volume_attention":   "volume_attention_score",
+    "analyst_consensus":  "analyst_consensus_score",
+    "analyst_revision":   "analyst_revision_score",
+    "price_target_upside": "price_target_upside_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
@@ -629,6 +635,8 @@ def generate(
                 "news_buzz":          0.0,
                 "momentum_long":      float(row.get("momentum_long_score") or 0.0),
                 "volume_attention":   float(row.get("volume_attention_score") or 0.0),
+                "analyst_consensus":  0.0,  # structurally absent for non-US (FMP 403)
+                "analyst_revision":   0.0,  # structurally absent for non-US (FMP 403)
             },
             "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
             "quiver_evidence":         {},

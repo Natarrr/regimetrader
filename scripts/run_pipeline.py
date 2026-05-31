@@ -46,12 +46,15 @@ log = logging.getLogger("run_pipeline")
 # volume extracted from momentum into its own attention tilt (0.03).
 WEIGHTS = {
     "insider_conviction":  0.30,   # Fix #2 — dollar magnitude + CEO premium
-    "insider_breadth":     0.15,   # Fix #2 — consensus among distinct insiders
-    "congress":            0.22,   # unchanged
+    "insider_breadth":     0.12,   # reduced 0.15→0.12 to fund analyst_revision
+    "congress":            0.13,   # reduced 0.17→0.13 to fund price_target_upside
     "news_sentiment":      0.10,   # Fix #3 — directional, recency-decayed (Tetlock 2007)
-    "news_buzz":           0.05,   # Fix #3 — attention/coverage volume (Barber-Odean 2008)
+    "news_buzz":           0.03,   # Fix #3 — attention/coverage volume (Barber-Odean 2008)
     "momentum_long":       0.15,   # Fix #3 — 12-1m skip-month (Jegadeesh-Titman 1993)
     "volume_attention":    0.03,   # Fix #3 — volume spike tilt (Barber-Odean 2008)
+    "analyst_consensus":   0.04,   # Womack (1996 JF) — sell-side rating direction signal
+    "analyst_revision":    0.06,   # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS estimate revision momentum
+    "price_target_upside": 0.04,   # forward-looking analyst target signal (Womack-adjacent)
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1, got {sum(WEIGHTS.values())}"
 _WEIGHTS_MIGRATION_NOTE = (
@@ -584,21 +587,136 @@ def score_news_fmp(ticker: str) -> float:
     return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
 
 
-def score_news_sentiment_combined(ticker: str) -> tuple[float, str]:
-    """Recency-weighted directional sentiment (Tetlock 2007).
+def score_analyst_consensus(ticker: str) -> tuple[float, str]:
+    """Sell-side analyst consensus score from FMP /stable/grades-consensus.
 
-    Returns (score, source) where source ∈ {"fmp", "none"}.
-    Uses FMP stable/news/stock exclusively (FMP Ultimate, no yfinance fallback).
+    Womack (1996, JF): analyst upgrades/downgrades have significant post-event
+    drift — the direction of the consensus is a credible, widely-used signal.
+    This maps the ratings distribution to a continuous [0, 1] score weighted by
+    count, treating the distribution as a probability mass over the rating scale.
+
+    Rating → score mapping (linear 5-point scale):
+        strongBuy  → 1.00
+        buy        → 0.75
+        hold       → 0.50
+        sell       → 0.25
+        strongSell → 0.00
+
+    Returns (0.0, "none")   — dead signal, no coverage (total == 0).
+    Returns (0.0, "sparse") — insufficient coverage (total < 3 analysts).
+    Returns (score, "fmp_consensus") — valid weighted average.
+    Never raises — returns (0.0, "error") on any exception.
+    """
+    _SCORE_MAP = {
+        "strongBuy":  1.00,
+        "buy":        0.75,
+        "hold":       0.50,
+        "sell":       0.25,
+        "strongSell": 0.00,
+    }
+    try:
+        data = _FMPClient().get_analyst_ratings(ticker)
+        if not data:
+            return 0.0, "none"
+
+        total = sum(int(data.get(k, 0) or 0) for k in _SCORE_MAP)
+        if total == 0:
+            return 0.0, "none"
+        if total < 3:
+            return 0.0, "sparse"
+
+        weighted = sum(
+            _SCORE_MAP[k] * int(data.get(k, 0) or 0)
+            for k in _SCORE_MAP
+        )
+        return round(weighted / total, 4), "fmp_consensus"
+    except Exception as exc:
+        log.debug("score_analyst_consensus %s failed: %s", ticker, exc)
+        return 0.0, "error"
+
+
+def score_analyst_revision(
+    revision_pct: Optional[float],
+    n_analysts: int,
+) -> float:
+    """EPS estimate revision momentum score in [0, 1].
+
+    Analyst estimate revision momentum is a separate alpha source from price
+    momentum (Jegadeesh-Titman 1993): it captures the direction of fundamental
+    re-rating by sell-side analysts, which has been shown to predict returns
+    independently of past price performance.
+
+    Reference: Chan, Jegadeesh & Lakonishok (1996, JF) "Momentum Strategies" —
+    estimate revisions contribute an independent return-predictive signal,
+    particularly when analyst coverage is broad (high n_analysts).
+
+    Scoring:
+      1. revision_pct is clipped to [−0.30, +0.30] (extreme revisions of
+         ±30%+ are treated as ±30% to prevent outlier domination).
+      2. Linear mapping to [0, 1]: (clip + 0.30) / 0.60
+         −30% revision → 0.0 (maximum bearish)
+          0% revision  → 0.5 (neutral)
+         +30% revision → 1.0 (maximum bullish)
+      3. Coverage weight: min(1.0, n_analysts / 10)
+         Thin analyst coverage (< 10) reduces confidence proportionally.
+         Scores from a single analyst are weighted at 0.1; 10+ analysts get
+         full weight. This prevents micro-cap noise from dominating.
+
+    Returns 0.0 (dead signal) when:
+      - revision_pct is None (endpoint unavailable or < 3 estimates)
+      - n_analysts < 3 (insufficient coverage — sparse, not neutral)
+    """
+    if revision_pct is None or n_analysts < 3:
+        return 0.0
+    clipped = max(-0.30, min(0.30, revision_pct))
+    raw_score = (clipped + 0.30) / 0.60
+    coverage_weight = min(1.0, n_analysts / 10.0)
+    return round(raw_score * coverage_weight, 4)
+
+
+def score_news_sentiment_combined(
+    ticker: str,
+) -> tuple[float, str, Optional[float], int]:
+    """Recency-weighted directional sentiment boosted by EPS surprise (PEAD).
+
+    Returns (score, source, earnings_surprise_pct, earnings_surprise_days).
+
+    Base signal: Tetlock (2007, JF) recency-weighted bull/bear headline sentiment.
+    EPS boost:   Bernard & Thomas (1989, JAE) PEAD — standardized unexpected
+                 earnings (SUE) predicts returns for up to 90 days post-announcement.
+
+    Boost formula (applied only when surprise is available AND days_since <= 90):
+        boost       = clip(surprise_pct × 0.5, −0.20, +0.20)
+        final_score = clip(headline_score + boost, 0.0, 1.0)
+
+    The ×0.5 dampener keeps EPS from overwhelming the headline signal on extreme
+    beats/misses. The 90-day PEAD horizon follows Bernard & Thomas (1989).
+
+    source label: "fmp+eps" when EPS data was used, "fmp" otherwise.
     """
     from regime_trader.scoring.news_signals import score_news_sentiment  # noqa: PLC0415
 
     client = _FMPClient()
     articles = client.get_news_raw_articles(ticker)
+
+    headline_score = 0.0
+    base_source = "none"
     if articles:
         s = score_news_sentiment(articles)
         if s > 0.0:
-            return s, "fmp"
-    return 0.0, "none"
+            headline_score = s
+            base_source = "fmp"
+
+    # PEAD boost — FMP /stable/earnings-surprises (Bernard & Thomas 1989)
+    surprise_pct, days_since = client.get_earnings_surprise(ticker)
+
+    if surprise_pct is not None and days_since <= 90 and base_source != "none":
+        # Dampen to ±20pp max so an extreme beat can't dominate the sentiment score
+        boost = max(-0.20, min(0.20, surprise_pct * 0.5))
+        final_score = max(0.0, min(1.0, headline_score + boost))
+        return round(final_score, 4), "fmp+eps", round(surprise_pct, 6), days_since
+
+    return headline_score, base_source, surprise_pct, days_since
 
 
 def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
@@ -1217,8 +1335,15 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             vol_att_score = score_volume_attention(price_data["volume_spike"])
 
             # ── Fix #3: orthogonal news signals ──────────────────────────
-            news_sent_score, news_sent_source = score_news_sentiment_combined(ticker)
+            news_sent_score, news_sent_source, _eps_pct, _eps_days = score_news_sentiment_combined(ticker)
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
+
+            # ── Analyst consensus (Womack 1996 JF) ───────────────────────
+            analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(ticker)
+
+            # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
+            _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
+            analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
 
             # ── Congress ─────────────────────────────────────────────────
             c_score = score_congress(congress_raw)
@@ -1279,6 +1404,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "volume_attention_score":   vol_att_score,
                 "news_sentiment_score":     news_sent_score,
                 "news_buzz_score":          news_buzz_score,
+                "analyst_consensus_score":  analyst_consensus_score,
+                "analyst_revision_score":   analyst_revision_score,
+                "analyst_revision_n":       _rev_n,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":           c_score,
                 # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
@@ -1296,6 +1424,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "quiver_evidence":         quiver_evidence,
                 "news_sentiment_source":   news_sent_source,
                 "news_buzz_source":        news_buzz_source,
+                "analyst_consensus_source": analyst_consensus_source,
+                "earnings_surprise_pct":   _eps_pct,
+                "earnings_surprise_days":  _eps_days,
                 "insider_usd":             float(total_purchases_usd),
                 "return_12_1m":            ret_12_1m,
                 "momentum_spy_relative":   float(ret_12_1m - _spy12) if ret_12_1m is not None else 0.0,
@@ -1316,6 +1447,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "volume_attention_score":   0.0,
                 "news_sentiment_score":     0.0,
                 "news_buzz_score":          0.0,
+                "analyst_consensus_score":  0.0,
+                "analyst_revision_score":   0.0,
+                "analyst_revision_n":       0,
                 "congress_score":           0.0,
                 "edgar_score_legacy":       0.0,
                 "insider_score_legacy":     0.0,
@@ -1326,6 +1460,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "quiver_evidence":         {},
                 "news_sentiment_source":   "none",
                 "news_buzz_source":        "none",
+                "analyst_consensus_source": "none",
+                "earnings_surprise_pct":   None,
+                "earnings_surprise_days":  0,
                 "insider_usd":             float(total_purchases_usd),
                 "return_12_1m":            None,
                 "momentum_spy_relative":   0.0,
