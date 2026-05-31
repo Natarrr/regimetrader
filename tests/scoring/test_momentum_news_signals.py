@@ -213,3 +213,8 @@ class TestPriceTargetUpside:
     def test_small_upside(self):
         """5% upside → (0.05 + 0.50) / 1.00 = 0.55."""
         assert score_price_target_upside(105.0, 100.0) == 0.5500
+
+    def test_nan_returns_dead_signal(self):
+        import math
+        assert score_price_target_upside(float('nan'), 100.0) == 0.0
+        assert score_price_target_upside(100.0, float('nan')) == 0.0

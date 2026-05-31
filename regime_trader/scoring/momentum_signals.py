@@ -119,6 +119,8 @@ def score_price_target_upside(
         return 0.0
     if not t or not c:
         return 0.0
+    if math.isnan(t) or math.isnan(c):
+        return 0.0
     upside  = (t - c) / c
     clipped = max(-0.50, min(0.50, upside))
     return round((clipped + 0.50) / 1.00, 4)
