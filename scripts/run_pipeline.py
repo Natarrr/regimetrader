@@ -1150,6 +1150,7 @@ def _score_ticker_international(
             "congress_score":            None,
             "news_sentiment_score":      None,
             "news_buzz_score":           None,
+            "price_target_upside_score": None,
             # Raw inputs (diagnostic)
             "return_12_1m":              return_12_1m,
             "volume_spike":              volume_spike,
@@ -1345,6 +1346,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
             analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
 
+            # ── Price target upside (forward-looking analyst target signal) ────
+            # None = no analyst coverage / data missing → dead signal (penalised).
+            # Not the same as 0.50 (at-target with valid data).
+            price_target_upside_score = _fmp_client.get_upside_to_target(ticker) or 0.0
+
             # ── Congress ─────────────────────────────────────────────────
             c_score = score_congress(congress_raw)
 
@@ -1407,6 +1413,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "analyst_consensus_score":  analyst_consensus_score,
                 "analyst_revision_score":   analyst_revision_score,
                 "analyst_revision_n":       _rev_n,
+                "price_target_upside_score": price_target_upside_score,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":           c_score,
                 # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
@@ -1450,6 +1457,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "analyst_consensus_score":  0.0,
                 "analyst_revision_score":   0.0,
                 "analyst_revision_n":       0,
+                "price_target_upside_score": 0.0,
                 "congress_score":           0.0,
                 "edgar_score_legacy":       0.0,
                 "insider_score_legacy":     0.0,
