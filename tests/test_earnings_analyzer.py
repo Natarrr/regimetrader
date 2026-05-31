@@ -552,3 +552,24 @@ class TestRunAnalysisTranscript:
 
         MockFMP.assert_called_once()
         mock_instance.get_earnings_transcript.assert_called_once_with("AAPL")
+
+    def test_transcript_passed_to_build_prompt(self):
+        """Verify transcript from FMP is actually injected into the prompt."""
+        from analysis.earnings_analyzer import run_analysis, build_prompt
+        from unittest.mock import patch
+
+        fmp = self._mock_fmp_client(transcript="CEO: Guidance raised.")
+        claude = self._mock_claude_client()
+
+        with patch("analysis.earnings_analyzer.build_prompt", wraps=build_prompt) as mock_build:
+            run_analysis(
+                shortlist=["AAPL"],
+                quant_map={"AAPL": _candidate("AAPL")},
+                filings_map={},
+                client=claude,
+                fmp_client=fmp,
+            )
+
+        mock_build.assert_called_once()
+        call_kwargs = mock_build.call_args.kwargs
+        assert call_kwargs.get("transcript") == "CEO: Guidance raised."
