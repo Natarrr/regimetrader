@@ -470,6 +470,12 @@ class TestSchemaGate:
         _schema_gate(rows, universe_size=5)
         assert rows[0]["_validation"].get("esg_exclusion_candidate") is True
 
+    def test_esg_flag_false_does_not_mark_exclusion_candidate(self):
+        rows = [_make_schema_row(f"T{i}") for i in range(5)]
+        rows[0]["esg_flag"] = False
+        _schema_gate(rows, universe_size=5)
+        assert rows[0]["_validation"].get("esg_exclusion_candidate") is None
+
     def test_returns_same_list_in_place(self):
         rows = [_make_schema_row()]
         returned = _schema_gate(rows, universe_size=1)

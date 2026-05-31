@@ -616,7 +616,7 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
     eps_pct = raw.get("earnings_surprise_pct")   # float | None
     eps_days = int(raw.get("earnings_surprise_days") or 0)
 
-    return {
+    entry = {
         "ticker":                  raw.get("ticker", "?"),
         "sector":                  raw.get("sector", "Unknown"),
         "cap_tier":                raw.get("cap_tier", "large"),
@@ -633,6 +633,12 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
         "earnings_surprise_pct":   eps_pct,
         "earnings_surprise_days":  eps_days,
     }
+
+    for key in ("esg_score", "esg_e_score", "esg_flag"):
+        if key in raw:
+            entry[key] = raw.get(key)
+
+    return entry
 
 
 def _badge_from_score(score: float) -> str:
@@ -679,8 +685,11 @@ def build_payload(
 
         # All results for percentile calculation
         all_results = status.get("results", [])
-        all_scores = sorted([float(r.get("final_score", 0) or 0)
-                            for r in all_results if r.get("final_score")])
+        all_scores = sorted([
+            float(r.get("final_score", 0))
+            for r in all_results
+            if r.get("final_score") is not None
+        ])
 
         # Mid caps: non-top-5 entries with cap_tier == "mid", cross-market
         top_tickers = {e["ticker"]
@@ -702,8 +711,11 @@ def build_payload(
         us_entries = top_buys[:5]
         eu_entries = list(status.get("top_buys_europe") or [])[:5]
         asia_entries = list(status.get("top_buys_asia") or [])[:5]
-        all_scores = sorted([float(e.get("final_score", 0))
-                            for e in top_buys if e.get("final_score")])
+        all_scores = sorted([
+            float(e.get("final_score", 0))
+            for e in top_buys
+            if e.get("final_score") is not None
+        ])
         mid_caps = list(status.get("mid_caps") or [])[:5]
 
     # ── Timing ───────────────────────────────────────────────────────────────

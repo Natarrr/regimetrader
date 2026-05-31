@@ -211,3 +211,17 @@ class TestBuildPayloadSchema:
         payload = build_payload(status)
         desc = payload["embeds"][0]["description"]
         assert "OLD" in desc
+
+    def test_status_schema_preserves_esg_metadata(self):
+        from scripts.send_toplists_discord import build_payload
+        status = _make_status()
+        status["top_by_market"]["US"][0]["esg_score"] = 22.0
+        status["top_by_market"]["US"][0]["esg_flag"] = True
+        payload = build_payload(status)
+        names = [f["name"] for f in payload["embeds"][0]["fields"]]
+        assert any("ESG!" in n for n in names)
+
+    def test_percentile_includes_zero_values(self):
+        from scripts.send_toplists_discord import _compute_percentile
+        scores = [0.0, 0.2, 0.4, 0.6]
+        assert _compute_percentile(0.0, scores) == 25

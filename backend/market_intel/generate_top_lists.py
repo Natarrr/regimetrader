@@ -165,15 +165,19 @@ def _schema_gate(
             if val is None or float(val) == 0.0:
                 missing.append(factor)
 
-        esg_score = row.get("esg_flag")
-        if esg_score is None:
-            esg_score = row.get("esg_score")
+        esg_flag_raw = row.get("esg_flag")
+        if isinstance(esg_flag_raw, bool):
+            esg_flag = esg_flag_raw
+        else:
+            esg_score = esg_flag_raw
+            if esg_score is None:
+                esg_score = row.get("esg_score")
             if esg_score is None:
                 esg_score = row.get("ESGScore")
-        try:
-            esg_flag = bool(esg_score is not None and float(esg_score) < 30)
-        except Exception:
-            esg_flag = False
+            try:
+                esg_flag = bool(esg_score is not None and float(esg_score) < 30)
+            except Exception:
+                esg_flag = False
 
         is_complete = len(missing) <= _SCHEMA_MISSING_THRESHOLD
         row["_validation"] = {
@@ -346,14 +350,18 @@ def _to_entry(
     # Carry schema-gate result into the entry so it appears in top_lists.json
     validation = row.get(
         "_validation", {"is_complete": True, "missing_sources": []})
-    esg_score_value = row.get("esg_score")
-    if esg_score_value is None:
-        esg_score_value = row.get("ESGScore")
+    esg_flag_value = row.get("esg_flag")
+    esg_score_value = row.get("esg_score") if row.get("esg_score") is not None else row.get("ESGScore")
     if esg_score_value is not None:
         try:
             esg_score_value = float(esg_score_value)
         except Exception:
             esg_score_value = None
+
+    if esg_flag_value is None and esg_score_value is not None:
+        esg_flag_value = bool(esg_score_value < 30)
+    else:
+        esg_flag_value = bool(esg_flag_value)
 
     esg_e_score_value = row.get("esg_e_score")
     if esg_e_score_value is None:
@@ -363,8 +371,6 @@ def _to_entry(
             esg_e_score_value = float(esg_e_score_value)
         except Exception:
             esg_e_score_value = None
-
-    esg_flag_value = bool(esg_score_value is not None and esg_score_value < 30)
 
     return {
         "ticker":          row.get("ticker", "?"),
