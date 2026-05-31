@@ -239,13 +239,59 @@ class TestBuildPrompt:
         assert "No specific risk flags" in prompt
 
     def test_prompt_version_constant(self):
-        """Verify PROMPT_VERSION is v1.2 — cache-busting relies on this."""
-        assert PROMPT_VERSION == "v1.2"
+        """Verify PROMPT_VERSION is v1.3 — cache-busting relies on this."""
+        assert PROMPT_VERSION == "v1.3"
 
     def test_returns_string(self):
         prompt = build_prompt("AAPL", self._base_quant(), [], "Bull")
         assert isinstance(prompt, str)
         assert len(prompt) > 100
+
+    def test_transcript_section_present_when_provided(self):
+        transcript = "CEO: We are raising guidance for Q3. Revenue will be..."
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull",
+                              transcript=transcript)
+        assert "Recent Earnings Call" in prompt
+        assert "CEO: We are raising guidance" in prompt
+
+    def test_transcript_truncated_to_transcript_max_chars(self):
+        transcript = "X" * 5000
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull",
+                              transcript=transcript, transcript_max_chars=2000)
+        assert prompt.count("X") == 2000
+
+    def test_transcript_none_shows_fallback(self):
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull",
+                              transcript=None)
+        assert "No transcript available" in prompt
+
+    def test_transcript_empty_string_shows_fallback(self):
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull",
+                              transcript="")
+        assert "No transcript available" in prompt
+
+    def test_transcript_instructions_present_when_transcript_provided(self):
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull",
+                              transcript="Some transcript text.")
+        assert "Forward guidance tone" in prompt
+        assert "Management confidence" in prompt
+        assert "buybacks" in prompt.lower() or "buyback" in prompt.lower()
+
+    def test_transcript_instructions_present_without_transcript(self):
+        """Instructions block always included so Claude knows what to look for."""
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull",
+                              transcript=None)
+        assert "Forward guidance tone" in prompt
+
+    def test_no_transcript_arg_backward_compat(self):
+        """Callers that don't pass transcript still get a valid prompt."""
+        prompt = build_prompt("AAPL", self._base_quant(), [], "Bull")
+        assert "AAPL" in prompt
+        assert "No transcript available" in prompt
+
+    def test_prompt_version_bumped_to_v1_3(self):
+        """PROMPT_VERSION must be v1.3 after this change — cache-bust."""
+        assert PROMPT_VERSION == "v1.3"
 
 
 # ── cross_check_citations ─────────────────────────────────────────────────────

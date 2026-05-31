@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 # ── Prompt versioning ─────────────────────────────────────────────────────────
 # Bump MAJOR when prompt intent changes (cache-busting).
 # Bump MINOR for wording tweaks (cache still valid).
-PROMPT_VERSION = "v1.2"
+PROMPT_VERSION = "v1.3"
 
 # ── Auto-execution thresholds ─────────────────────────────────────────────────
 _DEFAULT_QUANT_THRESHOLD = float(os.getenv("AUTO_EXEC_QUANT_MIN", "80"))
@@ -101,7 +101,7 @@ Rules:
 5. Respond ONLY via the output_analysis tool — no free-form text.
 """
 
-# v1.2 — added explicit regime context block
+# v1.3 — added transcript section and qualitative cross-reference instructions
 _USER_PROMPT_TEMPLATE = """\
 ## Equity Analysis Request — {symbol}
 
@@ -121,6 +121,9 @@ _USER_PROMPT_TEMPLATE = """\
 ### Key Risk Factors
 {risk_block}
 
+### Recent Earnings Call (last quarter — executive remarks excerpt)
+{transcript_block}
+
 ### Analysis Instructions
 Synthesize the quantitative signal and the SEC filing evidence above.
 Focus on:
@@ -128,6 +131,12 @@ Focus on:
 2. Are institutions accumulating or distributing?
 3. What is the most likely 30-day price catalyst?
 4. What are the top 2 risks that could invalidate the long thesis?
+
+If a transcript is provided, identify:
+1. Forward guidance tone (raised/maintained/lowered)
+2. Management confidence signals (hedging language vs conviction)
+3. Any mention of buybacks, M&A, or restructuring
+Cross-reference these qualitative signals against the quantitative factors.
 
 Return your analysis via the output_analysis tool with score, confidence,
 reasons (≥3 points), citations (anchor each fact to a filing), and
@@ -140,17 +149,24 @@ def build_prompt(
     quant_data: Dict[str, Any],
     parsed_events: List[Dict[str, Any]],
     regime: str = "Unknown",
+    transcript: Optional[str] = None,
+    transcript_max_chars: int = 2000,
 ) -> str:
     """Build a compressed, token-efficient prompt for a single symbol.
 
     Context budget: ≤ 4000 tokens. Insider events are capped at 10 rows.
-    Institutional changes are capped at 5 rows.
+    Institutional changes are capped at 5 rows. Transcript injected up to
+    transcript_max_chars (default 2000) — smaller than the FMPClient fetch
+    ceiling of 3000 so the prompt budget can change without a new network call.
 
     Args:
-        symbol:        Ticker.
-        quant_data:    Dict from discovery_scanner ScanResult.
-        parsed_events: Form-4 events from edgar_parse.parse_form4_file().
-        regime:        Current regime label (VIX/HMM output).
+        symbol:              Ticker.
+        quant_data:          Dict from discovery_scanner ScanResult.
+        parsed_events:       Form-4 events from edgar_parse.parse_form4_file().
+        regime:              Current regime label (VIX/HMM output).
+        transcript:          Raw transcript text from FMPClient.get_earnings_transcript().
+                             None when unavailable — prompt uses a fallback message.
+        transcript_max_chars: Max chars of transcript injected into prompt (default 2000).
 
     Returns:
         Formatted user-turn prompt string.
@@ -208,6 +224,12 @@ def build_prompt(
         risk_items.append("No specific risk flags from quant model.")
     risk_block = "\n".join(f"  - {r}" for r in risk_items)
 
+    # ── Transcript block ───────────────────────────────────────────────────────
+    if transcript:
+        transcript_block = transcript[:transcript_max_chars]
+    else:
+        transcript_block = "No transcript available — analysis based on filing data only."
+
     return _USER_PROMPT_TEMPLATE.format(
         symbol=symbol,
         quant_score=quant_data.get("smart_money_score", 0) * 100,
@@ -218,6 +240,7 @@ def build_prompt(
         insider_block=insider_block,
         inst_block=inst_block,
         risk_block=risk_block,
+        transcript_block=transcript_block,
     )
 
 
