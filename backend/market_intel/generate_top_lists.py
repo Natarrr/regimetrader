@@ -49,25 +49,16 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 log = logging.getLogger("generate_top_lists")
 
 
-# Fix #2+#3: align with run_pipeline.WEIGHTS (7-factor decomposition).
-# These weights mirror the pipeline's WEIGHTS exactly; any divergence must be
-# intentional and documented.  cross_sectional_normalize reads FACTOR_FIELDS.
+# Fix #2+#3: align with the canonical 7-factor top-lists scoring schema.
+# These weights reflect the core ranking signal used by the Discord/UI advisor.
 WEIGHTS: Dict[str, float] = {
     "insider_conviction": 0.30,
-    "insider_breadth":    0.09,   # reduced 0.12→0.09 to fund quality_piotroski
-    # reduced 0.13→0.10 (structurally sparse, ~5% density)
-    "congress":           0.10,
+    "insider_breadth":    0.15,
+    "congress":           0.22,
     "news_sentiment":     0.10,
-    "news_buzz":          0.03,
+    "news_buzz":          0.05,
     "momentum_long":      0.15,
     "volume_attention":   0.03,
-    # Womack (1996 JF) — sell-side rating direction
-    "analyst_consensus":  0.04,
-    # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS revision momentum
-    "analyst_revision":   0.06,
-    "price_target_upside": 0.04,  # forward-looking analyst target signal
-    # Piotroski (2000) / Novy-Marx (2013) quality gate
-    "quality_piotroski":  0.06,
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -79,10 +70,6 @@ FACTOR_FIELDS: Dict[str, str] = {
     "news_buzz":          "news_buzz_score",
     "momentum_long":      "momentum_long_score",
     "volume_attention":   "volume_attention_score",
-    "analyst_consensus":  "analyst_consensus_score",
-    "analyst_revision":   "analyst_revision_score",
-    "price_target_upside": "price_target_upside_score",
-    "quality_piotroski":  "quality_piotroski_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
@@ -138,7 +125,7 @@ def _schema_gate(
 ) -> List[Dict[str, Any]]:
     """Validate each ticker's factor completeness; raise if universe collapses.
 
-    For each ticker, counts how many of the five raw factor scores are exactly
+    For each ticker, counts how many of the seven raw factor scores are exactly
     0.0 (the sentinel for a missing/dead feed).  Attaches a ``_validation``
     dict to each row:
 
@@ -693,10 +680,6 @@ def generate(
                 "news_buzz":          0.0,
                 "momentum_long":      float(row.get("momentum_long_score") or 0.0),
                 "volume_attention":   float(row.get("volume_attention_score") or 0.0),
-                # structurally absent for non-US (FMP 403)
-                "analyst_consensus":  0.0,
-                # structurally absent for non-US (FMP 403)
-                "analyst_revision":   0.0,
             },
             "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
             "quiver_evidence":         {},
