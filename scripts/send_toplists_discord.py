@@ -74,6 +74,8 @@ _FACTOR_DISPLAY: List[tuple] = [
     ("news_buzz",          "NB"),
     ("momentum_long",      "MO"),
     ("volume_attention",   "VA"),
+    ("analyst_consensus",  "AC"),
+    ("analyst_revision",   "AR"),
 ]
 
 # ── VIX regime thresholds ─────────────────────────────────────────────────────
@@ -107,6 +109,7 @@ _MEDAL: Dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
 _MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸", "US": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
 
 _STALE_HOURS = 25
+_NO_CATALYST = "no primary catalyst detected"
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -196,18 +199,63 @@ def _compute_percentile(score: float, all_scores: List[float]) -> int:
 
 
 def _compute_catalyst(entry: Dict[str, Any]) -> str:
-    """Return a one-line catalyst string from the top 2 non-zero factors."""
-    factors = entry.get("factors") or {}
-    scored = [
-        (label, float(factors.get(key, 0) or 0))
-        for key, label in _FACTOR_DISPLAY
-    ]
-    active = [(lbl, v) for lbl, v in scored if v >= 0.05]
-    active.sort(key=lambda x: -x[1])
-    if not active:
-        return "no primary catalyst"
-    parts = [f"{lbl}: {v:.2f}" for lbl, v in active[:2]]
-    return "driven by " + " + ".join(parts)
+    """Evidence-first catalyst narrative, max 80 chars, signals separated by ' · '.
+
+    Priority order (max 3 signals emitted):
+      1. INSIDER: insider_usd > 0 → "Insider $Xk [CEO]"
+      2. EARNINGS (PEAD ≤90d): earnings_surprise_pct → "EPS beat/miss ±X% (Nd ago)"
+      3. CONGRESS: quiver_evidence.congress.purchases > 0 → "Nx congress buy · rep"
+      4. MOMENTUM: |momentum_spy_relative| > 0.05 → "±X% vs SPY 12m"
+      5. ANALYST REVISION (fallback only, no other signal): analyst_revision_n ≥ 5
+
+    Returns _NO_CATALYST when no signal fires.
+    """
+    signals: list[str] = []
+
+    # 1. INSIDER
+    usd = float(entry.get("insider_usd", 0) or 0)
+    if usd > 0:
+        if usd < 100_000:
+            usd_str = f"${round(usd / 1000, 1)}k"
+        else:
+            usd_str = f"${round(usd / 1000, 0):.0f}k"
+        ceo_tier = entry.get("ceo_conviction_tier", "none") or "none"
+        ceo_part = " CEO" if ceo_tier != "none" else ""
+        signals.append(f"Insider {usd_str}{ceo_part}")
+
+    # 2. EARNINGS SURPRISE (PEAD — Bernard & Thomas 1989, ≤90d window)
+    eps_pct  = entry.get("earnings_surprise_pct")
+    eps_days = int(entry.get("earnings_surprise_days") or 0)
+    if eps_pct is not None and eps_days <= 90:
+        verb    = "beat" if eps_pct >= 0 else "miss"
+        sign    = "+" if eps_pct >= 0 else "-"
+        pct_fmt = abs(eps_pct * 100)
+        signals.append(f"EPS {verb} {sign}{pct_fmt:.1f}% ({eps_days}d ago)")
+
+    # 3. CONGRESS
+    congress   = (entry.get("quiver_evidence") or {}).get("congress", {})
+    cg_buys    = int(congress.get("purchases", 0) or 0)
+    if cg_buys > 0:
+        reps       = congress.get("representatives") or []
+        rep_str    = reps[0][:12] if reps else "members"
+        recency    = congress.get("recency_days")
+        rec_part   = f" ({recency}d ago)" if recency is not None else ""
+        signals.append(f"{cg_buys}x congress buy · {rep_str}{rec_part}")
+
+    # 4. MOMENTUM
+    rel = float(entry.get("momentum_spy_relative", 0) or 0)
+    if abs(rel) > 0.05:
+        sign = "+" if rel >= 0 else ""
+        signals.append(f"{sign}{rel * 100:.1f}% vs SPY 12m")
+
+    # 5. ANALYST REVISION — fallback only (no other signal fired)
+    if not signals:
+        n = int(entry.get("analyst_revision_n", 0) or 0)
+        if n >= 5:
+            signals.append(f"analyst revision signal ({n} analysts)")
+
+    result = " · ".join(signals[:3])
+    return (result or _NO_CATALYST)[:80]
 
 
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
@@ -444,20 +492,25 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
 
     factors = {key: _get(key) for key, _ in _FACTOR_DISPLAY}
 
+    eps_pct  = raw.get("earnings_surprise_pct")   # float | None
+    eps_days = int(raw.get("earnings_surprise_days") or 0)
+
     return {
-        "ticker":              raw.get("ticker", "?"),
-        "sector":              raw.get("sector", "Unknown"),
-        "cap_tier":            raw.get("cap_tier", "large"),
-        "market_cap":          float(raw.get("market_cap", 0) or 0),
-        "final_score":         float(raw.get("final_score", 0) or 0),
-        "badge":               raw.get("badge") or _badge_from_score(float(raw.get("final_score", 0) or 0)),
-        "ceo_buy":             bool(raw.get("ceo_buy", False)),
-        "ceo_conviction_tier": raw.get("ceo_conviction_tier", "none"),
-        "ceo_purchase_bps":    raw.get("ceo_purchase_bps"),
-        "congress_boost":      float(raw.get("congress_boost", 0.0) or 0),
-        "market":              raw.get("market", "USA"),
-        "factors":             factors,
-        "company_name":        raw.get("company_name", ""),
+        "ticker":                  raw.get("ticker", "?"),
+        "sector":                  raw.get("sector", "Unknown"),
+        "cap_tier":                raw.get("cap_tier", "large"),
+        "market_cap":              float(raw.get("market_cap", 0) or 0),
+        "final_score":             float(raw.get("final_score", 0) or 0),
+        "badge":                   raw.get("badge") or _badge_from_score(float(raw.get("final_score", 0) or 0)),
+        "ceo_buy":                 bool(raw.get("ceo_buy", False)),
+        "ceo_conviction_tier":     raw.get("ceo_conviction_tier", "none"),
+        "ceo_purchase_bps":        raw.get("ceo_purchase_bps"),
+        "congress_boost":          float(raw.get("congress_boost", 0.0) or 0),
+        "market":                  raw.get("market", "USA"),
+        "factors":                 factors,
+        "company_name":            raw.get("company_name", ""),
+        "earnings_surprise_pct":   eps_pct,
+        "earnings_surprise_days":  eps_days,
     }
 
 
@@ -934,12 +987,61 @@ def run_tests() -> int:
         field = _ticker_detail_field(1, e, all_scores=[0.49])
         lines = field["value"].split("\n")
         _check("has_three_lines_plus_sep", len(lines) >= 3, f"lines={lines}")
-        _check("catalyst_line_present", any("driven by" in ln or "no primary" in ln for ln in lines), f"lines={lines}")
+        _check(
+            "catalyst_line_present",
+            any(
+                any(kw in ln for kw in ["Insider", "EPS", "congress", "vs SPY", "no primary"])
+                for ln in lines
+            ),
+            f"Catalyst line missing expected pattern: lines={lines}",
+        )
+
+        # Zero-signal entry → _NO_CATALYST
+        e_zero = _entry("ZERO", score=0.10)
+        e_zero["insider_usd"]           = 0.0
+        e_zero["earnings_surprise_pct"] = None
+        cat_zero = _compute_catalyst(e_zero)
+        _check("zero_signal_fallback", cat_zero == _NO_CATALYST, f"cat_zero={cat_zero!r}")
     except Exception:
         failures.append(f"FAIL [catalyst_line]: {traceback.format_exc()}")
 
+    # ── Test 13: EPS surprise appended to catalyst when within 90-day window ──
+    try:
+        e = _entry("NVDA", score=0.72)
+        e["earnings_surprise_pct"]   = 0.153   # +15.3% beat
+        e["earnings_surprise_days"]  = 8
+        e["momentum_spy_relative"]   = 0.20    # +20% vs SPY — triggers second signal → · separator
+        cat = _compute_catalyst(e)
+        _check("eps_in_catalyst_beat",  "EPS beat +15.3%" in cat, f"cat={cat!r}")
+        _check("eps_days_in_catalyst",  "8d ago"     in cat, f"cat={cat!r}")
+        _check("eps_separator",         "·"          in cat, f"cat={cat!r}")
+
+        # Negative surprise
+        e2 = _entry("INTC", score=0.30)
+        e2["earnings_surprise_pct"]  = -0.087
+        e2["earnings_surprise_days"] = 45
+        cat2 = _compute_catalyst(e2)
+        _check("eps_in_catalyst_miss",  "EPS miss -8.7%"  in cat2, f"cat2={cat2!r}")
+        _check("eps_days_miss",         "45d ago"    in cat2, f"cat2={cat2!r}")
+
+        # Outside 90-day window → no EPS fragment
+        e3 = _entry("AAPL", score=0.55)
+        e3["earnings_surprise_pct"]  = 0.20
+        e3["earnings_surprise_days"] = 95
+        cat3 = _compute_catalyst(e3)
+        _check("eps_absent_outside_window", "EPS" not in cat3, f"cat3={cat3!r}")
+
+        # None surprise → no EPS fragment
+        e4 = _entry("MSFT", score=0.60)
+        e4["earnings_surprise_pct"]  = None
+        e4["earnings_surprise_days"] = 0
+        cat4 = _compute_catalyst(e4)
+        _check("eps_absent_when_none", "EPS" not in cat4, f"cat4={cat4!r}")
+    except Exception:
+        failures.append(f"FAIL [eps_catalyst]: {traceback.format_exc()}")
+
     # ── Report ────────────────────────────────────────────────────────────────
-    total_assertions = 32
+    total_assertions = 40
     if failures:
         for f in failures:
             print(f, file=sys.stderr)
