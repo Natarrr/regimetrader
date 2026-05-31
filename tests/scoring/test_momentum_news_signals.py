@@ -12,7 +12,12 @@ from datetime import date, timedelta
 
 import pytest
 
-from regime_trader.scoring.momentum_signals import score_momentum_long, score_volume_attention, score_price_target_upside
+from regime_trader.scoring.momentum_signals import (
+    score_momentum_long,
+    score_volume_attention,
+    score_price_target_upside,
+    score_quality_piotroski,
+)
 from regime_trader.scoring.news_signals import score_news_sentiment, score_news_buzz
 
 
@@ -218,3 +223,113 @@ class TestPriceTargetUpside:
         import math
         assert score_price_target_upside(float('nan'), 100.0) == 0.0
         assert score_price_target_upside(100.0, float('nan')) == 0.0
+
+
+class TestQualityPiotroski:
+    """Simplified 8-point Piotroski F-score mapped to [0, 1].
+
+    References:
+        Piotroski (2000) JAR — historical financial statements separate winners from losers.
+        Novy-Marx (2013) JFE — gross profitability predicts cross-sectional returns.
+
+    Score = points_earned / 8.0. Dead signal (0.0) when ratios is None/empty/all-None.
+    """
+
+    def _full_quality_ratios(self) -> dict:
+        """Ratios dict where all 8 points pass — perfect score."""
+        return {
+            "returnOnAssetsTTM":        0.10,   # > 0 (point 1) and > 0.05 (point 2)
+            "operatingProfitMarginTTM": 0.15,   # > 0 (point 3)
+            "debtEquityRatioTTM":       0.30,   # < 1.0 (point 4) and < 0.5 (point 5)
+            "currentRatioTTM":          2.0,    # > 1.5 (point 6)
+            "grossProfitMarginTTM":     0.45,   # > 0.30 (point 7)
+            "netProfitMarginTTM":       0.08,   # > 0.05 (point 8)
+        }
+
+    def test_perfect_score_all_8_points(self):
+        score = score_quality_piotroski(self._full_quality_ratios())
+        assert score == 1.0000
+
+    def test_zero_score_all_8_points_fail(self):
+        ratios = {
+            "returnOnAssetsTTM":        -0.05,  # fails points 1 and 2
+            "operatingProfitMarginTTM": -0.10,  # fails point 3
+            "debtEquityRatioTTM":        2.0,   # fails points 4 and 5
+            "currentRatioTTM":           0.8,   # fails point 6
+            "grossProfitMarginTTM":      0.10,  # fails point 7
+            "netProfitMarginTTM":       -0.02,  # fails point 8
+        }
+        assert score_quality_piotroski(ratios) == 0.0000
+
+    def test_partial_score_5_of_8_points(self):
+        """ROA > 0 only (not > 0.05), opMargin OK, D/E < 1 only (not < 0.5),
+        currentRatio OK, grossMargin OK, netMargin fails."""
+        ratios = {
+            "returnOnAssetsTTM":        0.02,   # passes point 1, fails point 2
+            "operatingProfitMarginTTM": 0.10,   # passes point 3
+            "debtEquityRatioTTM":       0.70,   # passes point 4, fails point 5
+            "currentRatioTTM":          2.0,    # passes point 6
+            "grossProfitMarginTTM":     0.40,   # passes point 7
+            "netProfitMarginTTM":       0.02,   # fails point 8
+        }
+        assert score_quality_piotroski(ratios) == round(5 / 8, 4)
+
+    def test_empty_dict_returns_dead_signal(self):
+        assert score_quality_piotroski({}) == 0.0
+
+    def test_none_returns_dead_signal(self):
+        assert score_quality_piotroski(None) == 0.0
+
+    def test_all_none_fields_returns_dead_signal(self):
+        ratios = {
+            "returnOnAssetsTTM":        None,
+            "operatingProfitMarginTTM": None,
+            "debtEquityRatioTTM":       None,
+            "currentRatioTTM":          None,
+            "grossProfitMarginTTM":     None,
+            "netProfitMarginTTM":       None,
+        }
+        assert score_quality_piotroski(ratios) == 0.0
+
+    def test_missing_individual_fields_score_zero_for_that_point(self):
+        """A company with 5 of 8 fields present and all passing scores 5/8."""
+        ratios = {
+            "returnOnAssetsTTM":        0.10,   # points 1+2 pass
+            "operatingProfitMarginTTM": 0.15,   # point 3 passes
+            # debtEquityRatioTTM missing — points 4+5 score 0
+            "currentRatioTTM":          2.0,    # point 6 passes
+            "grossProfitMarginTTM":     0.40,   # point 7 passes
+            # netProfitMarginTTM missing — point 8 scores 0
+        }
+        assert score_quality_piotroski(ratios) == round(5 / 8, 4)
+
+    def test_negative_debt_equity_fails_both_leverage_points(self):
+        """Negative D/E (negative book equity) is worse than high D/E — fails points 4 and 5."""
+        ratios = {**self._full_quality_ratios(), "debtEquityRatioTTM": -0.5}
+        # Loses 2 leverage points: 8 - 2 = 6 → 6/8
+        assert score_quality_piotroski(ratios) == round(6 / 8, 4)
+
+    def test_roa_exactly_at_5pct_threshold(self):
+        """ROA == 0.05 fails point 2 (must be strictly greater than 0.05)."""
+        ratios = {**self._full_quality_ratios(), "returnOnAssetsTTM": 0.05}
+        # Loses point 2: 8 - 1 = 7 → 7/8
+        assert score_quality_piotroski(ratios) == round(7 / 8, 4)
+
+    def test_gross_margin_exactly_at_threshold(self):
+        """grossProfitMarginTTM == 0.30 fails point 7 (must be strictly greater)."""
+        ratios = {**self._full_quality_ratios(), "grossProfitMarginTTM": 0.30}
+        assert score_quality_piotroski(ratios) == round(7 / 8, 4)
+
+    def test_returns_float_in_range_0_to_1(self):
+        score = score_quality_piotroski(self._full_quality_ratios())
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+    def test_score_rounded_to_4_decimal_places(self):
+        ratios = {**self._full_quality_ratios(), "returnOnAssetsTTM": 0.02}
+        score = score_quality_piotroski(ratios)
+        assert score == round(score, 4)
+
+    def test_non_dict_input_returns_dead_signal(self):
+        assert score_quality_piotroski("not a dict") == 0.0
+        assert score_quality_piotroski(42) == 0.0

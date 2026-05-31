@@ -124,3 +124,90 @@ def score_price_target_upside(
     upside  = (t - c) / c
     clipped = max(-0.50, min(0.50, upside))
     return round((clipped + 0.50) / 1.00, 4)
+
+
+def score_quality_piotroski(ratios: dict) -> float:
+    """Simplified 8-point Piotroski F-score, in [0, 1].
+
+    Captures fundamental quality as a value-trap gate: high-conviction insider
+    buying in a deteriorating business is a false signal. Piotroski (2000)
+    showed that a simple binary F-score on financial statement data separates
+    winners from losers among high book-to-market stocks. Novy-Marx (2013)
+    extended this: gross profitability is the strongest single quality predictor.
+    Ilmanen (2011) documents quality as a cross-regime premium independent of
+    momentum — which makes it a natural complement to score_momentum_long.
+
+    8 binary points (each worth 1/8 of the final score):
+        1. returnOnAssetsTTM > 0         — profitable at all
+        2. returnOnAssetsTTM > 0.05      — strong ROA (>5%)
+        3. operatingProfitMarginTTM > 0  — positive operating income (OCF proxy)
+        4. debtEquityRatioTTM < 1.0      — manageable leverage
+        5. debtEquityRatioTTM < 0.5      — low leverage (bonus)
+        6. currentRatioTTM > 1.5         — liquid balance sheet
+        7. grossProfitMarginTTM > 0.30   — 30%+ gross margin = pricing power
+        8. netProfitMarginTTM > 0.05     — profitable after all costs
+
+    score = round(points_earned / 8.0, 4)
+
+    Partial-data handling: a missing or None field contributes 0 for its
+    point(s) but does not collapse the entire score. A company with 6 of 8
+    fields and 5 passing scores 5/8 = 0.625.
+
+    Negative D/E (negative book equity) fails both leverage points — it
+    signals structural distress, not low debt.
+
+    Returns 0.0 (dead signal) when ratios is None, not a dict, or every
+    relevant field is None/missing. Consistent with score_momentum_long:
+    missing input is penalised, not granted a neutral pass.
+
+    References:
+        Piotroski (2000), "Value Investing: The Use of Historical Financial
+        Statement Information to Separate Winners from Losers", JAR 38(1).
+        Novy-Marx (2013), "The Other Side of Value", JFE 108(1).
+        Ilmanen (2011), "Expected Returns", Wiley.
+
+    Source: FMPClient.get_ratios_ttm() → stable/ratios-ttm (24h cache).
+    """
+    if not isinstance(ratios, dict) or not ratios:
+        return 0.0
+
+    def _get(field: str) -> float | None:
+        v = ratios.get(field)
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            return None if math.isnan(f) else f
+        except (TypeError, ValueError):
+            return None
+
+    roa  = _get("returnOnAssetsTTM")
+    opm  = _get("operatingProfitMarginTTM")
+    de   = _get("debtEquityRatioTTM")
+    cr   = _get("currentRatioTTM")
+    gpm  = _get("grossProfitMarginTTM")
+    npm  = _get("netProfitMarginTTM")
+
+    # Guard: all fields missing → dead signal
+    if all(v is None for v in (roa, opm, de, cr, gpm, npm)):
+        return 0.0
+
+    points = 0
+    if roa is not None and roa > 0:
+        points += 1
+    if roa is not None and roa > 0.05:
+        points += 1
+    if opm is not None and opm > 0:
+        points += 1
+    if de is not None and 0 <= de < 1.0:  # negative D/E fails both leverage points
+        points += 1
+    if de is not None and 0 <= de < 0.5:  # negative D/E fails: 0 <= de is False
+        points += 1
+    if cr is not None and cr > 1.5:
+        points += 1
+    if gpm is not None and gpm > 0.30:
+        points += 1
+    if npm is not None and npm > 0.05:
+        points += 1
+
+    return round(points / 8.0, 4)
