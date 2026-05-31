@@ -427,6 +427,165 @@ class FMPClient:
         self._cache_write("news", ticker, result)
         return result
 
+    def get_earnings_surprise(self, ticker: str) -> Tuple[Optional[float], int]:
+        """Return (surprise_pct, days_since) for the most recent quarter.
+
+        Post-Earnings Announcement Drift (PEAD): Bernard & Thomas (1989, JAE)
+        showed that standardized unexpected earnings (SUE) predict returns for
+        60–90 days post-announcement — the most robust anomaly in event studies.
+
+        surprise_pct = (actual - estimate) / abs(estimate)
+        days_since   = calendar days from the announcement date to today
+
+        Returns (None, 0) gracefully on any error, empty response, or zero estimate
+        (avoids division-by-zero on pre-revenue companies).
+
+        Uses the "news" TTL bucket (2h) — earnings surprise data changes at most
+        once per quarter so 2h is conservative and keeps the news cache coherent.
+        """
+        if not self._api_key:
+            return None, 0
+
+        cache_key = f"eps_surprise_{ticker}"
+        cached = self._cache_read("news", cache_key)
+        if cached is not None:
+            return tuple(cached)  # type: ignore[return-value]
+
+        try:
+            data = self._get(
+                "earnings-surprises",
+                {"symbol": ticker, "limit": 4},
+                bucket="news",
+            ) or []
+            if not isinstance(data, list) or not data:
+                self._cache_write("news", cache_key, [None, 0])
+                return None, 0
+
+            # FMP returns newest-first; index 0 is the most recent quarter.
+            most_recent = data[0]
+            actual   = most_recent.get("actualEarningResult")
+            estimate = most_recent.get("estimatedEarning")
+            date_str = str(most_recent.get("date") or "")
+
+            if actual is None or estimate is None:
+                self._cache_write("news", cache_key, [None, 0])
+                return None, 0
+
+            actual   = float(actual)
+            estimate = float(estimate)
+
+            # Guard: zero or near-zero estimate → undefined surprise % (pre-revenue)
+            if abs(estimate) < 1e-6:
+                self._cache_write("news", cache_key, [None, 0])
+                return None, 0
+
+            surprise_pct = (actual - estimate) / abs(estimate)
+
+            days_since = 0
+            if date_str:
+                try:
+                    from datetime import date as _date
+                    announcement = _date.fromisoformat(date_str[:10])
+                    days_since = max(0, (datetime.now(timezone.utc).date() - announcement).days)
+                except Exception:
+                    days_since = 0
+
+            result = (round(surprise_pct, 6), days_since)
+            self._cache_write("news", cache_key, list(result))
+            return result
+
+        except FMPEndpointError:
+            # Structural failure already logged by _get(); propagate to health_report
+            return None, 0
+        except Exception as exc:
+            log.debug("get_earnings_surprise %s failed: %s", ticker, exc)
+            return None, 0
+
+    def get_analyst_estimate_revision(self, ticker: str) -> Tuple[Optional[float], int]:
+        """Return (revision_pct, n_analysts) measuring EPS estimate revision momentum.
+
+        Analyst estimate revision momentum is a core quant factor used by AQR,
+        Two Sigma, and most systematic equity funds. The intuition is that analysts
+        revising EPS estimates upward signal an improving fundamental view that is
+        not yet fully reflected in price — orthogonal to price momentum (Jegadeesh-
+        Titman 1993) which captures past returns. Academic grounding:
+
+          Chan, Jegadeesh & Lakonishok (1996, JF): "Momentum Strategies" —
+          estimate revisions predict future abnormal returns independently of
+          past price performance.
+
+        revision_pct = (estimates[0].estimatedEpsAvg - estimates[2].estimatedEpsAvg)
+                       / abs(estimates[2].estimatedEpsAvg)
+
+        estimates[0] = most recent quarter, estimates[2] = ~3 quarters ago.
+        FMP returns newest-first so index 0 is the freshest estimate.
+
+        n_analysts is taken from estimates[0].numberAnalystEstimatedEps and used
+        by the scorer as a coverage weight (thin coverage → low confidence).
+
+        Returns (None, 0) when:
+          - No API key
+          - Fewer than 3 estimates available (can't compute a revision)
+          - Base estimate is zero or near-zero (division guard)
+          - Any network / parse error
+
+        Cache bucket: "ratings" (6h TTL) — analyst estimates change slowly, at
+        most once per quarter, so 6h is conservative relative to the signal horizon.
+        """
+        if not self._api_key:
+            return None, 0
+
+        cache_key = f"eps_revision_{ticker}"
+        cached = self._cache_read("ratings", cache_key)
+        if cached is not None:
+            return tuple(cached)  # type: ignore[return-value]
+
+        _null = [None, 0]
+        try:
+            data = self._get(
+                "analyst-estimates",
+                {"symbol": ticker, "period": "quarter", "limit": 4},
+                bucket="ratings",
+            ) or []
+            if not isinstance(data, list) or len(data) < 3:
+                self._cache_write("ratings", cache_key, _null)
+                return None, 0
+
+            # FMP returns newest-first; [0] = most recent, [2] = ~3 quarters ago.
+            recent = data[0]
+            base   = data[2]
+
+            recent_eps = recent.get("estimatedEpsAvg")
+            base_eps   = base.get("estimatedEpsAvg")
+
+            if recent_eps is None or base_eps is None:
+                self._cache_write("ratings", cache_key, _null)
+                return None, 0
+
+            recent_eps = float(recent_eps)
+            base_eps   = float(base_eps)
+
+            # Guard against pre-revenue or near-zero base (undefined revision %)
+            if abs(base_eps) < 1e-6:
+                self._cache_write("ratings", cache_key, _null)
+                return None, 0
+
+            revision_pct = (recent_eps - base_eps) / abs(base_eps)
+
+            n_analysts = int(recent.get("numberAnalystEstimatedEps") or 0)
+
+            result = [round(revision_pct, 6), n_analysts]
+            self._cache_write("ratings", cache_key, result)
+            return tuple(result)  # type: ignore[return-value]
+
+        except FMPEndpointError:
+            # Structural failure already logged by _get(); do not propagate —
+            # a dead estimates route should not abort the broader scoring run.
+            return None, 0
+        except Exception as exc:
+            log.debug("get_analyst_estimate_revision %s failed: %s", ticker, exc)
+            return None, 0
+
     # ── Quote (stable/quote) ───────────────────────────────────────────────────
 
     def get_quote(self, ticker: str, bypass_cache: bool = False) -> Dict:
@@ -580,6 +739,45 @@ class FMPClient:
                          {"symbol": ticker, "period": "quarter", "limit": limit},
                          bucket="key_metrics") or []
         return data if isinstance(data, list) else []
+
+    def get_earnings_transcript(self, ticker: str, max_chars: int = 3000) -> Optional[str]:
+        """Executive remarks from the most recent earnings call.
+
+        Fetches stable/earning-call-transcript-latest (limit=1).
+        Returns content[:max_chars] on success; None on any failure.
+
+        max_chars (default 3000) is intentionally larger than build_prompt's
+        transcript_max_chars (default 2000) — the delta sits in memory and is
+        discarded. This avoids a second network call if the prompt budget changes.
+
+        Cache bucket: "transcript" (24h TTL — transcripts don't change after
+        publication). Soft-fail: FMPEndpointError and network exceptions return
+        None; the transcript is additive enrichment, not a scored factor.
+        """
+        if not self._api_key:
+            return None
+        cached = self._cache_read("transcript", ticker)
+        if cached is not None:
+            return cached
+        try:
+            data = self._get(
+                "earning-call-transcript-latest",
+                {"symbol": ticker, "limit": 1},
+                bucket="transcript",
+            ) or []
+            if not isinstance(data, list) or not data:
+                return None
+            content = data[0].get("content")
+            if not content:
+                return None
+            result = content[:max_chars]
+            self._cache_write("transcript", ticker, result)
+            return result
+        except FMPEndpointError:
+            return None
+        except Exception as exc:
+            log.debug("get_earnings_transcript %s failed: %s", ticker, exc)
+            return None
 
     # ── Health report ──────────────────────────────────────────────────────────
 

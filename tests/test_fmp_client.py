@@ -341,3 +341,66 @@ class TestScoreNewsFMP:
         with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
             score = score_news_fmp("NVDA")
         assert 0.0 <= score <= 1.0
+
+
+class TestGetEarningsTranscript:
+    """get_earnings_transcript fetches stable/earning-call-transcript-latest.
+
+    Cache bucket: "transcript" (24h TTL).
+    Soft-fail: returns None on error, empty list, or FMPEndpointError.
+    max_chars=3000 fetch ceiling is intentionally larger than build_prompt's
+    2000-char injection limit — no second network call needed if budget changes.
+    """
+
+    def test_returns_content_truncated_to_max_chars(self, client):
+        long_content = "A" * 5000
+        payload = [{"symbol": "AAPL", "quarter": 1, "year": 2026,
+                    "date": "2026-01-15", "content": long_content}]
+        with patch.object(client._session, "get", return_value=_ok_resp(payload)):
+            result = client.get_earnings_transcript("AAPL", max_chars=3000)
+        assert result == "A" * 3000
+
+    def test_returns_full_content_when_shorter_than_max_chars(self, client):
+        content = "Short transcript text."
+        payload = [{"symbol": "AAPL", "quarter": 1, "year": 2026,
+                    "date": "2026-01-15", "content": content}]
+        with patch.object(client._session, "get", return_value=_ok_resp(payload)):
+            result = client.get_earnings_transcript("AAPL")
+        assert result == content
+
+    def test_returns_none_on_empty_list(self, client):
+        with patch.object(client._session, "get", return_value=_empty_resp()):
+            result = client.get_earnings_transcript("AAPL")
+        assert result is None
+
+    def test_returns_none_on_missing_content_key(self, client):
+        payload = [{"symbol": "AAPL", "quarter": 1, "year": 2026, "date": "2026-01-15"}]
+        with patch.object(client._session, "get", return_value=_ok_resp(payload)):
+            result = client.get_earnings_transcript("AAPL")
+        assert result is None
+
+    def test_returns_none_when_no_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        c = FMPClient(api_key="", cache_root=tmp_path / "fmp")
+        result = c.get_earnings_transcript("AAPL")
+        assert result is None
+
+    def test_caches_result(self, client):
+        content = "Transcript text."
+        payload = [{"symbol": "AAPL", "quarter": 1, "year": 2026,
+                    "date": "2026-01-15", "content": content}]
+        with patch.object(client._session, "get", return_value=_ok_resp(payload)) as mock_get:
+            client.get_earnings_transcript("AAPL")
+            client.get_earnings_transcript("AAPL")
+        assert mock_get.call_count == 1  # second call served from cache
+
+    def test_returns_none_on_fmp_endpoint_error(self, client):
+        from regime_trader.services.fmp_client import FMPEndpointError
+        with patch.object(client, "_get", side_effect=FMPEndpointError("earning-call-transcript-latest", 404)):
+            result = client.get_earnings_transcript("AAPL")
+        assert result is None
+
+    def test_returns_none_on_network_exception(self, client):
+        with patch.object(client, "_get", side_effect=RuntimeError("timeout")):
+            result = client.get_earnings_transcript("AAPL")
+        assert result is None
