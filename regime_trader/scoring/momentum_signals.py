@@ -80,3 +80,45 @@ def score_volume_attention(volume_spike: float) -> float:
     if math.isnan(v) or v <= 1.0:
         return 0.0
     return round(min(1.0, (v - 1.0) / 4.0), 4)
+
+
+def score_price_target_upside(
+    target_price: float | None,
+    current_price: float | None,
+) -> float:
+    """Analyst consensus price target upside, in [0, 1].
+
+    Captures the forward-looking dimension that backward-looking price momentum
+    (Jegadeesh-Titman 1993, 12-1m returns) cannot: where sell-side analysts
+    collectively expect the price to go. These two signals are orthogonal —
+    a stock can have strong past momentum and low analyst upside (priced in)
+    or weak momentum and high analyst upside (re-rating candidate).
+
+    Formula:
+        upside  = (target_price - current_price) / current_price
+        clipped = max(-0.50, min(+0.50, upside))   # ±50% practical bounds
+        score   = round((clipped + 0.50) / 1.00, 4) # linear map → [0, 1]
+
+    Score semantics:
+        1.00 = 50%+ upside to target
+        0.75 = 25% upside
+        0.50 = at target (no upside/downside)
+        0.25 = 25% downside
+        0.00 = 50%+ downside OR dead signal
+
+    Returns 0.0 (dead signal) when either argument is None, zero, or
+    non-numeric. Consistent with score_momentum_long and score_volume_attention:
+    a missing/zero input is penalised rather than granted a neutral pass.
+
+    Source: FMPClient.get_price_target_consensus() → stable/price-target-consensus.
+    """
+    try:
+        t = float(target_price)
+        c = float(current_price)
+    except (TypeError, ValueError):
+        return 0.0
+    if not t or not c:
+        return 0.0
+    upside  = (t - c) / c
+    clipped = max(-0.50, min(0.50, upside))
+    return round((clipped + 0.50) / 1.00, 4)

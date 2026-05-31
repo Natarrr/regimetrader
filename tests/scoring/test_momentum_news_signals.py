@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from regime_trader.scoring.momentum_signals import score_momentum_long, score_volume_attention
+from regime_trader.scoring.momentum_signals import score_momentum_long, score_volume_attention, score_price_target_upside
 from regime_trader.scoring.news_signals import score_news_sentiment, score_news_buzz
 
 
@@ -152,3 +152,64 @@ class TestNewsBuzz:
     def test_bounded(self):
         articles = [_article("Positive", 1) for _ in range(100)]
         assert 0.0 <= score_news_buzz(articles) <= 1.0
+
+
+class TestPriceTargetUpside:
+    """Forward-looking analyst price target signal in [0, 1].
+
+    Semantics:
+        0.50 = target == current price (no upside/downside)
+        0.75 = 25% upside to target
+        0.25 = 25% downside to target
+        1.00 = 50%+ upside (clipped)
+        0.00 = 50%+ downside (clipped) OR dead signal (None/zero input)
+    """
+
+    def test_at_target_scores_neutral(self):
+        """Target == current → exactly 0.50 (no upside/downside)."""
+        assert score_price_target_upside(100.0, 100.0) == 0.5000
+
+    def test_25pct_upside_scores_0_75(self):
+        """25% upside → 0.75."""
+        assert score_price_target_upside(125.0, 100.0) == 0.7500
+
+    def test_25pct_downside_scores_0_25(self):
+        """25% downside → 0.25."""
+        assert score_price_target_upside(75.0, 100.0) == 0.2500
+
+    def test_clips_at_50pct_upside(self):
+        """70% upside clipped to 50% → 1.00."""
+        assert score_price_target_upside(170.0, 100.0) == 1.0000
+
+    def test_clips_at_50pct_downside(self):
+        """-70% downside clipped to -50% → 0.00."""
+        assert score_price_target_upside(30.0, 100.0) == 0.0000
+
+    def test_exact_50pct_upside_scores_1(self):
+        assert score_price_target_upside(150.0, 100.0) == 1.0000
+
+    def test_exact_50pct_downside_scores_0(self):
+        assert score_price_target_upside(50.0, 100.0) == 0.0000
+
+    def test_none_target_returns_dead_signal(self):
+        assert score_price_target_upside(None, 100.0) == 0.0
+
+    def test_none_current_returns_dead_signal(self):
+        assert score_price_target_upside(100.0, None) == 0.0
+
+    def test_zero_current_price_returns_dead_signal(self):
+        """Zero current price → division guard → 0.0."""
+        assert score_price_target_upside(100.0, 0.0) == 0.0
+
+    def test_zero_target_returns_dead_signal(self):
+        """Zero target is a data error → 0.0."""
+        assert score_price_target_upside(0.0, 100.0) == 0.0
+
+    def test_returns_float_rounded_to_4dp(self):
+        result = score_price_target_upside(110.0, 100.0)
+        assert isinstance(result, float)
+        assert result == round(result, 4)
+
+    def test_small_upside(self):
+        """5% upside → (0.05 + 0.50) / 1.00 = 0.55."""
+        assert score_price_target_upside(105.0, 100.0) == 0.5500
