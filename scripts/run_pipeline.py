@@ -46,8 +46,8 @@ log = logging.getLogger("run_pipeline")
 # volume extracted from momentum into its own attention tilt (0.03).
 WEIGHTS = {
     "insider_conviction":  0.30,   # Fix #2 — dollar magnitude + CEO premium
-    "insider_breadth":     0.12,   # reduced 0.15→0.12 to fund analyst_revision
-    "congress":            0.13,   # reduced 0.17→0.13 to fund price_target_upside
+    "insider_breadth":     0.09,   # reduced 0.12→0.09 to fund quality_piotroski
+    "congress":            0.10,   # reduced 0.13→0.10 (structurally sparse, ~5% density)
     "news_sentiment":      0.10,   # Fix #3 — directional, recency-decayed (Tetlock 2007)
     "news_buzz":           0.03,   # Fix #3 — attention/coverage volume (Barber-Odean 2008)
     "momentum_long":       0.15,   # Fix #3 — 12-1m skip-month (Jegadeesh-Titman 1993)
@@ -55,6 +55,7 @@ WEIGHTS = {
     "analyst_consensus":   0.04,   # Womack (1996 JF) — sell-side rating direction signal
     "analyst_revision":    0.06,   # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS estimate revision momentum
     "price_target_upside": 0.04,   # forward-looking analyst target signal (Womack-adjacent)
+    "quality_piotroski":   0.06,   # Piotroski (2000) / Novy-Marx (2013) quality gate
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1, got {sum(WEIGHTS.values())}"
 _WEIGHTS_MIGRATION_NOTE = (

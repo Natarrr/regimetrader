@@ -54,8 +54,8 @@ log = logging.getLogger("generate_top_lists")
 # intentional and documented.  cross_sectional_normalize reads FACTOR_FIELDS.
 WEIGHTS: Dict[str, float] = {
     "insider_conviction": 0.30,
-    "insider_breadth":    0.12,   # reduced 0.15→0.12 to fund analyst_revision
-    "congress":           0.13,   # reduced 0.17→0.13 to fund price_target_upside
+    "insider_breadth":    0.09,   # reduced 0.12→0.09 to fund quality_piotroski
+    "congress":           0.10,   # reduced 0.13→0.10 (structurally sparse, ~5% density)
     "news_sentiment":     0.10,
     "news_buzz":          0.03,
     "momentum_long":      0.15,
@@ -63,6 +63,7 @@ WEIGHTS: Dict[str, float] = {
     "analyst_consensus":  0.04,   # Womack (1996 JF) — sell-side rating direction
     "analyst_revision":   0.06,   # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS revision momentum
     "price_target_upside": 0.04,  # forward-looking analyst target signal
+    "quality_piotroski":  0.06,   # Piotroski (2000) / Novy-Marx (2013) quality gate
 }
 
 # Maps factor key → field name in intel_source_status.json results
@@ -77,6 +78,7 @@ FACTOR_FIELDS: Dict[str, str] = {
     "analyst_consensus":  "analyst_consensus_score",
     "analyst_revision":   "analyst_revision_score",
     "price_target_upside": "price_target_upside_score",
+    "quality_piotroski":  "quality_piotroski_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
