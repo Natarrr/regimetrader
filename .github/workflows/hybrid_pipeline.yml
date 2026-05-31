@@ -206,9 +206,9 @@ jobs:
               pipeline_data = json.load(f)
 
           shortlist = pipeline_data.get('shortlist', [])
-          # Conservative estimate: ~1k input + 300 output tokens per symbol
+          # ~1500 input + 300 output tokens per symbol (includes 2000-char transcript block)
           # at claude-sonnet-4-6 pricing (\$3/Mtoken input, \$15/Mtoken output)
-          input_cost  = len(shortlist) * 1000 * 3.00  / 1_000_000
+          input_cost  = len(shortlist) * 1500 * 3.00  / 1_000_000
           output_cost = len(shortlist) * 300  * 15.00 / 1_000_000
           estimated_cost = round(input_cost + output_cost, 4)
 
