@@ -294,7 +294,7 @@ class TestQuiverEvidenceInResults:
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
                  patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp")), \
+                 patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp", None, 0)), \
                  patch("scripts.run_pipeline.score_news_buzz_combined", return_value=(0.40, "fmp")):
                 status = run(tickers_file, log_dir, max_workers=1)
 
@@ -337,7 +337,7 @@ class TestEvidencePassthroughFields:
                  patch("scripts.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
                  patch("scripts.run_pipeline.fetch_congress_buys", return_value={}), \
                  patch("scripts.run_pipeline.fetch_fmp_insider_all", return_value={}), \
-                 patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp")), \
+                 patch("scripts.run_pipeline.score_news_sentiment_combined", return_value=(0.55, "fmp", None, 0)), \
                  patch("scripts.run_pipeline.score_news_buzz_combined", return_value=(0.40, "fmp")):
                 status = run(tickers_file, log_dir, max_workers=1)
 
