@@ -167,32 +167,33 @@ def _fmt_eps_badge(entry: Dict[str, Any]) -> str:
 
 
 def _fmt_pt_badge(entry: Dict[str, Any]) -> str:
-    target = entry.get("price_target") or entry.get("target_price")
-    if target is None:
-        target = entry.get("targetConsensus") or entry.get(
-            "price_target_consensus")
-    price = entry.get("current_price") or entry.get(
-        "quote_price") or entry.get("price")
+    """Format price target badge using actual stored prices (not score inversion).
+
+    Uses target_price + current_price stored in result dict by run_pipeline.py.
+    Falls back to qualitative label if raw prices unavailable.
+    """
+    target = entry.get("target_price") or entry.get("targetConsensus")
+    price  = entry.get("current_price") or entry.get("price")
     try:
         target_val = float(target) if target is not None else 0.0
-        price_val = float(price) if price is not None else 0.0
-    except Exception:
-        target_val = 0.0
-        price_val = 0.0
+        price_val  = float(price)  if price  is not None else 0.0
+    except (TypeError, ValueError):
+        target_val = price_val = 0.0
+
     if target_val > 0 and price_val > 0:
         upside = (target_val - price_val) / price_val * 100
-        sign = "+" if upside >= 0 else ""
-        return f"PT ${target_val:.0f} · {sign}{upside:.0f}% upside"
-    score = entry.get("price_target_upside_score")
-    try:
-        score_val = float(score) if score is not None else 0.0
-    except Exception:
-        score_val = 0.0
-    if score_val <= 0:
-        return "PT —"
-    upside_pct = score_val * 100 - 50
-    sign = "+" if upside_pct >= 0 else ""
-    return f"PT {sign}{upside_pct:.0f}% upside"
+        sign   = "+" if upside >= 0 else ""
+        return f"PT ${target_val:.0f} ({sign}{upside:.0f}%)"
+
+    # No raw prices — qualitative fallback only (no fake % from score)
+    score_val = float(entry.get("price_target_upside_score") or 0.0)
+    if score_val >= 0.60:
+        return "PT ↑ above target"
+    if score_val >= 0.40:
+        return "PT → at target"
+    if score_val > 0:
+        return "PT ↓ below target"
+    return "PT —"
 
 
 def _fmt_analyst_badge(entry: Dict[str, Any]) -> str:
@@ -274,6 +275,7 @@ def _build_ticker_card(
     market: str = "US",
     kill_switch: bool = False,
     mid_cap: bool = False,
+    held_context: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     ticker = entry.get("ticker", "?")
     score = float(entry.get("final_score", 0) or 0)
@@ -295,9 +297,18 @@ def _build_ticker_card(
         _fmt_transcript_badge(entry),
     ]
     badge_line = " ".join([b for b in badge_texts if b])
-    name = f"#{rank} {ticker} {badge} p{pct} · {score:.4f}{mktcap_str}"
+    name = f"#{rank} {ticker} | {badge} | p{pct} | {score:.4f}{mktcap_str}"
     if entry.get("esg_flag"):
         name = f"{name} | ESG!"
+    # Add position annotation for Revolut context
+    if held_context is not None:
+        avg_cost = held_context.get(ticker)
+        if avg_cost is not None:
+            pos_label = f" [HOLD @{avg_cost:.0f}]" if avg_cost > 0 else " [HOLD]"
+        else:
+            pos_label = " [NEW]"
+        name = f"{name}{pos_label}"
+
     value = _truncate(f"`{factor_matrix}`\n{badge_line}", 1024)
     return {
         "name": name,
@@ -392,7 +403,7 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
         usd_label = _fmt_usd(usd)
         ceo_tier = (entry.get("ceo_conviction_tier") or "").strip()
         if ceo_tier and ceo_tier.lower() != "none":
-            signals.append(f"Insider {usd_label} CEO")
+            signals.append(f"Insider {usd_label} [{ceo_tier}]")
         else:
             signals.append(f"Insider {usd_label}")
 
@@ -404,6 +415,15 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
             signals.append(f"EPS miss {abs(pct * 100):.1f}%")
         else:
             signals.append(f"EPS +{pct * 100:.1f}% · {eps_days}d ago")
+
+    # Analyst rating change (most recent upgrade/downgrade within 7 days)
+    upg_raw = entry.get("recent_upgrade_downgrade") or {}
+    if isinstance(upg_raw, dict) and upg_raw.get("action") in ("upgrade", "downgrade"):
+        action_str = upg_raw["action"].upper()
+        firm_raw   = upg_raw.get("analyst_firm") or ""
+        firm_str   = f" {firm_raw[:12]}" if firm_raw else ""
+        days_upg   = int(upg_raw.get("days_ago") or 0)
+        signals.append(f"{action_str}{firm_str} {days_upg}d")
 
     congress = (entry.get("quiver_evidence") or {}).get("congress", {})
     cg_buys = int(congress.get("purchases", 0) or 0)
@@ -447,11 +467,12 @@ def _ticker_detail_field(
     rank: int,
     entry: Dict[str, Any],
     anomaly_flags: Optional[List[str]] = None,
-    rank_delta: Optional[int] = None,
+    score_delta: Optional[float] = None,
     buyback_conv: Optional[float] = None,
     mid_cap: bool = False,
     all_scores: Optional[List[float]] = None,
     kill_switch: bool = False,
+    held_context: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     if all_scores is not None:
         entry["percentile"] = _compute_percentile(
@@ -462,14 +483,22 @@ def _ticker_detail_field(
         market=entry.get("market", "US"),
         kill_switch=kill_switch,
         mid_cap=mid_cap,
+        held_context=held_context,
     )
     if anomaly_flags:
         field["name"] = f"{field['name']} ⚠️"
-    if rank_delta is not None:
-        if rank_delta > 0:
-            field["name"] = f"{field['name']} ▲{rank_delta}"
-        elif rank_delta < 0:
-            field["name"] = f"{field['name']} ▼{abs(rank_delta)}"
+    if score_delta is not None:
+        try:
+            current_score = float(entry.get("final_score", 0))
+            diff = current_score - float(score_delta)
+            if abs(diff) >= 0.01:
+                arrow = "▲" if diff > 0 else "▼"
+                delta_str = f" {arrow}{diff:+.3f}"
+            else:
+                delta_str = ""
+        except Exception:
+            delta_str = ""
+        field["name"] = f"{field['name']}{delta_str}"
     return field
 
 
@@ -492,13 +521,12 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
         pct = _compute_percentile(score, all_scores)
         cat = _compute_catalyst(e)
         ceo_tier = e.get("ceo_conviction_tier", "none")
-        ceo_note = f" · CEO {ceo_tier}" if ceo_tier and ceo_tier != "none" else ""
         # Fix #3: verb gated on score (badge thresholds), NOT percentile alone
         if score >= 0.60:
             verb = "**BUY**   "
         else:
             verb = "**WATCH** "
-        lines.append(f"{verb} `{ticker}` — p{pct}{ceo_note} · {cat}")
+        lines.append(f"{verb} `{ticker}` — p{pct} · {cat}")
 
     if not lines:
         return None
@@ -674,6 +702,11 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
         "form4_count":               int(raw.get("form4_count", 0) or 0),
         "quiver_evidence":           raw.get("quiver_evidence", {}),
         "momentum_spy_relative":     float(raw.get("momentum_spy_relative", 0.0) or 0),
+        "transcript_tone_score":     float(raw.get("transcript_tone_score") or 0.0),
+        "transcript_tone_source":    raw.get("transcript_tone_source", "none"),
+        "recent_upgrade_downgrade":  raw.get("recent_upgrade_downgrade", {}),
+        "target_price":              raw.get("target_price"),
+        "current_price":             raw.get("current_price"),
     }
 
     for key in ("esg_score", "esg_e_score", "esg_flag"):
@@ -764,7 +797,7 @@ def build_payload(
     age_h = _data_age_hours(generated_at)
     try:
         ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        date_str = ts.strftime("%b %d, %Y")
+        date_str = ts.strftime("%b %d %H:%M UTC")
     except Exception:
         date_str = generated_at[:10] or "—"
 
@@ -817,10 +850,34 @@ def build_payload(
         f"{alert_block}"
     )
 
-    # ── Shadow rank map (for trend arrow) ────────────────────────────────────
-    shadow_buys = status.get("shadow_top_buys") or []
-    shadow_rank_of = {e.get("ticker", ""): i for i,
-                      e in enumerate(shadow_buys, 1)}
+    # Load yesterday's scores from archive for real score-delta display
+    _yesterday_scores: Dict[str, float] = {}
+    try:
+        import glob as _glob
+        _archive_files = sorted(Path("logs/archive").glob("*_top_lists.json"))
+        if len(_archive_files) >= 2:
+            _prev_data = json.loads(_archive_files[-2].read_text(encoding="utf-8"))
+            for _prev_e in _prev_data.get("top_buys", []):
+                _prev_t = _prev_e.get("ticker", "")
+                if _prev_t:
+                    _yesterday_scores[_prev_t] = float(_prev_e.get("final_score", 0))
+    except Exception:
+        pass  # archive not available — score delta not shown
+
+    # Load Revolut positions for hold/add context
+    _held_tickers: set[str] = set()
+    _held_avg_cost: Dict[str, float] = {}
+    try:
+        _rev_path = Path("data/revolut_portfolio.json")
+        if _rev_path.exists():
+            _rev_data = json.loads(_rev_path.read_text(encoding="utf-8"))
+            for _pos in _rev_data.get("positions", []):
+                _t = _pos.get("ticker", "")
+                if _t:
+                    _held_tickers.add(_t)
+                    _held_avg_cost[_t] = float(_pos.get("avg_cost", 0.0))
+    except Exception:
+        pass  # portfolio file not available
 
     def _ticker_fields(
         entries: List[Dict],
@@ -834,18 +891,18 @@ def build_payload(
         added = 0
         for i, e in enumerate(entries[:max_n], 1):
             ticker_ = e.get("ticker", "")
-            shadow_r = shadow_rank_of.get(ticker_)
-            rank_delta = (shadow_r - i) if shadow_r is not None else None
+            score_delta = _yesterday_scores.get(ticker_)
             buyback_cv = buyback_conv_of.get(ticker_.upper())
             field = _ticker_detail_field(
                 i,
                 e,
                 anomaly_flags=anomaly_map.get(ticker_),
-                rank_delta=rank_delta,
+                score_delta=score_delta,
                 buyback_conv=buyback_cv,
                 mid_cap=mid_cap,
                 all_scores=all_scores,
                 kill_switch=kill_switch,
+                held_context=_held_avg_cost,
             )
             flen = len(field["value"])
             if used + flen > budget and added > 0:

@@ -45,24 +45,30 @@ log = logging.getLogger("run_pipeline")
 # news(0.15) split into directional sentiment(0.10) + attention buzz(0.05).
 # volume extracted from momentum into its own attention tilt (0.03).
 WEIGHTS = {
-    "insider_conviction":  0.30,   # Fix #2 — dollar magnitude + CEO premium
-    "insider_breadth":     0.09,   # reduced 0.12→0.09 to fund quality_piotroski
-    "congress":            0.10,   # reduced 0.13→0.10 (structurally sparse, ~5% density)
-    "news_sentiment":      0.10,   # Fix #3 — directional, recency-decayed (Tetlock 2007)
-    "news_buzz":           0.03,   # Fix #3 — attention/coverage volume (Barber-Odean 2008)
-    "momentum_long":       0.15,   # Fix #3 — 12-1m skip-month (Jegadeesh-Titman 1993)
-    "volume_attention":    0.03,   # Fix #3 — volume spike tilt (Barber-Odean 2008)
-    "analyst_consensus":   0.04,   # Womack (1996 JF) — sell-side rating direction signal
-    "analyst_revision":    0.06,   # Chan-Jegadeesh-Lakonishok (1996 JF) — EPS estimate revision momentum
-    "price_target_upside": 0.04,   # forward-looking analyst target signal (Womack-adjacent)
-    "quality_piotroski":   0.06,   # Piotroski (2000) / Novy-Marx (2013) quality gate
+    "insider_conviction":  0.18,   # was 0.30 — sparse on large-cap universe (~99% tickers score 0.0)
+    "insider_breadth":     0.12,   # was 0.09 — denser signal, increased
+    "congress":            0.08,   # was 0.10 — ~5% density, reduced proportionally
+    "news_sentiment":      0.10,
+    "news_buzz":           0.03,
+    "momentum_long":       0.22,   # was 0.15 — strongest IC empirically, increased
+    "volume_attention":    0.03,
+    "analyst_consensus":   0.04,
+    "analyst_revision":    0.06,
+    "price_target_upside": 0.04,
+    "quality_piotroski":   0.06,
+    "transcript_tone":     0.04,   # NEW — FMP earnings transcript guidance tone
 }
-assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1, got {sum(WEIGHTS.values())}"
+assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values())}"
+# Migration note: rebalanced weights and added `transcript_tone` signal.
+# - insider_conviction: 0.30 → 0.18 (sparse on large-cap universe)
+# - insider_breadth:    0.09 → 0.12
+# - congress:           0.10 → 0.08
+# - momentum_long:      0.15 → 0.22
+# - transcript_tone:    0.00 → 0.04 (new FMP transcript signal)
+
+# Human-readable migration note used in runtime logs/tests
 _WEIGHTS_MIGRATION_NOTE = (
-    "WEIGHTS migration #3: momentum 20d (anti-alpha short-reversal) → "
-    "momentum 12-1m (Jegadeesh). News 0.15 split into sentiment(0.10) + buzz(0.05). "
-    "Volume extracted from momentum into volume_attention(0.03). "
-    "Legacy scores preserved as news_score_legacy / momentum_score_legacy."
+    "Weights migrated: rebalanced core factors and added 'transcript_tone'",
 )
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
@@ -355,7 +361,7 @@ def _fetch_spy_return() -> float:
     """
     from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
     try:
-        rows = _FC().get_historical_prices("SPY", limit=280)
+        rows = _FC().get_historical_prices("SPY", limit=310)
         closes, _, _ = fmp_prices_to_arrays(rows)
         if len(closes) < 22:
             return 0.0
@@ -395,7 +401,7 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
         "volume_spike":     1.0,
     }
     try:
-        rows = _FC().get_historical_prices(ticker, limit=280)
+        rows = _FC().get_historical_prices(ticker, limit=310)
         closes, volumes, _ = fmp_prices_to_arrays(rows)
 
         if len(closes) < 5:
@@ -742,6 +748,56 @@ def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
         if s > 0.0:
             return s, "fmp"
     return 0.0, "none"
+
+
+def score_transcript_tone(ticker: str) -> tuple[float, str]:
+    """Score earnings transcript guidance tone via FMP transcript text.
+
+    Returns (score, source) where source is 'fmp_transcript:<tone>' or 'none'.
+    """
+    try:
+        client = _FMPClient()
+        txt = client.get_earnings_transcript(ticker, max_chars=3000)
+        if not txt:
+            return 0.0, "none"
+        text = str(txt).lower()
+
+        raise_phrases = [
+            "raising guidance", "raised guidance", "increase our guidance",
+            "raising our full-year", "above the high end", "raising our outlook",
+            "above our guidance", "raising revenue guidance",
+        ]
+        lower_phrases = [
+            "lowering guidance", "lowered guidance", "reduce our guidance",
+            "below our guidance", "revising guidance lower", "lowering our outlook",
+            "below the low end", "headwinds",
+        ]
+        maintain_phrases = [
+            "reaffirming guidance", "reaffirm", "maintaining guidance", "on track to",
+            "comfortable with our guidance", "reiterate", "confident in our",
+        ]
+
+        cnt_raise = sum(text.count(p) for p in raise_phrases)
+        cnt_lower = sum(text.count(p) for p in lower_phrases)
+        cnt_maint = sum(text.count(p) for p in maintain_phrases)
+
+        log.debug("score_transcript_tone %s: raise=%d lower=%d maintain=%d",
+                  ticker, cnt_raise, cnt_lower, cnt_maint)
+
+        total = cnt_raise + cnt_lower + cnt_maint
+        if total == 0:
+            return 0.0, "none"
+
+        # Majority wins; tie -> maintain
+        if cnt_raise > cnt_lower and cnt_raise > cnt_maint:
+            return 0.80, "fmp_transcript:raised"
+        if cnt_lower > cnt_raise and cnt_lower > cnt_maint:
+            return 0.20, "fmp_transcript:lowered"
+        # ties and maintain majority
+        return 0.55, "fmp_transcript:reaffirm"
+    except Exception as exc:
+        log.debug("score_transcript_tone %s failed: %s", ticker, exc)
+        return 0.0, "none"
 
 
 def fetch_fmp_insider_all(
@@ -1348,6 +1404,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             news_sent_score, news_sent_source, _eps_pct, _eps_days = score_news_sentiment_combined(ticker)
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
 
+            # Transcript tone from FMP earnings transcript (new signal)
+            transcript_tone_score, transcript_tone_source = score_transcript_tone(ticker)
+
             # ── Analyst consensus (Womack 1996 JF) ───────────────────────
             analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(ticker)
 
@@ -1355,10 +1414,20 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
             analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
 
+            # Recent upgrade/downgrade (FMP) — useful catalyst signal
+            recent_upg = _fmp_client.get_recent_upgrades_downgrades(ticker)
+
             # ── Price target upside (forward-looking analyst target signal) ────
             # None = no analyst coverage / data missing → dead signal (penalised).
             # Not the same as 0.50 (at-target with valid data).
             price_target_upside_score = _fmp_client.get_upside_to_target(ticker) or 0.0
+
+            # Store raw PT and current price for Discord display
+            # Avoids the score-reversal bug in send_toplists_discord._fmt_pt_badge
+            _pt_data         = _fmp_client.get_price_target_consensus(ticker)
+            _quote_data      = _fmp_client.get_quote(ticker)
+            _raw_target_price  = _pt_data.get("targetConsensus") if _pt_data else None
+            _raw_current_price = _quote_data.get("price") if _quote_data else None
 
             # quality_piotroski: Piotroski (2000) / Novy-Marx (2013) fundamental quality gate
             quality_piotroski_score = _fmp_client.get_quality_score(ticker)
@@ -1429,6 +1498,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "quality_piotroski_score":  quality_piotroski_score,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":           c_score,
+                "transcript_tone_score":    transcript_tone_score,
+                "transcript_tone_source":   transcript_tone_source,
+                "recent_upgrade_downgrade": recent_upg,
+                "target_price":             _raw_target_price,
+                "current_price":            _raw_current_price,
                 # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
                 "edgar_score_legacy":       e_score_legacy,
                 "insider_score_legacy":     i_score_legacy,
@@ -1471,6 +1545,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "analyst_consensus_score":  0.0,
                 "analyst_revision_score":   0.0,
                 "analyst_revision_n":       0,
+                "transcript_tone_score":    0.0,
+                "transcript_tone_source":   "none",
+                "recent_upgrade_downgrade": {},
+                "target_price":             None,
+                "current_price":            None,
                 "price_target_upside_score": 0.0,
                 "quality_piotroski_score":  0.0,
                 "congress_score":           0.0,
@@ -1624,6 +1703,29 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "momentum_long,momentum_legacy", 0.2,
     )
 
+    # Analyst triplet orthogonality (all three are sell-side derived — check for redundancy)
+    _pearson(
+        [r.get("analyst_consensus_score", 0.0) for r in _us_results],
+        [r.get("analyst_revision_score", 0.0) for r in _us_results],
+        "analyst_consensus,analyst_revision", 0.5,
+    )
+    _pearson(
+        [r.get("analyst_consensus_score", 0.0) for r in _us_results],
+        [r.get("price_target_upside_score", 0.0) for r in _us_results],
+        "analyst_consensus,price_target_upside", 0.5,
+    )
+    _pearson(
+        [r.get("analyst_revision_score", 0.0) for r in _us_results],
+        [r.get("price_target_upside_score", 0.0) for r in _us_results],
+        "analyst_revision,price_target_upside", 0.5,
+    )
+    # Transcript vs news sentiment (both are text-based — check overlap)
+    _pearson(
+        [r.get("transcript_tone_score", 0.0) for r in _us_results],
+        [r.get("news_sentiment_score", 0.0) for r in _us_results],
+        "transcript_tone,news_sentiment", 0.4,
+    )
+
     # ── Fix #5: source_reliability migration notice ───────────────────────────
     log.warning(
         "Fix #5 migration: source_reliability is no longer a score multiplier. "
@@ -1631,26 +1733,87 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "if EU/Asia source quality correlates empirically with IC."
     )
 
-    # ── Cross-sectional neutralization — Fix #5: group by market × sector × cap_tier ──
-    # Grinold & Kahn ch. 7: remove sector × cap_tier bias before Stage 1 gate.
-    # Fix #5: group_by now includes "market" so EU/Asia tickers are normalized
-    # within their own peer group, not mixed with US (market was already in the
-    # bucket key in neutralization.py; making it explicit in group_by ensures
-    # sector × cap_tier buckets are market-specific).
-    # Adds *_neutral columns to every result; originals are preserved unchanged.
+    # Neutralization and final scoring moved to after validation (Stage 1 gate)
+
+    # Diagnostic: weight_coverage distribution by market
+    for mkt_str in ("USA", "EUROPE", "ASIA"):
+        mkt_rows = [r for r in results if r.get("market", "USA") == mkt_str]
+        if mkt_rows:
+            wc_vals = [r.get("weight_coverage", 0.0) for r in mkt_rows]
+            low_cov = sum(1 for r in mkt_rows if r.get("_low_coverage", False))
+            log.info(
+                "Fix #5 weight_coverage [%s]: n=%d, mean=%.3f, min=%.3f, max=%.3f, low_cov=%d",
+                mkt_str, len(mkt_rows),
+                sum(wc_vals) / len(wc_vals), min(wc_vals), max(wc_vals), low_cov,
+            )
+
+    # ── Stage 1 gate: stamp computed_at + run validate_raw ────────────────────
+    # Stamp a row-level timestamp on every result so validate_dates() has a
+    # per-row anchor.  Rows already carrying computed_at are left unchanged.
+    pipeline_run_ts = datetime.now(timezone.utc).isoformat()
+    for row in results:
+        if "computed_at" not in row:
+            row["computed_at"] = pipeline_run_ts
+
+    # Build source_meta from the live run timestamps so validate_dates() can
+    # check whether Quiver/Finnhub/EDGAR feeds are stale at source level.
+    source_meta: Dict[str, Dict[str, Any]] = {
+        "fmp":    {"last_updated": pipeline_run_ts},
+        "edgar":  {"last_updated": pipeline_run_ts},
+        "none":   {"last_updated": pipeline_run_ts},
+    }
+
+    
+
+    # ── Stage 1 gate: BEFORE neutralization ─────────────────────────────────────
+    # Quarantined tickers must not distort the peer group in cross-sectional stats.
+    quarantine_count = 0
+    try:
+        clean_rows, quarantined_rows, val_issues = validate_raw(results, source_meta)
+        quarantine_count = len(quarantined_rows)
+        quarantined_tickers = {r["ticker"] for r in quarantined_rows}
+        for r in results:
+            r["_validation_failed"] = r["ticker"] in quarantined_tickers
+        if quarantine_count:
+            log.warning(
+                "Stage 1 gate: %d/%d tickers quarantined pre-neutralization — %s",
+                quarantine_count, len(results),
+                ", ".join({i.code for i in val_issues if i.code != "STALE_DATA"}),
+            )
+        else:
+            log.info("Stage 1 gate: all %d tickers passed", len(results))
+    except Exception as exc:
+        log.error("Stage 1 gate FAILED: %s", exc)
+        raise
+
+    # ── Cross-sectional neutralization (clean tickers only) ───────────────────
     from regime_trader.scoring.neutralization import neutralize_factors  # noqa: PLC0415
     from regime_trader.scoring.market_config import (  # noqa: PLC0415
         Market, PIPELINE_MARKET_MAP, renormalize_weights_for_market, LOW_COVERAGE_THRESHOLD,
     )
 
     _v2_factors = tuple(f"{k}_score" for k in WEIGHTS)
-    results = neutralize_factors(
-        results,
+    clean_for_norm  = [r for r in results if not r.get("_validation_failed")]
+    quarantined_out = [r for r in results if r.get("_validation_failed")]
+
+    clean_for_norm = neutralize_factors(
+        clean_for_norm,
         factors=_v2_factors,
         group_by=("market", "sector", "cap_tier"),
         min_bucket_size=5,
         fallback_group_by=("market", "cap_tier"),
     )
+
+    # Quarantined tickers: zero out scores, mark low coverage
+    for r in quarantined_out:
+        for f in _v2_factors:
+            r[f"{f}_neutral"] = 0.0
+        r["final_score"]     = 0.0
+        r["weight_coverage"] = 0.0
+        r["_low_coverage"]   = True
+
+    # Reassemble
+    results = clean_for_norm + quarantined_out
 
     # ── Fix #5: compute final_score with market-renormalized weights ──────────
     # For each ticker, use only the factors available for its market.
@@ -1689,51 +1852,6 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         r["final_score"]     = round(final_score, 4)
         r["weight_coverage"] = round(weight_sum_applied, 4)
         r["_low_coverage"]   = weight_sum_applied < LOW_COVERAGE_THRESHOLD
-
-    # Diagnostic: weight_coverage distribution by market
-    for mkt_str in ("USA", "EUROPE", "ASIA"):
-        mkt_rows = [r for r in results if r.get("market", "USA") == mkt_str]
-        if mkt_rows:
-            wc_vals = [r.get("weight_coverage", 0.0) for r in mkt_rows]
-            low_cov = sum(1 for r in mkt_rows if r.get("_low_coverage", False))
-            log.info(
-                "Fix #5 weight_coverage [%s]: n=%d, mean=%.3f, min=%.3f, max=%.3f, low_cov=%d",
-                mkt_str, len(mkt_rows),
-                sum(wc_vals) / len(wc_vals), min(wc_vals), max(wc_vals), low_cov,
-            )
-
-    # ── Stage 1 gate: stamp computed_at + run validate_raw ────────────────────
-    # Stamp a row-level timestamp on every result so validate_dates() has a
-    # per-row anchor.  Rows already carrying computed_at are left unchanged.
-    pipeline_run_ts = datetime.now(timezone.utc).isoformat()
-    for row in results:
-        if "computed_at" not in row:
-            row["computed_at"] = pipeline_run_ts
-
-    # Build source_meta from the live run timestamps so validate_dates() can
-    # check whether Quiver/Finnhub/EDGAR feeds are stale at source level.
-    source_meta: Dict[str, Dict[str, Any]] = {
-        "fmp":    {"last_updated": pipeline_run_ts},
-        "edgar":  {"last_updated": pipeline_run_ts},
-        "none":   {"last_updated": pipeline_run_ts},
-    }
-
-    try:
-        clean_rows, quarantined_rows, val_issues = validate_raw(results, source_meta)
-        quarantine_count = len(quarantined_rows)
-        if quarantine_count:
-            log.warning(
-                "Stage 1 gate: %d/%d tickers quarantined — %s",
-                quarantine_count,
-                len(results),
-                ", ".join({i.code for i in val_issues if i.code != "STALE_DATA"}),
-            )
-        else:
-            log.info("Stage 1 gate: all %d tickers passed validation", len(results))
-    except Exception as exc:
-        # PipelineIntegrityError or unexpected — log but do not swallow; re-raise
-        log.error("Stage 1 gate FAILED: %s", exc)
-        raise
 
     # ── Fix #5: top_by_market — separate Top-20 per market ───────────────────
     # Excludes _low_coverage tickers (weight_coverage < LOW_COVERAGE_THRESHOLD).

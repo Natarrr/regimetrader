@@ -162,7 +162,8 @@ def _schema_gate(
             if esg_score is None:
                 esg_score = row.get("ESGScore")
             try:
-                esg_flag = bool(esg_score is not None and float(esg_score) < 30)
+                esg_flag = bool(
+                    esg_score is not None and float(esg_score) < 30)
             except Exception:
                 esg_flag = False
 
@@ -338,7 +339,8 @@ def _to_entry(
     validation = row.get(
         "_validation", {"is_complete": True, "missing_sources": []})
     esg_flag_value = row.get("esg_flag")
-    esg_score_value = row.get("esg_score") if row.get("esg_score") is not None else row.get("ESGScore")
+    esg_score_value = row.get("esg_score") if row.get(
+        "esg_score") is not None else row.get("ESGScore")
     if esg_score_value is not None:
         try:
             esg_score_value = float(esg_score_value)

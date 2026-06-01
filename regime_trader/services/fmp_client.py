@@ -632,6 +632,96 @@ class FMPClient:
         self._cache_write("ratings", ticker, result)
         return result
 
+    def get_recent_upgrades_downgrades(self, ticker: str, lookback_days: int = 7) -> Dict:
+        """Fetch recent upgrades/downgrades within lookback_days.
+
+        Returns a dict with keys: action, from_grade, to_grade, analyst_firm,
+        days_ago, score_delta. Returns {'action': 'none'} on error or no records.
+        """
+        if not self._api_key:
+            return {"action": "none"}
+        cache_key = f"upgrades_{ticker}_{lookback_days}d"
+        cached = self._cache_read("ratings", cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            data = self._get("upgrades-downgrades", {"symbol": ticker, "page": 0}, bucket="ratings") or []
+        except FMPEndpointError:
+            return {"action": "none"}
+        except Exception:
+            return {"action": "none"}
+
+        if not isinstance(data, list) or not data:
+            return {"action": "none"}
+
+        # Determine cutoff
+        from datetime import date as _dt_date
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date()
+
+        # Grade score map
+        _GRADE_SCORE = {
+            "strongbuy": 1.0, "buy": 0.75, "outperform": 0.70, "overweight": 0.70,
+            "hold": 0.50, "neutral": 0.50, "underperform": 0.25, "sell": 0.10,
+            "underweight": 0.10, "strongsell": 0.0,
+        }
+
+        best_record = None
+        best_days = None
+
+        for rec in data:
+            # date field may be 'publishedDate' or 'date'
+            raw_date = str(rec.get("publishedDate") or rec.get("date") or "")[:10]
+            try:
+                d = _dt_date.fromisoformat(raw_date)
+            except Exception:
+                continue
+            days_ago = (datetime.now(timezone.utc).date() - d).days
+            if days_ago > lookback_days:
+                continue
+            action_raw = str(rec.get("action") or "").lower()
+            action = None
+            if "upgrade" in action_raw:
+                action = "upgrade"
+            elif "downgrade" in action_raw:
+                action = "downgrade"
+            elif "initiat" in action_raw or "cover" in action_raw:
+                action = "initiate"
+            else:
+                continue
+
+            if best_record is None or days_ago < best_days:
+                best_record = rec
+                best_days = days_ago
+
+        if not best_record:
+            return {"action": "none"}
+
+        from_grade = best_record.get("fromGrade") or best_record.get("from") or None
+        to_grade = best_record.get("toGrade") or best_record.get("to") or None
+        firm = best_record.get("analystFirm") or best_record.get("firm") or None
+
+        from_score = _GRADE_SCORE.get(str(from_grade).lower(), None) if from_grade else None
+        to_score = _GRADE_SCORE.get(str(to_grade).lower(), None) if to_grade else None
+        score_delta = None
+        if to_score is not None and from_score is not None:
+            score_delta = to_score - from_score
+
+        result = {
+            "action": best_record and ("upgrade" if "upgrade" in str(best_record.get("action") or "").lower() else ("downgrade" if "downgrade" in str(best_record.get("action") or "").lower() else ("initiate" if ("initiat" in str(best_record.get("action") or "").lower() or "cover" in str(best_record.get("action") or "").lower()) else "none"))),
+            "from_grade": from_grade,
+            "to_grade": to_grade,
+            "analyst_firm": firm,
+            "days_ago": int(best_days) if best_days is not None else None,
+            "score_delta": float(score_delta) if score_delta is not None else None,
+        }
+
+        try:
+            self._cache_write("ratings", cache_key, result)
+        except Exception:
+            pass
+        return result
+
     def get_key_metrics_ttm(self, ticker: str) -> Dict:
         """TTM key metrics (stable/key-metrics-ttm). PASS in smoke-test.
 
@@ -646,6 +736,55 @@ class FMPClient:
                          {"symbol": ticker}, bucket="key_metrics") or []
         result = data[0] if isinstance(data, list) and data else {}
         self._cache_write("key_metrics", ticker, result)
+        return result
+
+    def get_key_metrics_ttm_bulk(self, tickers: List[str]) -> Dict[str, Dict]:
+        """Bulk key metrics TTM — stable/key-metrics-ttm/bulk (Ultimate only).
+
+        Returns {ticker: metrics_dict}. Falls back to serial calls if bulk
+        endpoint returns 404 (not available on plan). Uses runtime probe
+        so the fallback is transparent.
+        """
+        if not self._api_key or not tickers:
+            return {}
+
+        cached_probe = self._cache_read("key_metrics", "_bulk_km_available")
+        bulk_available = cached_probe if isinstance(cached_probe, bool) else True
+
+        if bulk_available:
+            try:
+                # FMP bulk accepts comma-separated symbols, max ~200
+                chunks = [tickers[i:i+200] for i in range(0, len(tickers), 200)]
+                combined: Dict[str, Dict] = {}
+                for chunk in chunks:
+                    data = self._get(
+                        "key-metrics-ttm/bulk",
+                        {"symbols": ",".join(chunk)},
+                        bucket="key_metrics",
+                    ) or []
+                    if isinstance(data, list):
+                        for row in data:
+                            sym = row.get("symbol")
+                            if sym:
+                                combined[sym] = row
+                if combined:
+                    self._cache_write("key_metrics", "_bulk_km_available", True)
+                    return combined
+            except FMPEndpointError as exc:
+                if exc.status == 404:
+                    log.warning(
+                        "key-metrics-ttm/bulk: HTTP 404 — endpoint not on plan, "
+                        "caching fallback decision and using serial calls"
+                    )
+                    self._cache_write("key_metrics", "_bulk_km_available", False)
+                    bulk_available = False
+
+        # Serial fallback
+        result: Dict[str, Dict] = {}
+        for ticker in tickers:
+            row = self.get_key_metrics_ttm(ticker)
+            if row:
+                result[ticker] = row
         return result
 
     def get_esg_score(self, ticker: str) -> Dict:
@@ -681,6 +820,47 @@ class FMPClient:
             "ratios-ttm", {"symbol": ticker}, bucket="ratios") or []
         result = data[0] if isinstance(data, list) and data else {}
         self._cache_write("ratios", ticker, result)
+        return result
+
+    def get_ratios_ttm_bulk(self, tickers: List[str]) -> Dict[str, Dict]:
+        """Bulk ratios TTM — stable/ratios-bulk (Ultimate only). Falls back to serial."""
+        if not self._api_key or not tickers:
+            return {}
+
+        cached_probe = self._cache_read("ratios", "_bulk_ratios_available")
+        bulk_available = cached_probe if isinstance(cached_probe, bool) else True
+
+        if bulk_available:
+            try:
+                chunks = [tickers[i:i+200] for i in range(0, len(tickers), 200)]
+                combined: Dict[str, Dict] = {}
+                for chunk in chunks:
+                    data = self._get(
+                        "ratios-bulk",
+                        {"symbols": ",".join(chunk)},
+                        bucket="ratios",
+                    ) or []
+                    if isinstance(data, list):
+                        for row in data:
+                            sym = row.get("symbol")
+                            if sym:
+                                combined[sym] = row
+                if combined:
+                    self._cache_write("ratios", "_bulk_ratios_available", True)
+                    return combined
+            except FMPEndpointError as exc:
+                if exc.status == 404:
+                    log.warning(
+                        "ratios-bulk: HTTP 404 — endpoint not on plan, caching fallback"
+                    )
+                    self._cache_write("ratios", "_bulk_ratios_available", False)
+                    bulk_available = False
+
+        result: Dict[str, Dict] = {}
+        for ticker in tickers:
+            row = self.get_ratios_ttm(ticker)
+            if row:
+                result[ticker] = row
         return result
 
     def get_quality_score(self, ticker: str) -> float:

@@ -163,10 +163,24 @@ def score_insider_breadth(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
 
     def _in_window(txs: list[dict]) -> list[dict]:
+        """Filter transactions to lookback window with robust date parsing."""
+        from datetime import date as _dt_date
         result = []
+        try:
+            cutoff_date = _dt_date.fromisoformat(cutoff)
+        except ValueError:
+            return txs  # fallback: include all if cutoff is malformed
         for tx in txs:
-            d = str(tx.get("date", "") or "")[:10]
-            if d >= cutoff:
+            raw_date = str(tx.get("date", "") or "")
+            # Normalise separators: "2025/01/15" or "2025.01.15" → "2025-01-15"
+            normalised = raw_date[:10].replace("/", "-").replace(".", "-")
+            try:
+                tx_date = _dt_date.fromisoformat(normalised)
+                if tx_date >= cutoff_date:
+                    result.append(tx)
+            except ValueError:
+                # Unparseable — include conservatively rather than silently drop
+                log.debug("score_insider_breadth: unparseable date %r — including", raw_date)
                 result.append(tx)
         return result
 
