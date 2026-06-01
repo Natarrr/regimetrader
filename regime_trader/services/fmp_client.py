@@ -655,11 +655,8 @@ class FMPClient:
         if not isinstance(data, list) or not data:
             return {"action": "none"}
 
-        # Determine cutoff
-        from datetime import date as _dt_date
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date()
-
         # Grade score map
+        from datetime import date as _dt_date
         _GRADE_SCORE = {
             "strongbuy": 1.0, "buy": 0.75, "outperform": 0.70, "overweight": 0.70,
             "hold": 0.50, "neutral": 0.50, "underperform": 0.25, "sell": 0.10,
@@ -668,6 +665,7 @@ class FMPClient:
 
         best_record = None
         best_days = None
+        best_action = None
 
         for rec in data:
             # date field may be 'publishedDate' or 'date'
@@ -680,7 +678,6 @@ class FMPClient:
             if days_ago > lookback_days:
                 continue
             action_raw = str(rec.get("action") or "").lower()
-            action = None
             if "upgrade" in action_raw:
                 action = "upgrade"
             elif "downgrade" in action_raw:
@@ -693,6 +690,7 @@ class FMPClient:
             if best_record is None or days_ago < best_days:
                 best_record = rec
                 best_days = days_ago
+                best_action = action
 
         if not best_record:
             return {"action": "none"}
@@ -708,7 +706,7 @@ class FMPClient:
             score_delta = to_score - from_score
 
         result = {
-            "action": best_record and ("upgrade" if "upgrade" in str(best_record.get("action") or "").lower() else ("downgrade" if "downgrade" in str(best_record.get("action") or "").lower() else ("initiate" if ("initiat" in str(best_record.get("action") or "").lower() or "cover" in str(best_record.get("action") or "").lower()) else "none"))),
+            "action": best_action or "none",
             "from_grade": from_grade,
             "to_grade": to_grade,
             "analyst_firm": firm,

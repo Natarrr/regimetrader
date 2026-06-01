@@ -520,7 +520,6 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
         score = float(e.get("final_score", 0))
         pct = _compute_percentile(score, all_scores)
         cat = _compute_catalyst(e)
-        ceo_tier = e.get("ceo_conviction_tier", "none")
         # Fix #3: verb gated on score (badge thresholds), NOT percentile alone
         if score >= 0.60:
             verb = "**BUY**   "
@@ -853,7 +852,6 @@ def build_payload(
     # Load yesterday's scores from archive for real score-delta display
     _yesterday_scores: Dict[str, float] = {}
     try:
-        import glob as _glob
         _archive_files = sorted(Path("logs/archive").glob("*_top_lists.json"))
         if len(_archive_files) >= 2:
             _prev_data = json.loads(_archive_files[-2].read_text(encoding="utf-8"))

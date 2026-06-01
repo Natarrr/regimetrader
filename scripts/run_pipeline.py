@@ -1763,8 +1763,6 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "none":   {"last_updated": pipeline_run_ts},
     }
 
-    
-
     # ── Stage 1 gate: BEFORE neutralization ─────────────────────────────────────
     # Quarantined tickers must not distort the peer group in cross-sectional stats.
     quarantine_count = 0
