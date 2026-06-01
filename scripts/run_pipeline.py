@@ -518,7 +518,15 @@ def _load_cik_map() -> Dict[str, str]:
 def _score_news_sentiment_yfinance(ticker: str) -> float:
     """Fallback directional sentiment from yfinance headlines (bull/bear word-count).
 
-    Returns 0.0 if no headlines or both bull and bear counts are zero for all items.
+    Fix #4: dead-signal convention is 0.0, NOT 0.5. The rest of the codebase
+    (score_insider_value, score_congress, score_momentum_long) returns 0.0 on
+    missing/dead data so the cross-sectional normalizer triggers the all-zero
+    branch (penalised) rather than the all-same-non-zero branch (silently 0.5).
+
+    Returns 0.0 when:
+      - No headlines returned by yfinance
+      - All headlines contain zero bull AND zero bear words
+      - yfinance raises any exception
     """
     try:
         import yfinance as yf
@@ -536,11 +544,10 @@ def _score_news_sentiment_yfinance(ticker: str) -> float:
             bull  = len(words & _BULL)
             bear  = len(words & _BEAR)
             if bull == 0 and bear == 0:
-                scores.append(0.50)
-            else:
-                scores.append(max(0.10, min(0.90, 0.50 + 0.20 * (bull - bear))))
+                continue  # Fix #4: skip neutral headlines, don't weight them 0.5
+            scores.append(max(0.10, min(0.90, 0.50 + 0.20 * (bull - bear))))
         if not scores:
-            return 0.0
+            return 0.0  # Fix #4: dead signal — no scored headlines
         return round(sum(scores) / len(scores), 4)
     except Exception:
         return 0.0
@@ -1434,6 +1441,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "ceo_buy":                 ceo_buy,  # legacy bool — _deprecated: true
                 "ceo_buy_deprecated":      True,
                 "form4_count":             form4_count,
+                "form4_purchase_count":    len(p_transactions),  # Fix #6: P-code only, for Minsky stress signal
                 "quiver_evidence":         quiver_evidence,
                 "news_sentiment_source":   news_sent_source,
                 "news_buzz_source":        news_buzz_source,
@@ -1472,6 +1480,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "momentum_score_legacy":    0.0,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
+                "form4_purchase_count":    0,  # Fix #6: scoring failed → no parsed purchases
                 "quiver_evidence":         {},
                 "news_sentiment_source":   "none",
                 "news_buzz_source":        "none",
@@ -1749,6 +1758,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     )
 
     status = {
+        "run_id":      os.getenv("GITHUB_RUN_ID", "local"),  # Fix #5: surfaced in Discord footer
         "_edgar_meta": {
             "last_run":             pipeline_run_ts,
             "run_duration_seconds": duration,

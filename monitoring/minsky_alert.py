@@ -66,7 +66,8 @@ def _compute_stress(results: list) -> _StressResult:
         return _StressResult("CLEAR", 0, 0.0, 0.0, 0.0, "No tickers to evaluate.")
 
     ceo_buys   = sum(1 for r in results if r.get("ceo_buy", False))
-    mean_form4 = sum(r.get("form4_count", 0) for r in results) / n
+    # Fix #6: prefer form4_purchase_count (P-code only) over form4_count (inflated by grants/exercises)
+    mean_form4 = sum(r.get("form4_purchase_count", r.get("form4_count", 0)) for r in results) / n
     # 7-factor pipeline emits `insider_breadth_score`; fall back to the legacy
     # `insider_score` so historical snapshots still score correctly.
     breadth    = sum(

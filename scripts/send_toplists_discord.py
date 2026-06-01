@@ -474,7 +474,14 @@ def _ticker_detail_field(
 
 
 def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> Optional[Dict[str, Any]]:
-    """Top-3 actionable recommendations: BUY (p95+) or WATCH (p80+)."""
+    """Top-3 actionable recommendations gated on BADGE THRESHOLDS, not just percentile.
+
+    A WATCHLIST ticker (score < 0.60) must not be labelled BUY — that violates
+    the badge system the rest of the embed uses. Score thresholds match
+    _badge_from_score() exactly:
+      score >= 0.60  → BUY  (TACTICAL BUY or HIGH BUY band)
+      score <  0.60  → WATCH (WATCHLIST — relative rank only, no action)
+    """
     if not entries or not all_scores:
         return None
 
@@ -486,12 +493,11 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
         cat = _compute_catalyst(e)
         ceo_tier = e.get("ceo_conviction_tier", "none")
         ceo_note = f" · CEO {ceo_tier}" if ceo_tier and ceo_tier != "none" else ""
-        if pct >= 95:
-            verb = "**BUY**  "
-        elif pct >= 80:
-            verb = "**BUY**  "
+        # Fix #3: verb gated on score (badge thresholds), NOT percentile alone
+        if score >= 0.60:
+            verb = "**BUY**   "
         else:
-            verb = "**HOLD** "
+            verb = "**WATCH** "
         lines.append(f"{verb} `{ticker}` — p{pct}{ceo_note} · {cat}")
 
     if not lines:
@@ -599,6 +605,30 @@ def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
         return {}
 
 
+def _load_top_lists_overlay(log_dir: Path) -> Dict[str, Any]:
+    """Load vix / kill_switch / vix_multiplier from top_lists.json.
+
+    intel_source_status.json does not carry the macro overlay — that lives in
+    top_lists.json next to it in the artifact.  Returns {} if the file is absent
+    or unreadable; caller treats missing keys as "no overlay".
+    """
+    path = log_dir / "top_lists.json"
+    if not path.exists():
+        log.warning("top_lists.json not found at %s — VIX/kill_switch will be missing", path)
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            "vix":             data.get("vix"),
+            "kill_switch":     data.get("kill_switch", False),
+            "vix_multiplier":  data.get("vix_multiplier", 1.0),
+            "shadow_top_buys": data.get("shadow_top_buys", []),
+        }
+    except Exception as exc:
+        log.warning("top_lists.json unreadable: %s", exc)
+        return {}
+
+
 def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Map intel_source_status.json result row → ticker card entry.
 
@@ -617,21 +647,33 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
     eps_days = int(raw.get("earnings_surprise_days") or 0)
 
     entry = {
-        "ticker":                  raw.get("ticker", "?"),
-        "sector":                  raw.get("sector", "Unknown"),
-        "cap_tier":                raw.get("cap_tier", "large"),
-        "market_cap":              float(raw.get("market_cap", 0) or 0),
-        "final_score":             float(raw.get("final_score", 0) or 0),
-        "badge":                   raw.get("badge") or _badge_from_score(float(raw.get("final_score", 0) or 0)),
-        "ceo_buy":                 bool(raw.get("ceo_buy", False)),
-        "ceo_conviction_tier":     raw.get("ceo_conviction_tier", "none"),
-        "ceo_purchase_bps":        raw.get("ceo_purchase_bps"),
-        "congress_boost":          float(raw.get("congress_boost", 0.0) or 0),
-        "market":                  raw.get("market", "USA"),
-        "factors":                 factors,
-        "company_name":            raw.get("company_name", ""),
-        "earnings_surprise_pct":   eps_pct,
-        "earnings_surprise_days":  eps_days,
+        "ticker":                    raw.get("ticker", "?"),
+        "sector":                    raw.get("sector", "Unknown"),
+        "cap_tier":                  raw.get("cap_tier", "large"),
+        "market_cap":                float(raw.get("market_cap", 0) or 0),
+        "final_score":               float(raw.get("final_score", 0) or 0),
+        "badge":                     raw.get("badge") or _badge_from_score(float(raw.get("final_score", 0) or 0)),
+        "ceo_buy":                   bool(raw.get("ceo_buy", False)),
+        "ceo_conviction_tier":       raw.get("ceo_conviction_tier", "none"),
+        "ceo_purchase_bps":          raw.get("ceo_purchase_bps"),
+        "congress_boost":            float(raw.get("congress_boost", 0.0) or 0),
+        "market":                    raw.get("market", "USA"),
+        "factors":                   factors,
+        # Fix #2: analyst + quality fields read by _fmt_factor_matrix / _fmt_analyst_badge / _fmt_pt_badge
+        "analyst_consensus_score":   float(raw.get("analyst_consensus_score") or 0.0),
+        "analyst_consensus_source":  raw.get("analyst_consensus_source", "none"),
+        "analyst_revision_score":    float(raw.get("analyst_revision_score") or 0.0),
+        "analyst_revision_n_analysts": int(raw.get("analyst_revision_n") or 0),
+        "price_target_upside_score": float(raw.get("price_target_upside_score") or 0.0),
+        "quality_piotroski_score":   float(raw.get("quality_piotroski_score") or 0.0),
+        "company_name":              raw.get("company_name", ""),
+        "earnings_surprise_pct":     eps_pct,
+        "earnings_surprise_days":    eps_days,
+        # Catalyst / evidence pass-through
+        "insider_usd":               float(raw.get("insider_usd", 0.0) or 0),
+        "form4_count":               int(raw.get("form4_count", 0) or 0),
+        "quiver_evidence":           raw.get("quiver_evidence", {}),
+        "momentum_spy_relative":     float(raw.get("momentum_spy_relative", 0.0) or 0),
     }
 
     for key in ("esg_score", "esg_e_score", "esg_flag"):
@@ -1374,6 +1416,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         send_to_discord(webhook, payload)
         return 1
+
+    # Side-load macro overlay (VIX, kill_switch) from top_lists.json — these
+    # live in the sibling artifact, not in intel_source_status.json.
+    if input_path.name == "intel_source_status.json":
+        overlay = _load_top_lists_overlay(args.log_dir)
+        for k, v in overlay.items():
+            status.setdefault(k, v)
+        log.info(
+            "Loaded macro overlay: vix=%s kill_switch=%s vix_multiplier=%s",
+            status.get("vix"), status.get("kill_switch"), status.get("vix_multiplier"),
+        )
 
     satellite = _load_satellite(args.log_dir)
     anomaly_map = _load_anomaly_report(args.log_dir)
