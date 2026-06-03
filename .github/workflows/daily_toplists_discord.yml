@@ -40,6 +40,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: daily_toplists_discord
+  cancel-in-progress: false
+
 jobs:
   send-discord:
     runs-on: ubuntu-latest

@@ -50,6 +50,18 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Get cache date
+        id: cache_date
+        run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore pipeline data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/
+          key: canary-cache-${{ runner.os }}-${{ steps.cache_date.outputs.date }}
+          restore-keys: |
+            canary-cache-${{ runner.os }}-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -81,7 +93,7 @@ jobs:
       # ── Run pipeline ─────────────────────────────────────────────────────────
       - name: Run EDGAR pipeline
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           # Ultimate tier: 3,000 req/min = 50 req/s. Was 1 — completely wrong.
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
@@ -93,6 +105,7 @@ jobs:
           START=$(date +%s)
           python scripts/run_pipeline.py \
             --tickers-file "$TICKERS_FILE" \
+            --max-workers  4 \
             --bulk-cache   "$BULK_CACHE_DIR" \
             --verbose
           END=$(date +%s)

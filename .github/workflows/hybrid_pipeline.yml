@@ -373,7 +373,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
           CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
           REGIME: ${{ needs.quant.outputs.regime }}
           VIX: ${{ needs.quant.outputs.vix }}

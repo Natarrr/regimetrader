@@ -35,6 +35,10 @@ on:
         type: choice
         options: ["true", "false"]
 
+concurrency:
+  group: weekly_backtest
+  cancel-in-progress: false
+
 jobs:
   backtest:
     name: Weekly Signal Backtest
@@ -52,6 +56,18 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Get cache date
+        id: cache_date
+        run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore pipeline data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/
+          key: pipeline-cache-${{ runner.os }}-${{ steps.cache_date.outputs.date }}
+          restore-keys: |
+            pipeline-cache-${{ runner.os }}-
 
       - name: Install dependencies
         run: |

@@ -146,7 +146,7 @@ jobs:
       - name: EDGAR full-universe fetch
         id: edgar_fetch
         env:
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           EDGAR_FIRST: "true"
