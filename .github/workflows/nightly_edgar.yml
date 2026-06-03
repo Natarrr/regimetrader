@@ -87,8 +87,7 @@ jobs:
           python scripts/fmp_bulk_prefetch.py \
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$TTL" \
-            --endpoints  financial-scores-bulk \
-                         upgrades-downgrades-consensus-bulk \
+            --endpoints  upgrades-downgrades-consensus-bulk \
                          earnings-surprises-bulk \
                          price-target-summary-bulk \
                          ratios-ttm-bulk \
