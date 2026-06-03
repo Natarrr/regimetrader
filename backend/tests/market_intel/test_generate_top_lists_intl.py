@@ -24,20 +24,27 @@ def _no_vix(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _us_row(ticker: str) -> dict:
-    """A complete US row so the schema-gate circuit breaker passes."""
+    """A complete US row so the schema-gate circuit breaker passes.
+    All 12 FACTOR_FIELDS must be present and non-zero (threshold=4 allows at most 4 zeros).
+    """
     return {
-        "ticker":                   ticker,
-        "market":                   "USA",
-        "sector":                   "Information Technology",
-        "cap_tier":                 "large",
-        "market_cap":               1.0e11,
-        "insider_conviction_score": 0.50,
-        "insider_breadth_score":    0.50,
-        "congress_score":           0.50,
-        "news_sentiment_score":     0.50,
-        "news_buzz_score":          0.50,
-        "momentum_long_score":      0.50,
-        "volume_attention_score":   0.50,
+        "ticker":                    ticker,
+        "market":                    "USA",
+        "sector":                    "Information Technology",
+        "cap_tier":                  "large",
+        "market_cap":                1.0e11,
+        "insider_conviction_score":  0.50,
+        "insider_breadth_score":     0.50,
+        "congress_score":            0.50,
+        "news_sentiment_score":      0.50,
+        "news_buzz_score":           0.50,
+        "momentum_long_score":       0.50,
+        "volume_attention_score":    0.50,
+        "analyst_consensus_score":   0.50,
+        "analyst_revision_score":    0.50,
+        "price_target_upside_score": 0.50,
+        "quality_piotroski_score":   0.50,
+        "transcript_tone_score":     0.50,
     }
 
 
