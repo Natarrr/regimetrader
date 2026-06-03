@@ -1,41 +1,22 @@
 # regime_trader/weights.py
 """
-Canonical WEIGHTS definition — single source of truth.
+Canonical WEIGHTS definition — single source of truth (12-factor schema).
 
 Import this in generate_top_lists.py, run_pipeline.py, and any test that
 validates weight distribution.
 
 Enforced constraint: sum(WEIGHTS.values()) == 1.0 (asserted at import time).
 
-Changes from 12-factor schema (removed analyst_revision, price_target_upside,
-transcript_tone — sell-side triplet correlation risk per Grinold-Kahn 2000):
-  congress:          0.08 → 0.12  (freed weight redistributed)
-  insider_conviction 0.15 → 0.25  (Seyhun 1988: strongest individual alpha source)
-  insider_breadth    0.12 → 0.12  (unchanged)
-  analyst_consensus  0.04 → 0.10  (NEW weight: upgrades-downgrades-consensus-bulk)
-  quality_piotroski  0.08 → 0.08  (unchanged; now sourced from financial-scores-bulk)
+Weight constraints (enforced by tests):
+  momentum_long  must be the largest weight (strongest empirical IC)
+  congress       must be <= 0.10 (sparse US-only binary signal)
+  volume_attention must be <= 0.05 (attention tilt, not alpha factor)
 
-EU/Asia effective weight stack (insider=0, congress=0):
-  news_sentiment(0.10) + news_buzz(0.05) + momentum_long(0.15) +
-  volume_attention(0.03) + analyst_consensus(0.10) + quality_piotroski(0.08)
-  = 0.51 coverage (was 0.33 before analyst_consensus wired via bulk)
-
-quality_piotroski scoring — multiplicative gate applied AFTER linear combination:
-  piotroskiScore 0-2  → BUY multiplier = 0.0  (suppressed)
-  piotroskiScore 3-5  → BUY multiplier = 0.6  (discounted)
-  piotroskiScore 6-9  → BUY multiplier = 1.0  (full)
-  SELL signals: gate does NOT apply (asymmetric protection)
-  EU/Asia: gate applies (Piotroski is accounting-identity based, exchange-agnostic)
-  Missing data: treat as piotroskiScore=3 (discounted, not suppressed)
-
-analyst_consensus scoring:
-  Strong Buy  = 1.00
-  Buy         = 0.75
-  Hold        = 0.50
-  Sell        = 0.25
-  Strong Sell = 0.00
-  No coverage = 0.50 (neutral — not penalised for absence unlike congress)
-  Source: upgrades-downgrades-consensus-bulk → consensusRating field
+EU/Asia effective weight stack (insider=0, congress=0, news=0,
+analyst_consensus=0, analyst_revision=0, transcript_tone=0):
+  momentum_long(0.21) + volume_attention(0.03) +
+  quality_piotroski(0.06) + price_target_upside(0.03)
+  = 0.33 coverage, renormalized to 1.0 for EU/Asia
 
 Academic citations:
   insider_conviction:  Seyhun (1988), Lakonishok & Lee (2001)
@@ -46,19 +27,25 @@ Academic citations:
   momentum_long:       Jegadeesh & Titman (1993) — 12-1 month momentum
   volume_attention:    Gervais, Kaniel & Mingelgrin (2001) — high-volume premium
   analyst_consensus:   Givoly & Lakonishok (1979) — revision momentum
+  analyst_revision:    Chan, Jegadeesh & Lakonishok (1996) — estimate revision
+  price_target_upside: Brav & Lehavy (2003) — analyst price target drift
   quality_piotroski:   Piotroski (2000) — F-Score 9-signal financial health gate
+  transcript_tone:     Matsumoto et al. (2011) — management guidance tone
 """
 
 WEIGHTS: dict[str, float] = {
-    "insider_conviction":  0.25,
-    "insider_breadth":     0.12,
-    "congress":            0.12,
+    "insider_conviction":  0.20,
+    "insider_breadth":     0.10,
+    "congress":            0.08,
     "news_sentiment":      0.10,
     "news_buzz":           0.05,
-    "momentum_long":       0.15,
+    "momentum_long":       0.21,
     "volume_attention":    0.03,
-    "analyst_consensus":   0.10,
-    "quality_piotroski":   0.08,
+    "analyst_consensus":   0.08,
+    "analyst_revision":    0.04,
+    "price_target_upside": 0.03,
+    "quality_piotroski":   0.06,
+    "transcript_tone":     0.02,
 }
 
 # ── Invariant: enforced at import time ──────────────────────────────────────

@@ -1346,6 +1346,17 @@ def _score_ticker_international(
         volume_spike = float(rf.get("volume_spike", 0.0) or 0.0)
         volume_attention_score = score_volume_attention(volume_spike)
 
+        # ── price_target_upside — per-ticker FMP (partial coverage for EU/Asia) ──
+        price_target_upside_score = 0.0
+        try:
+            from regime_trader.services.fmp_client import FMPClient as _FC_pt  # noqa: PLC0415
+            _pt_client = _FC_pt()
+            if _pt_client._api_key:
+                pt_upside = _pt_client.get_upside_to_target(entry.ticker)
+                price_target_upside_score = pt_upside if pt_upside is not None else 0.0
+        except Exception as exc:
+            log.debug("price_target_upside fetch %s: %s", entry.ticker, exc)
+
         # ── quality_piotroski — bulk index first, per-ticker FMP fallback ────────
         # financial-scores-bulk covers global exchanges (accounting-identity based).
         _pio_idx = bulk_piotroski_idx or {}
@@ -1367,28 +1378,14 @@ def _score_ticker_international(
             except Exception as exc:
                 log.debug("quality_piotroski fallback %s: %s", entry.ticker, exc)
 
-        # ── analyst_consensus — bulk index (exchange-agnostic) ────────────────
-        _CONSENSUS_MAP_INTL = {
-            "Strong Buy":  1.00, "strongBuy":  1.00,
-            "Buy":         0.75, "buy":         0.75,
-            "Hold":        0.50, "hold":        0.50,
-            "Sell":        0.25, "sell":        0.25,
-            "Strong Sell": 0.00, "strongSell":  0.00,
-        }
-        _cons_idx = bulk_consensus_idx or {}
-        analyst_consensus_score = 0.0
-        _bulk_cons_intl = _cons_idx.get(entry.ticker.upper(), {})
-        if _bulk_cons_intl:
-            _cons_r = _bulk_cons_intl.get("consensusRating") or ""
-            analyst_consensus_score = _CONSENSUS_MAP_INTL.get(_cons_r, 0.0)
-
         log.debug(
-            "EU/Asia %s (%s): quality=%.4f consensus=%.4f",
-            entry.ticker, market_str, quality_piotroski_score, analyst_consensus_score,
+            "EU/Asia %s (%s): quality=%.4f pt_upside=%.4f",
+            entry.ticker, market_str, quality_piotroski_score, price_target_upside_score,
         )
 
         # ── structurally absent factors → None ───────────────────────────────
-        # congress, insider, news: no data source for non-US markets.
+        # congress, insider, news, analyst_consensus, analyst_revision,
+        # transcript_tone: no data source for non-US markets.
         # None signals "weight excluded" in renormalize_weights_for_market.
         return {
             "ticker":                    entry.ticker,
@@ -1397,17 +1394,20 @@ def _score_ticker_international(
             "cap_tier":                  entry.cap_tier,
             "market":                    market_str,
             "source_reliability":        entry.source_reliability,
-            # Available factor scores
+            # Available factor scores (PATCH 07: momentum, volume, quality, pt_upside)
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
             "quality_piotroski_score":   quality_piotroski_score,
-            "analyst_consensus_score":   analyst_consensus_score,
+            "price_target_upside_score": price_target_upside_score,
             # Structurally absent — None (not 0.0)
             "insider_conviction_score":  None,
             "insider_breadth_score":     None,
             "congress_score":            None,
             "news_sentiment_score":      None,
             "news_buzz_score":           None,
+            "analyst_consensus_score":   None,   # FMP grades-consensus US-only
+            "analyst_revision_score":    None,   # FMP analyst-estimates US-only
+            "transcript_tone_score":     None,   # FMP transcripts US-only
             # Raw inputs (diagnostic)
             "return_12_1m":              return_12_1m,
             "volume_spike":              volume_spike,
@@ -1678,6 +1678,24 @@ def run(
             else:
                 quality_piotroski_score = _fmp_client.get_quality_score(ticker)
 
+            # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
+            _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
+            analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
+
+            # ── Price target upside ───────────────────────────────────────
+            price_target_upside_score = _fmp_client.get_upside_to_target(ticker) or 0.0
+
+            # Store raw PT and current price for Discord display
+            _pt_data         = _fmp_client.get_price_target_consensus(ticker)
+            _quote_data      = _fmp_client.get_quote(ticker)
+            _raw_target_price  = _pt_data.get("targetConsensus") if _pt_data else None
+            _raw_current_price = _quote_data.get("price") if _quote_data else None
+
+            # ── Transcript tone ───────────────────────────────────────────
+            transcript_tone_score, transcript_tone_source = score_transcript_tone(
+                ticker, client=_fmp_client
+            )
+
             # ── Congress ─────────────────────────────────────────────────
             c_score = score_congress(congress_raw)
 
@@ -1737,12 +1755,19 @@ def run(
                 "volume_attention_score":   vol_att_score,
                 "news_sentiment_score":     news_sent_score,
                 "news_buzz_score":          news_buzz_score,
-                # ── Analyst + quality factors (9-factor schema) ───────────
-                "analyst_consensus_score":  analyst_consensus_score,
-                "quality_piotroski_score":  quality_piotroski_score,
+                # ── Analyst + quality factors ─────────────────────────────
+                "analyst_consensus_score":   analyst_consensus_score,
+                "analyst_revision_score":    analyst_revision_score,
+                "analyst_revision_n":        _rev_n,
+                "price_target_upside_score": price_target_upside_score,
+                "quality_piotroski_score":   quality_piotroski_score,
                 # ── Congress ─────────────────────────────────────────────
-                "congress_score":           c_score,
-                "recent_upgrade_downgrade": recent_upg,
+                "congress_score":            c_score,
+                "transcript_tone_score":     transcript_tone_score,
+                "transcript_tone_source":    transcript_tone_source,
+                "recent_upgrade_downgrade":  recent_upg,
+                "target_price":              _raw_target_price,
+                "current_price":             _raw_current_price,
                 # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
                 "edgar_score_legacy":       e_score_legacy,
                 "insider_score_legacy":     i_score_legacy,

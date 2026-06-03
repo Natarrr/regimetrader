@@ -52,15 +52,18 @@ try:
 except Exception as _e:
     log.warning("Could not import WEIGHTS from regime_trader.weights: %s — using hardcoded fallback", _e)
     WEIGHTS: Dict[str, float] = {
-        "insider_conviction":  0.25,
-        "insider_breadth":     0.12,
-        "congress":            0.12,
+        "insider_conviction":  0.20,
+        "insider_breadth":     0.10,
+        "congress":            0.08,
         "news_sentiment":      0.10,
         "news_buzz":           0.05,
-        "momentum_long":       0.15,
+        "momentum_long":       0.21,
         "volume_attention":    0.03,
-        "analyst_consensus":   0.10,
-        "quality_piotroski":   0.08,
+        "analyst_consensus":   0.08,
+        "analyst_revision":    0.04,
+        "price_target_upside": 0.03,
+        "quality_piotroski":   0.06,
+        "transcript_tone":     0.02,
     }
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
@@ -68,7 +71,7 @@ assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     "Check regime_trader/weights.py."
 )
 
-# Maps factor key → field name in intel_source_status.json results (9-factor schema).
+# Maps factor key → field name in intel_source_status.json results (12-factor schema).
 FACTOR_FIELDS: Dict[str, str] = {
     "insider_conviction":  "insider_conviction_score",
     "insider_breadth":     "insider_breadth_score",
@@ -78,7 +81,10 @@ FACTOR_FIELDS: Dict[str, str] = {
     "momentum_long":       "momentum_long_score",
     "volume_attention":    "volume_attention_score",
     "analyst_consensus":   "analyst_consensus_score",
+    "analyst_revision":    "analyst_revision_score",
+    "price_target_upside": "price_target_upside_score",
     "quality_piotroski":   "quality_piotroski_score",
+    "transcript_tone":     "transcript_tone_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
