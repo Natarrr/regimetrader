@@ -24,7 +24,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true   # cancel stale PR runs
+  cancel-in-progress: true # cancel stale PR runs
 
 env:
   PYTHON_VERSION: "3.11"
@@ -120,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]   # extend to windows-latest if needed
+        os: [ubuntu-latest] # extend to windows-latest if needed
 
     steps:
       - name: Checkout

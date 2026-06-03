@@ -15,7 +15,7 @@ name: weekly_backtest
 
 on:
   schedule:
-    - cron: "0 21 * * 5"   # Friday 21:00 UTC
+    - cron: "0 21 * * 5" # Friday 21:00 UTC
   workflow_dispatch:
     inputs:
       dry_run:
@@ -71,7 +71,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           BULK_CACHE_DIR: ".cache/bulk_snapshots"
-          BULK_CACHE_TTL_HOURS: "26"  # accept today's cache (runs after edgar_3x 16:00)
+          BULK_CACHE_TTL_HOURS: "26" # accept today's cache (runs after edgar_3x 16:00)
         run: |
           set -euo pipefail
           python scripts/fmp_bulk_prefetch.py \

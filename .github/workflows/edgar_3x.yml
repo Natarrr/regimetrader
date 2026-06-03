@@ -41,9 +41,9 @@ name: edgar_3x
 
 on:
   schedule:
-    - cron: "0 0 * * *"    # 00:00 UTC — post-Asia close
-    - cron: "0 8 * * *"    # 08:00 UTC — London open
-    - cron: "0 16 * * *"   # 16:00 UTC — NYC mid-session
+    - cron: "0 0 * * *" # 00:00 UTC — post-Asia close
+    - cron: "0 8 * * *" # 08:00 UTC — London open
+    - cron: "0 16 * * *" # 16:00 UTC — NYC mid-session
   workflow_dispatch:
     inputs:
       tickers_file:
@@ -68,7 +68,6 @@ jobs:
       cancel-in-progress: false
 
     steps:
-
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4

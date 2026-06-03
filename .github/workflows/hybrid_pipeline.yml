@@ -33,7 +33,7 @@ name: hybrid_pipeline
 
 on:
   schedule:
-    - cron: "30 12 * * 1-5"   # 12:30 UTC = 08:30 ET, weekdays
+    - cron: "30 12 * * 1-5" # 12:30 UTC = 08:30 ET, weekdays
   workflow_dispatch:
     inputs:
       force_refresh:
@@ -81,7 +81,6 @@ env:
   INCLUDE_TRANSCRIPTS: ${{ github.event.inputs.include_transcripts || 'true' }}
 
 jobs:
-
   # ── 1. Load & reshape quant data ────────────────────────────────────────────
   quant:
     name: Load edgar_3x top lists

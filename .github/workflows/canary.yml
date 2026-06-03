@@ -34,7 +34,7 @@ on:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 10   # was 30 — bulk + 10 tickers finishes in <5 min
+    timeout-minutes: 10 # was 30 — bulk + 10 tickers finishes in <5 min
 
     concurrency:
       group: edgar_canary
@@ -63,7 +63,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           BULK_CACHE_DIR: ".cache/bulk_snapshots"
-          BULK_CACHE_TTL_HOURS: "4"   # canary uses 4h TTL — tighter freshness
+          BULK_CACHE_TTL_HOURS: "4" # canary uses 4h TTL — tighter freshness
         run: |
           set -euo pipefail
           python scripts/fmp_bulk_prefetch.py \

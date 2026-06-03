@@ -18,7 +18,7 @@ name: daily_toplists_discord
 
 on:
   schedule:
-    - cron: "0 13 * * *"    # 13:00 UTC = 14:00 BST / 13:00 GMT
+    - cron: "0 13 * * *" # 13:00 UTC = 14:00 BST / 13:00 GMT
   workflow_run:
     workflows: ["edgar_3x"]
     types: [completed]
@@ -51,7 +51,6 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
 
     steps:
-
       # ── 1. Checkout (needed for scripts/) ─────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
