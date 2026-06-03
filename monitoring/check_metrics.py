@@ -33,82 +33,182 @@ from .slack_notifier import send_discord_alert as send_slack_alert
 
 log = logging.getLogger("monitoring.check_metrics")
 
-_SCORE_BUCKETS = (
-    "top_buys", "top_buys_usa", "top_buys_europe",
-    "top_buys_asia", "mid_caps", "small_caps",
-)
 
+def check_score_distribution(log_dir: Path) -> bool:
+    """Assert the pipeline score distribution is non-degenerate.
 
-def check_score_distribution(
-    log_dir: Path,
-    min_stdev: float = 0.05,
-    min_max_score: float = 0.40,
-    min_entries: int = 3,
-) -> bool:
-    """Assert that top_lists.json score distribution is non-degenerate.
+    Grinold & Kahn (2000): a factor with zero cross-sectional variance has
+    IC = 0 and contributes nothing to IR. A distribution where every ticker
+    scores identically, or where fewer than 20% of tickers have a non-zero
+    final_score, indicates one or more dead data feeds.
 
-    Detects dead-feed scenarios where all tickers score near the weight-floor
-    value (~0.18 when all factors return 0.0). Returns True when healthy,
-    False when degenerate. Missing or unreadable files are treated as skips
-    (return True) so canary does not fail on a missing artifact.
+    Checks:
+      1. intel_source_status.json exists and contains US results.
+      2. At least 10 US result rows are present (population gate).
+      3. >= 20% of US tickers have final_score > 0 (non-zero density gate).
+      4. Standard deviation of final_scores > 0.05 (variance gate).
+      5. At least ONE factor column has non-zero density > 5% (per-factor
+         gate — catches the case where scores are non-zero but all driven by
+         a single factor because every other feed is dead).
+
+    Returns True when all checks pass; logs ERROR and returns False otherwise.
+    Never raises — all exceptions are caught and logged.
     """
-    tl_path = Path(log_dir) / "top_lists.json"
-    if not tl_path.exists():
-        log.warning("check_score_distribution: top_lists.json not found — skipping")
-        return True
+    status_path = Path(log_dir) / "intel_source_status.json"
+    if not status_path.exists():
+        log.error(
+            "check_score_distribution: intel_source_status.json not found at %s",
+            status_path,
+        )
+        return False
 
     try:
-        data = json.loads(tl_path.read_text(encoding="utf-8"))
+        status = json.loads(status_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        log.warning("check_score_distribution: cannot parse top_lists.json — %s", exc)
+        log.error("check_score_distribution: cannot parse status file: %s", exc)
+        return False
+
+    results = [
+        r for r in status.get("results", [])
+        if r.get("market", "USA") in ("USA", "US")
+    ]
+
+    # Gate 1: minimum population
+    if len(results) < 10:
+        log.error(
+            "check_score_distribution: only %d US results (need >= 10). "
+            "Pipeline may have failed completely.",
+            len(results),
+        )
+        return False
+
+    final_scores = [float(r.get("final_score", 0.0) or 0.0) for r in results]
+
+    # Gate 2: non-zero density
+    nonzero_count = sum(1 for s in final_scores if s > 0.0)
+    nonzero_density = nonzero_count / len(final_scores)
+    if nonzero_density < 0.20:
+        log.error(
+            "check_score_distribution: DEGENERATE — only %d/%d US tickers "
+            "have final_score > 0 (density=%.1f%% < 20%%). "
+            "Dead signal feeds likely. Check fmp_health.json.",
+            nonzero_count,
+            len(final_scores),
+            nonzero_density * 100,
+        )
+        return False
+
+    # Gate 3: variance
+    std_dev = statistics.stdev(final_scores) if len(final_scores) > 1 else 0.0
+
+    if std_dev < 0.05:
+        log.error(
+            "check_score_distribution: DEGENERATE — std_dev=%.4f < 0.05. "
+            "All tickers scoring nearly identically. "
+            "Cross-sectional normalization may be broken.",
+            std_dev,
+        )
+        return False
+
+    # Gate 4: per-factor density (at least one live factor)
+    _FACTOR_SCORE_KEYS = [
+        "insider_conviction_score",
+        "insider_breadth_score",
+        "congress_score",
+        "news_sentiment_score",
+        "momentum_long_score",
+    ]
+    live_factors = []
+    for key in _FACTOR_SCORE_KEYS:
+        nz = sum(1 for r in results if float(r.get(key, 0.0) or 0.0) > 0.0)
+        density = nz / len(results)
+        if density > 0.05:
+            live_factors.append((key, density))
+
+    if not live_factors:
+        log.error(
+            "check_score_distribution: ALL core factor feeds appear dead "
+            "(each has < 5%% non-zero density across %d tickers). "
+            "insider / news / momentum feeds may all be down.",
+            len(results),
+        )
+        return False
+
+    log.info(
+        "check_score_distribution PASSED: n=%d, nonzero=%.1f%%, std=%.4f, "
+        "live_factors=%d (%s)",
+        len(results),
+        nonzero_density * 100,
+        std_dev,
+        len(live_factors),
+        ", ".join(f"{k.replace('_score', '')}={d:.0%}" for k, d in live_factors[:3]),
+    )
+
+    # Advisory check: insider feed may be silently dead (HTTP 200 all-empty)
+    _check_insider_feed_density(results, log)
+
+    return True
+
+
+def _check_insider_feed_density(results: list, log) -> bool:
+    """Warn when insider feed appears silently dead (HTTP 200 but all-zeros).
+
+    Distinguishes between:
+      - Structurally sparse (e.g. 5–15% non-zero on S&P 500): EXPECTED, no warn
+      - Apparently dead (< 1% non-zero across 10+ US tickers): WARN — possible
+        HTTP 200 empty-array response from FMP insider endpoint
+
+    Does NOT hard-fail — sparsity is a known property of the insider signal
+    on large-cap universes (Cohen, Malloy & Pomorski 2012: ~11% of S&P 500
+    tickers have key-officer purchases in any 90-day window).
+
+    Returns True (always) — this is a monitoring signal, not a gate.
+    """
+    us_results = [r for r in results if r.get("market", "USA") in ("USA", "US")]
+    if len(us_results) < 10:
         return True
 
-    scores: list[float] = []
-    for bucket in _SCORE_BUCKETS:
-        for entry in data.get(bucket, []):
-            s = entry.get("final_score")
-            if s is not None:
-                scores.append(float(s))
+    conviction_nonzero = sum(
+        1 for r in us_results
+        if float(r.get("insider_conviction_score", 0.0) or 0.0) > 0.0
+    )
+    breadth_nonzero = sum(
+        1 for r in us_results
+        if float(r.get("insider_breadth_score", 0.0) or 0.0) > 0.0
+    )
+    n = len(us_results)
 
-    scores = list(set(scores))  # deduplicate same ticker across lists
+    conviction_density = conviction_nonzero / n
+    breadth_density = breadth_nonzero / n
 
-    if len(scores) < min_entries:
+    if conviction_density < 0.01 and breadth_density < 0.01:
         log.warning(
-            "check_score_distribution: only %d unique scores (need >= %d) — skipping",
-            len(scores), min_entries,
+            "INSIDER FEED LIKELY DEAD (HTTP 200 empty-array): "
+            "conviction_density=%.1f%% breadth_density=%.1f%% across %d US tickers. "
+            "FMP insider-trading/search may be returning [] for all tickers. "
+            "Check fmp_health.json for endpoint call counts vs failures.",
+            conviction_density * 100,
+            breadth_density * 100,
+            n,
         )
-        return True
-
-    stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
-    max_score = max(scores)
-    mean_score = statistics.mean(scores)
-    degenerate = False
-
-    if stdev < min_stdev:
-        log.error(
-            "::error::SCORE DISTRIBUTION DEGENERATE: stdev=%.4f < %.4f threshold. "
-            "All tickers scoring near %.4f — data feeds may be dead. "
-            "Check FMP endpoint health (fmp_health.json).",
-            stdev, min_stdev, mean_score,
+    elif conviction_density < 0.03:
+        log.warning(
+            "Insider conviction density unusually low: %.1f%% across %d US tickers "
+            "(expected 5–15%% on S&P 500 universe). "
+            "Possible feed degradation — check fmp_health.json.",
+            conviction_density * 100,
+            n,
         )
-        degenerate = True
-
-    if max_score < min_max_score:
-        log.error(
-            "::error::DEAD SIGNAL DETECTED: max_score=%.4f < %.4f threshold. "
-            "No ticker reached the minimum actionable score — "
-            "insider/news/congress feeds may all be returning 0.0.",
-            max_score, min_max_score,
-        )
-        degenerate = True
-
-    if not degenerate:
+    else:
         log.info(
-            "check_score_distribution: OK — stdev=%.4f max=%.4f mean=%.4f (%d entries)",
-            stdev, max_score, mean_score, len(scores),
+            "Insider feed density OK: conviction=%.1f%% breadth=%.1f%% "
+            "across %d US tickers.",
+            conviction_density * 100,
+            breadth_density * 100,
+            n,
         )
 
-    return not degenerate
+    return True
 
 
 def _format_alert_body(metrics: dict, reasons: List[str]) -> str:

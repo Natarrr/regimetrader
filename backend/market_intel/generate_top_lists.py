@@ -63,17 +63,17 @@ except Exception as _e:
     # UPDATE THIS if run_pipeline.WEIGHTS changes.
     log.warning("Could not import WEIGHTS from run_pipeline.py: %s — using hardcoded fallback", _e)
     WEIGHTS: Dict[str, float] = {
-        "insider_conviction":  0.18,
+        "insider_conviction":  0.15,
         "insider_breadth":     0.12,
         "congress":            0.08,
         "news_sentiment":      0.10,
         "news_buzz":           0.03,
-        "momentum_long":       0.22,
+        "momentum_long":       0.25,
         "volume_attention":    0.03,
         "analyst_consensus":   0.04,
-        "analyst_revision":    0.06,
-        "price_target_upside": 0.04,
-        "quality_piotroski":   0.06,
+        "analyst_revision":    0.05,
+        "price_target_upside": 0.03,
+        "quality_piotroski":   0.08,
         "transcript_tone":     0.04,
     }
 
@@ -118,6 +118,18 @@ _CIRCUIT_BREAKER_MIN_FRACTION = 0.40   # 40% of universe minimum
 # 0.05 was a workaround for the broken /api/v4 routes that zeroed factors silently.
 # Now that FMPEndpointError surfaces dead routes loudly, a low threshold is a trap
 # that would allow a partially-broken pipeline to write rankings without alerting.
+
+# Hull (2015): regime shifts precede VIX threshold breaches.
+# Jegadeesh & Titman (1993): momentum factor IC turns negative in bear regimes.
+# Applied when spy_momentum_regime from run_pipeline PATCH 10 indicates stress
+# but VIX has not yet crossed 30 (avoids double-dampening with VIX overlay).
+_MOMENTUM_REGIME_MULTIPLIERS: dict = {
+    "BEAR_CRASH":    0.30,  # SPY 63d return < -20%: severe early warning
+    "BEAR_MOMENTUM": 0.55,  # SPY 63d return < -10%: moderate dampening
+    "BEAR_TREND":    0.70,  # SPY 12-1m return < -15%: mild dampening
+    "BULL_STRONG":   0.95,  # SPY 12-1m return > +30%: reversal caution
+    "NORMAL":        1.00,  # No adjustment
+}
 
 _BADGES = [
     (0.80, "HIGH BUY"),
@@ -355,13 +367,17 @@ def _to_entry(
     vix: Optional[float] = None,
     weights: Optional[Dict[str, float]] = None,
     quiver_evidence: Optional[Dict[str, Any]] = None,
+    momentum_multiplier: float = 1.0,
 ) -> Dict[str, Any]:
     w = weights if weights is not None else WEIGHTS
     raw_score = round(
         sum(w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in WEIGHTS),
         4,
     )
-    score = round(_apply_vix_overlay(raw_score, vix), 4)
+    # Apply VIX macro overlay first (absolute regime risk)
+    score_after_vix = round(_apply_vix_overlay(raw_score, vix), 4)
+    # Apply momentum regime pre-dampening (early bear detection, avoids double-count)
+    score = round(score_after_vix * momentum_multiplier, 4)
     # Carry schema-gate result into the entry so it appears in top_lists.json
     validation = row.get(
         "_validation", {"is_complete": True, "missing_sources": []})
@@ -409,6 +425,8 @@ def _to_entry(
         "esg_score":               esg_score_value,
         "esg_e_score":             esg_e_score_value,
         "esg_flag":                esg_flag_value,
+        # PATCH-03: audit fields — momentum regime dampening
+        "momentum_multiplier":     momentum_multiplier,
     }
 
 
@@ -639,6 +657,35 @@ def generate(
             _apply_vix_overlay(1.0, current_vix),
         )
 
+    # PATCH-03: Read SPY momentum regime from intel_source_status.json.
+    # Applies a pre-VIX dampening for bear markets that develop before VIX
+    # crosses 30 (e.g. 2022 rate shock: SPY -19%, VIX peak 37 but mostly < 30).
+    # Hull (2015): "parameters may remain constant and then change because of a
+    # regime shift" — early detection requires multi-signal confirmation.
+    spy_momentum_regime = status.get("spy_momentum_regime", "NORMAL")
+    momentum_multiplier = _MOMENTUM_REGIME_MULTIPLIERS.get(spy_momentum_regime, 1.0)
+
+    # Only apply momentum dampening when VIX overlay is NOT already suppressing
+    # signals (VIX >= 30 already applies 0.50x or 0.20x — avoid double-dampening)
+    vix_already_active = current_vix is not None and current_vix >= 30
+    if momentum_multiplier < 1.0 and not vix_already_active:
+        log.warning(
+            "MOMENTUM REGIME ALERT: spy_momentum_regime=%s "
+            "-> applying %.2fx pre-VIX dampening (VIX=%.1f < 30). "
+            "Hull (2015): regime shifts precede VIX threshold.",
+            spy_momentum_regime,
+            momentum_multiplier,
+            current_vix if current_vix is not None else 0.0,
+        )
+    elif momentum_multiplier < 1.0 and vix_already_active:
+        log.info(
+            "Momentum regime %s detected but VIX overlay already active (VIX=%.1f). "
+            "No additional dampening applied.",
+            spy_momentum_regime,
+            current_vix,
+        )
+        momentum_multiplier = 1.0  # reset — VIX overlay handles dampening
+
     # EU/Asia rows carry a pre-scored final_score and must NOT enter cross-sectional
     # normalization — they have structural zeros in edgar/congress/news which would
     # corrupt the US peer-group min/max and distort all US scores.
@@ -672,7 +719,8 @@ def generate(
 
     entries = [
         _to_entry(row, nf, vix=current_vix, weights=eff_weights,
-                  quiver_evidence=row.get("quiver_evidence"))
+                  quiver_evidence=row.get("quiver_evidence"),
+                  momentum_multiplier=momentum_multiplier)
         for row, nf in zip(us_results, norm_factor_list)
     ]
     # Propagate Stage 1 validation flag from raw rows into entries
@@ -815,6 +863,8 @@ def generate(
         "vix":             current_vix,
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
+        "spy_momentum_regime":   spy_momentum_regime,
+        "momentum_multiplier":   round(momentum_multiplier, 4),
         "top_buys":        top_buys,
         "top_buys_usa":    top_buys_usa,
         "top_buys_europe": top_buys_europe,

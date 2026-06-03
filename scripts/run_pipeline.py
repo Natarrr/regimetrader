@@ -44,31 +44,47 @@ log = logging.getLogger("run_pipeline")
 # momentum 20d (anti-alpha short-term reversal) → 12-1m Jegadeesh (Tetlock 2007).
 # news(0.15) split into directional sentiment(0.10) + attention buzz(0.05).
 # volume extracted from momentum into its own attention tilt (0.03).
+# ── Weights (must sum to 1.0) ────────────────────────────────────────────────
+# Rebalanced per Grinold-Kahn Fundamental Law guidance (PATCH-08):
+#
+#   insider_conviction  0.18 → 0.15  (sparse ~1% density on S&P 500 large-cap;
+#                                      Cohen-Malloy-Pomorski 2012: CEO purchases
+#                                      carry alpha, but only ~11% of universe)
+#   momentum_long       0.22 → 0.25  (strongest empirical IC; Jegadeesh-Titman
+#                                      1993: 12-1m momentum IC ≈ 0.06-0.09)
+#   quality_piotroski   0.06 → 0.08  (most regime-stable signal; Piotroski 2000,
+#                                      Novy-Marx 2013: robust across 2008/2020/2022)
+#   analyst_revision    0.06 → 0.05  (reduce sell-side triplet combined weight;
+#                                      Grinold-Kahn: correlated signals overstate BR)
+#   price_target_upside 0.04 → 0.03  (staleness risk on quarterly targets)
+#
+#   All other factors unchanged. Total remains 1.0.
 WEIGHTS = {
-    "insider_conviction":  0.18,   # was 0.30 — sparse on large-cap universe (~99% tickers score 0.0)
-    "insider_breadth":     0.12,   # was 0.09 — denser signal, increased
-    "congress":            0.08,   # was 0.10 — ~5% density, reduced proportionally
-    "news_sentiment":      0.10,
-    "news_buzz":           0.03,
-    "momentum_long":       0.22,   # was 0.15 — strongest IC empirically, increased
-    "volume_attention":    0.03,
-    "analyst_consensus":   0.04,
-    "analyst_revision":    0.06,
-    "price_target_upside": 0.04,
-    "quality_piotroski":   0.06,
-    "transcript_tone":     0.04,   # NEW — FMP earnings transcript guidance tone
+    "insider_conviction":  0.15,   # ↓ from 0.18 — sparse on large-cap universe
+    "insider_breadth":     0.12,   # unchanged
+    "congress":            0.08,   # unchanged — US-only, already discounted
+    "news_sentiment":      0.10,   # unchanged — Tetlock (2007) IC stable
+    "news_buzz":           0.03,   # unchanged — attention tilt only
+    "momentum_long":       0.25,   # ↑ from 0.22 — Jegadeesh-Titman (1993)
+    "volume_attention":    0.03,   # unchanged — Barber-Odean (2008)
+    "analyst_consensus":   0.04,   # unchanged
+    "analyst_revision":    0.05,   # ↓ from 0.06 — reduce sell-side triplet
+    "price_target_upside": 0.03,   # ↓ from 0.04 — staleness risk
+    "quality_piotroski":   0.08,   # ↑ from 0.06 — Piotroski (2000) regime-robust
+    "transcript_tone":     0.04,   # unchanged
 }
-assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values())}"
-# Migration note: rebalanced weights and added `transcript_tone` signal.
-# - insider_conviction: 0.30 → 0.18 (sparse on large-cap universe)
-# - insider_breadth:    0.09 → 0.12
-# - congress:           0.10 → 0.08
-# - momentum_long:      0.15 → 0.22
-# - transcript_tone:    0.00 → 0.04 (new FMP transcript signal)
+assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
+    f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
+    "Check run_pipeline.WEIGHTS after any modification."
+)
+# Weight sum: 0.15+0.12+0.08+0.10+0.03+0.25+0.03+0.04+0.05+0.03+0.08+0.04 = 1.00 ✓
 
 # Human-readable migration note used in runtime logs/tests
 _WEIGHTS_MIGRATION_NOTE = (
-    "Weights migrated: rebalanced core factors and added 'transcript_tone'",
+    "Weights v3 (PATCH-08): rebalanced for Grinold-Kahn IR optimization. "
+    "momentum_long 0.22→0.25, quality_piotroski 0.06→0.08, "
+    "insider_conviction 0.18→0.15, analyst_revision 0.06→0.05, "
+    "price_target_upside 0.04→0.03.",
 )
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
@@ -744,13 +760,19 @@ def score_news_fmp(ticker: str) -> float:
     return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
 
 
-def score_analyst_consensus(ticker: str) -> tuple[float, str]:
+def score_analyst_consensus(ticker: str, client=None) -> tuple[float, str]:
     """Sell-side analyst consensus score from FMP /stable/grades-consensus.
 
     Womack (1996, JF): analyst upgrades/downgrades have significant post-event
     drift — the direction of the consensus is a credible, widely-used signal.
     This maps the ratings distribution to a continuous [0, 1] score weighted by
     count, treating the distribution as a probability mass over the rating scale.
+
+    Args:
+        ticker: Ticker symbol.
+        client: Optional shared FMPClient instance. If None, creates a new one.
+                Pass the shared pipeline client so health_report() captures
+                all endpoint calls and failures in fmp_health.json.
 
     Rating → score mapping (linear 5-point scale):
         strongBuy  → 1.00
@@ -772,7 +794,8 @@ def score_analyst_consensus(ticker: str) -> tuple[float, str]:
         "strongSell": 0.00,
     }
     try:
-        data = _FMPClient().get_analyst_ratings(ticker)
+        _client = client if client is not None else _FMPClient()
+        data = _client.get_analyst_ratings(ticker)
         if not data:
             return 0.0, "none"
 
@@ -903,14 +926,20 @@ def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
     return 0.0, "none"
 
 
-def score_transcript_tone(ticker: str) -> tuple[float, str]:
+def score_transcript_tone(ticker: str, client=None) -> tuple[float, str]:
     """Score earnings transcript guidance tone via FMP transcript text.
+
+    Args:
+        ticker: Ticker symbol.
+        client: Optional shared FMPClient instance. If None, creates a new one.
+                Pass the shared pipeline client so health_report() captures
+                all endpoint calls and failures in fmp_health.json.
 
     Returns (score, source) where source is 'fmp_transcript:<tone>' or 'none'.
     """
     try:
-        client = _FMPClient()
-        txt = client.get_earnings_transcript(ticker, max_chars=3000)
+        _client = client if client is not None else _FMPClient()
+        txt = _client.get_earnings_transcript(ticker, max_chars=3000)
         if not txt:
             return 0.0, "none"
         text = str(txt).lower()
@@ -1609,10 +1638,14 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
 
             # Transcript tone from FMP earnings transcript (new signal)
-            transcript_tone_score, transcript_tone_source = score_transcript_tone(ticker)
+            transcript_tone_score, transcript_tone_source = score_transcript_tone(
+                ticker, client=_fmp_client
+            )
 
             # ── Analyst consensus (Womack 1996 JF) ───────────────────────
-            analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(ticker)
+            analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(
+                ticker, client=_fmp_client
+            )
 
             # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
             _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)

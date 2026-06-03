@@ -42,6 +42,10 @@ class VIXCoherenceError(PipelineAuditError):
     """VIX value is implausible (negative or absurdly large)."""
 
 
+class InternationalScoreOverflowError(PipelineAuditError):
+    """EU/Asia ticker final_score exceeds what its available factors can produce."""
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -178,6 +182,38 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
                     f"Ticker {ticker!r} ({market}): congress factor={congress_val!r} > 0; "
                     f"non-US tickers must not carry a congress signal"
                 )
+
+    # ------------------------------------------------------------------
+    # E2. International score ceiling — EU/Asia scores must not exceed
+    #     what their limited factor set can produce.
+    #     Available factors for EUROPE/ASIA: momentum_long + volume_attention
+    #     Their renormalized weights sum to ~0.35 of full WEIGHTS.
+    #     A EU/Asia ticker scoring > 0.90 has almost certainly had US factor
+    #     scores injected via a stale cache or merge bug.
+    #     Tolerance: 0.10 headroom above theoretical max to allow for
+    #     _effective_weights redistribution effects.
+    # ------------------------------------------------------------------
+    # Renormalized: momentum_long=0.25, volume_attention=0.03 (from PATCH-08)
+    # sum of available intl factors = 0.28; renorm to 1.0 => theoretical max = 1.0
+    # but realistically scores cap out near 0.80 due to sparse volume signal.
+    _INTL_SCORE_CEILING = 0.90
+
+    for entry in _iter_all_entries(data):
+        ticker = entry.get("ticker", "?")
+        market = entry.get("market", "USA")
+        if market not in _FOREIGN_MARKETS:
+            continue
+
+        score = float(entry.get("final_score", 0.0))
+        factors = entry.get("factors", {})
+
+        if score > _INTL_SCORE_CEILING:
+            raise InternationalScoreOverflowError(
+                f"Ticker {ticker!r} ({market}): final_score={score:.4f} exceeds "
+                f"theoretical ceiling {_INTL_SCORE_CEILING:.2f}. "
+                f"US factor scores may have been injected. "
+                f"factors={factors}"
+            )
 
     # ------------------------------------------------------------------
     # F. VIX coherence — value must be a plausible positive float

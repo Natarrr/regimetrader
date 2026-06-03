@@ -103,6 +103,67 @@ jobs:
           workflow_conclusion: success
           if_no_artifact_found: warn
 
+      - name: Validate edgar_3x artifact freshness
+        run: |
+          python3 - <<'PYEOF'
+          import json, sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          # Check intel_source_status.json first, fall back to top_lists.json
+          candidates = [
+              Path("logs/intel_source_status.json"),
+              Path("logs/top_lists.json"),
+          ]
+          data = None
+          for p in candidates:
+              if p.exists():
+                  try:
+                      data = json.loads(p.read_text(encoding="utf-8"))
+                      print(f"Loaded freshness check from: {p.name}")
+                      break
+                  except Exception as e:
+                      print(f"::warning::Could not parse {p.name}: {e}")
+
+          if data is None:
+              print("::warning::No edgar_3x artifact found — shortlist will be empty. "
+                    "Check edgar_3x workflow on GitHub Actions.")
+              sys.exit(0)  # Soft fail: produce empty shortlist rather than block
+
+          # Extract timestamp from either schema
+          ts_str = (
+              data.get("computed_at")
+              or data.get("generated_at")
+              or (data.get("_edgar_meta") or {}).get("last_run")
+              or ""
+          )
+
+          if not ts_str:
+              print("::warning::Artifact has no timestamp field — cannot verify freshness. Proceeding.")
+              sys.exit(0)
+
+          try:
+              ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+              age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+          except Exception as e:
+              print(f"::warning::Cannot parse timestamp '{ts_str}': {e}. Proceeding.")
+              sys.exit(0)
+
+          print(f"Artifact age: {age_h:.1f}h (timestamp: {ts_str[:19]})")
+
+          # Hard fail if artifact is more than 12 hours old
+          MAX_AGE_HOURS = 12
+          if age_h > MAX_AGE_HOURS:
+              print(
+                  f"::error::Artifact is {age_h:.1f}h old (threshold: {MAX_AGE_HOURS}h). "
+                  f"edgar_3x has likely failed multiple consecutive runs. "
+                  f"hybrid_pipeline should not proceed with stale data."
+              )
+              sys.exit(1)
+
+          print(f"Freshness OK: {age_h:.1f}h < {MAX_AGE_HOURS}h threshold.")
+          PYEOF
+
       - name: Reshape top_lists → shortlist.json
         run: |
           python - <<'PYEOF'
