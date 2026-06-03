@@ -25,13 +25,18 @@ from scripts.run_pipeline import score_congress
 def _make_results(n: int, overrides: dict | None = None) -> list:
     """Build n neutral result rows, optionally overriding specific fields."""
     base = {
-        "insider_conviction_score": 0.50,
-        "insider_breadth_score":    0.50,
-        "congress_score":           0.50,
-        "news_sentiment_score":     0.50,
-        "news_buzz_score":          0.50,
-        "momentum_long_score":      0.50,
-        "volume_attention_score":   0.50,
+        "insider_conviction_score":  0.50,
+        "insider_breadth_score":     0.50,
+        "congress_score":            0.50,
+        "news_sentiment_score":      0.50,
+        "news_buzz_score":           0.50,
+        "momentum_long_score":       0.50,
+        "volume_attention_score":    0.50,
+        "analyst_consensus_score":   0.50,
+        "analyst_revision_score":    0.50,
+        "price_target_upside_score": 0.50,
+        "quality_piotroski_score":   0.50,
+        "transcript_tone_score":     0.50,
     }
     rows = [{**base} for _ in range(n)]
     if overrides:
@@ -64,14 +69,11 @@ class TestCrossSectionalNormalize:
             for v in row.values():
                 assert v == pytest.approx(0.5, abs=1e-4)
 
-    def test_all_seven_factors_present_in_output(self):
+    def test_all_twelve_factors_present_in_output(self):
         results = _make_results(3)
         normed = _cross_sectional_normalize(results)
         for row in normed:
-            assert set(row.keys()) == {
-                "insider_conviction", "insider_breadth", "congress",
-                "news_sentiment", "news_buzz", "momentum_long", "volume_attention",
-            }
+            assert set(row.keys()) == set(FACTOR_FIELDS.keys())
 
     def test_output_length_matches_input(self):
         results = _make_results(7)
@@ -114,12 +116,7 @@ class TestCrossSectionalNormalize:
 
     def test_null_values_penalised_not_neutral(self):
         """Explicit JSON null (None) must be treated as 0.0 — same as dead API feed."""
-        base = {
-            "insider_conviction_score": None, "insider_breadth_score": None,
-            "congress_score": None, "news_sentiment_score": None,
-            "news_buzz_score": None, "momentum_long_score": None,
-            "volume_attention_score": None,
-        }
+        base = {field: None for field in FACTOR_FIELDS.values()}
         results = [dict(base) for _ in range(4)]
         normed = _cross_sectional_normalize(results)
         for row in normed:
@@ -162,33 +159,29 @@ class TestScoreCongress:
 class TestEffectiveWeights:
     """Dead-factor weight redistribution."""
 
-    def test_no_dead_factors_returns_original(self):
-        norm = [{
-            "insider_conviction": 0.3, "insider_breadth": 0.5, "congress": 0.7,
-            "news_sentiment": 0.4, "news_buzz": 0.5,
-            "momentum_long": 0.6, "volume_attention": 0.3,
+    def _all_live_norm(self, congress=0.7):
+        """Return a single-row norm dict with all 12 factors live (non-zero)."""
+        return [{
+            "insider_conviction": 0.3, "insider_breadth": 0.5, "congress": congress,
+            "news_sentiment": 0.4, "news_buzz": 0.5, "momentum_long": 0.6,
+            "volume_attention": 0.3, "analyst_consensus": 0.5, "analyst_revision": 0.4,
+            "price_target_upside": 0.6, "quality_piotroski": 0.5, "transcript_tone": 0.4,
         }]
-        w = _effective_weights(norm, WEIGHTS)
+
+    def test_no_dead_factors_returns_original(self):
+        w = _effective_weights(self._all_live_norm(), WEIGHTS)
         assert w == pytest.approx(WEIGHTS, abs=1e-6)
 
     def test_dead_congress_redistributes_to_live(self):
-        """All-zero congress → its 22% weight rolls to live factors."""
-        norm = [{
-            "insider_conviction": 0.5, "insider_breadth": 0.5, "congress": 0.0,
-            "news_sentiment": 0.5, "news_buzz": 0.5,
-            "momentum_long": 0.5, "volume_attention": 0.5,
-        }]
+        """All-zero congress → its weight rolls to live factors."""
+        norm = self._all_live_norm(congress=0.0)
         w = _effective_weights(norm, WEIGHTS)
         assert "congress" not in w
         assert abs(sum(w.values()) - 1.0) < 1e-5   # weights still sum to 1
 
     def test_live_weights_increase_proportionally(self):
         """Each live factor gets an equal relative boost when congress is dead."""
-        norm = [{
-            "insider_conviction": 0.5, "insider_breadth": 0.5, "congress": 0.0,
-            "news_sentiment": 0.5, "news_buzz": 0.5,
-            "momentum_long": 0.5, "volume_attention": 0.5,
-        }]
+        norm = self._all_live_norm(congress=0.0)
         w = _effective_weights(norm, WEIGHTS)
         # insider_conviction / insider_breadth ratio must stay constant
         assert (w["insider_conviction"] / w["insider_breadth"] ==
@@ -196,11 +189,7 @@ class TestEffectiveWeights:
 
     def test_all_dead_returns_original_fallback(self):
         """If everything is dead, fall back to original weights rather than divide by zero."""
-        norm = [{
-            "insider_conviction": 0.0, "insider_breadth": 0.0, "congress": 0.0,
-            "news_sentiment": 0.0, "news_buzz": 0.0,
-            "momentum_long": 0.0, "volume_attention": 0.0,
-        }]
+        norm = [{f: 0.0 for f in WEIGHTS}]
         w = _effective_weights(norm, WEIGHTS)
         assert w == pytest.approx(WEIGHTS, abs=1e-6)
 
@@ -337,16 +326,9 @@ class TestToEntryEvidencePassthrough:
 
 def _make_schema_row(ticker: str = "AAPL", **scores) -> dict:
     """Build a result row with configurable factor scores (default all 0.5)."""
-    base = {
-        "ticker": ticker,
-        "insider_conviction_score": scores.get("insider_conviction_score", 0.5),
-        "insider_breadth_score":    scores.get("insider_breadth_score",    0.5),
-        "congress_score":           scores.get("congress_score",           0.5),
-        "news_sentiment_score":     scores.get("news_sentiment_score",     0.5),
-        "news_buzz_score":          scores.get("news_buzz_score",          0.5),
-        "momentum_long_score":      scores.get("momentum_long_score",      0.5),
-        "volume_attention_score":   scores.get("volume_attention_score",   0.5),
-    }
+    base = {"ticker": ticker}
+    for field in FACTOR_FIELDS.values():
+        base[field] = scores.get(field, 0.5)
     return base
 
 

@@ -10,7 +10,12 @@ Error gate:     $\\text{error\\_count} \\leq e_{\\max}$
 """
 from __future__ import annotations
 
+import json
+import tempfile
+from pathlib import Path
+
 from monitoring.evaluate import evaluate
+from monitoring.check_metrics import check_score_distribution
 
 
 def _metrics(ticker: int, edgar: int, errors: int = 0) -> dict:
@@ -93,3 +98,80 @@ def test_evaluate_respects_relaxed_max_errors() -> None:
     must accept exactly two errors and reject three."""
     assert evaluate(_metrics(10, 8, errors=2), max_errors=2)[0] is True
     assert evaluate(_metrics(10, 8, errors=3), max_errors=2)[0] is False
+
+
+# ── check_score_distribution (PATCH 11) ──────────────────────────────────────
+
+def _write_top_lists(tmp: Path, data: dict) -> Path:
+    p = tmp / "top_lists.json"
+    p.write_text(json.dumps(data), encoding="utf-8")
+    return tmp
+
+
+class TestCheckScoreDistribution:
+    """Canary gate: score distribution must be non-degenerate (PATCH 11).
+
+    A dead-feed scenario (all factors return 0.0) causes the cross-sectional
+    normaliser to set all scores to 0.0, and weight redistribution raises all
+    final_scores to the weight-floor artefact (~0.18). The check must detect
+    this and return False.
+    """
+
+    def test_healthy_distribution_passes(self, tmp_path):
+        data = {"top_buys": [
+            {"final_score": 0.82}, {"final_score": 0.65}, {"final_score": 0.55},
+            {"final_score": 0.42}, {"final_score": 0.30},
+        ]}
+        _write_top_lists(tmp_path, data)
+        assert check_score_distribution(tmp_path) is True
+
+    def test_degenerate_uniform_scores_fail(self, tmp_path):
+        """Weight-floor artefact: all tickers at ~0.18 must trigger the gate."""
+        data = {"top_buys": [
+            {"final_score": 0.181}, {"final_score": 0.183}, {"final_score": 0.179},
+            {"final_score": 0.182}, {"final_score": 0.180},
+        ]}
+        _write_top_lists(tmp_path, data)
+        assert check_score_distribution(tmp_path) is False
+
+    def test_low_max_score_fails_even_with_spread(self, tmp_path):
+        """If no ticker exceeds min_max_score, the gate fails regardless of stdev."""
+        data = {"top_buys": [
+            {"final_score": 0.10}, {"final_score": 0.15}, {"final_score": 0.20},
+            {"final_score": 0.25}, {"final_score": 0.30},
+        ]}
+        _write_top_lists(tmp_path, data)
+        assert check_score_distribution(tmp_path) is False
+
+    def test_missing_file_is_skipped_not_failed(self, tmp_path):
+        """No top_lists.json → canary must not fail (file may not exist yet)."""
+        assert check_score_distribution(tmp_path) is True
+
+    def test_scores_across_multiple_buckets_aggregated(self, tmp_path):
+        """Scores from top_buys_usa and top_buys_europe are combined for the check."""
+        data = {
+            "top_buys_usa": [{"final_score": 0.80}, {"final_score": 0.60}],
+            "top_buys_europe": [{"final_score": 0.50}, {"final_score": 0.30}],
+        }
+        _write_top_lists(tmp_path, data)
+        assert check_score_distribution(tmp_path) is True
+
+    def test_fewer_than_min_entries_skips_check(self, tmp_path):
+        """Only 2 unique scores — below min_entries=3 — must skip gracefully."""
+        data = {"top_buys": [{"final_score": 0.80}, {"final_score": 0.20}]}
+        _write_top_lists(tmp_path, data)
+        assert check_score_distribution(tmp_path) is True
+
+    def test_entries_missing_final_score_key_are_ignored(self, tmp_path):
+        """Entries without a final_score key must be skipped, not crash."""
+        data = {"top_buys": [
+            {"ticker": "X"}, {"final_score": 0.75},
+            {"final_score": 0.55}, {"final_score": 0.45},
+        ]}
+        _write_top_lists(tmp_path, data)
+        assert check_score_distribution(tmp_path) is True
+
+    def test_corrupted_json_is_skipped_not_failed(self, tmp_path):
+        """Unreadable top_lists.json must not crash the canary."""
+        (tmp_path / "top_lists.json").write_text("not-json", encoding="utf-8")
+        assert check_score_distribution(tmp_path) is True

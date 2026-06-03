@@ -94,7 +94,24 @@ jobs:
             --min-coverage "${{ github.event.inputs.min_coverage || '0.6' }}" \
             --max-errors 0
 
-      # ── 8. Upload artifacts (even on failure so you can debug) ──────────────
+      # ── 8. Score distribution gate (PATCH 11) ──────────────────────────────
+      - name: Check score distribution
+        run: |
+          set -euo pipefail
+          python - <<'EOF'
+          import sys
+          sys.path.insert(0, '.')
+          import logging
+          logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+          from monitoring.check_metrics import check_score_distribution
+          from pathlib import Path
+          ok = check_score_distribution(Path('logs'))
+          if not ok:
+              print('::error::Score distribution degenerate — insider/news/congress feeds may be dead')
+              sys.exit(1)
+          EOF
+
+      # ── 9. Upload artifacts (even on failure so you can debug) ──────────────
       - name: Upload canary artifacts
         if: always()
         uses: actions/upload-artifact@v4

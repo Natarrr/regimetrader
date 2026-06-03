@@ -241,6 +241,60 @@ class TestInternationalScorer:
         assert result["congress_score"] is None
         assert result["momentum_long_score"] is not None
 
+    def test_quality_piotroski_score_is_float_not_none(self):
+        """PATCH 07: quality_piotroski_score must be a float (0.0 if FMP unavailable), not None."""
+        from scripts.run_pipeline import _score_ticker_international
+        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
+            instance = _MockFC.return_value
+            instance._api_key = ""  # no key — fallback to 0.0
+            entry = _make_eu_entry(return_12_1m=0.15, volume_spike=2.0)
+            result = _score_ticker_international(entry, spy_return_baseline=0.05)
+        assert result["quality_piotroski_score"] is not None
+        assert isinstance(result["quality_piotroski_score"], float)
+
+    def test_price_target_upside_score_is_float_not_none(self):
+        """PATCH 07: price_target_upside_score must be a float (0.0 if unavailable), not None."""
+        from scripts.run_pipeline import _score_ticker_international
+        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
+            instance = _MockFC.return_value
+            instance._api_key = ""  # no key — fallback to 0.0
+            entry = _make_eu_entry(return_12_1m=0.15, volume_spike=2.0)
+            result = _score_ticker_international(entry, spy_return_baseline=0.05)
+        assert result["price_target_upside_score"] is not None
+        assert isinstance(result["price_target_upside_score"], float)
+
+    def test_quality_piotroski_populated_when_fmp_returns_value(self):
+        """PATCH 07: when FMP get_quality_score returns 0.625, scorer propagates it."""
+        from scripts.run_pipeline import _score_ticker_international
+        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
+            instance = _MockFC.return_value
+            instance._api_key = "dummy_key"
+            instance.get_quality_score.return_value = 0.625
+            instance.get_upside_to_target.return_value = None
+            entry = _make_eu_entry(return_12_1m=0.15, volume_spike=2.0)
+            result = _score_ticker_international(entry, spy_return_baseline=0.05)
+        assert result["quality_piotroski_score"] == pytest.approx(0.625)
+
+    def test_analyst_consensus_score_is_none_for_eu(self):
+        """PATCH 07: analyst_consensus_score stays None (FMP grades-consensus US-only)."""
+        from scripts.run_pipeline import _score_ticker_international
+        entry = _make_eu_entry()
+        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
+            instance = _MockFC.return_value
+            instance._api_key = ""
+            result = _score_ticker_international(entry)
+        assert result.get("analyst_consensus_score") is None
+
+    def test_transcript_tone_score_is_none_for_eu(self):
+        """PATCH 07: transcript_tone_score stays None (FMP transcripts US-only)."""
+        from scripts.run_pipeline import _score_ticker_international
+        entry = _make_eu_entry()
+        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
+            instance = _MockFC.return_value
+            instance._api_key = ""
+            result = _score_ticker_international(entry)
+        assert result.get("transcript_tone_score") is None
+
     def test_returns_none_on_exception(self):
         """Entry with broken raw_factors must return None, not raise."""
         from scripts.run_pipeline import _score_ticker_international
@@ -261,8 +315,8 @@ class TestInternationalScorer:
 # ── Test 3: MARKET_FACTORS contents ─────────────────────────────────────────
 
 class TestMarketFactors:
-    def test_us_has_all_seven_factors(self):
-        assert len(MARKET_FACTORS[Market.US]) == 7
+    def test_us_has_all_twelve_factors(self):
+        assert len(MARKET_FACTORS[Market.US]) == 12
 
     def test_europe_does_not_have_congress(self):
         assert "congress_score" not in MARKET_FACTORS[Market.EUROPE]
@@ -274,11 +328,43 @@ class TestMarketFactors:
         assert "momentum_long_score" in MARKET_FACTORS[Market.EUROPE]
         assert "volume_attention_score" in MARKET_FACTORS[Market.EUROPE]
 
-    def test_europe_has_exactly_two_factors(self):
-        assert len(MARKET_FACTORS[Market.EUROPE]) == 2
+    def test_europe_has_exactly_two_base_factors(self):
+        """Momentum and volume are always present (pre-PATCH 07 baseline)."""
+        assert "momentum_long_score" in MARKET_FACTORS[Market.EUROPE]
+        assert "volume_attention_score" in MARKET_FACTORS[Market.EUROPE]
 
-    def test_asia_has_exactly_two_factors(self):
-        assert len(MARKET_FACTORS[Market.ASIA]) == 2
+    def test_asia_has_exactly_two_base_factors(self):
+        """Momentum and volume are always present (pre-PATCH 07 baseline)."""
+        assert "momentum_long_score" in MARKET_FACTORS[Market.ASIA]
+        assert "volume_attention_score" in MARKET_FACTORS[Market.ASIA]
+
+    def test_europe_has_exactly_four_factors(self):
+        """PATCH 07: EU now has 4 factors (adds quality_piotroski + price_target_upside)."""
+        assert len(MARKET_FACTORS[Market.EUROPE]) == 4
+
+    def test_asia_has_exactly_four_factors(self):
+        """PATCH 07: Asia now has 4 factors (adds quality_piotroski + price_target_upside)."""
+        assert len(MARKET_FACTORS[Market.ASIA]) == 4
+
+    def test_europe_has_quality_piotroski(self):
+        """PATCH 07: FMP ratios-ttm confirmed PASS for SAP.DE (Phase-0 2026-05-30)."""
+        assert "quality_piotroski_score" in MARKET_FACTORS[Market.EUROPE]
+
+    def test_asia_has_quality_piotroski(self):
+        """PATCH 07: FMP ratios-ttm confirmed PASS for 7203.T (Phase-0 2026-05-30)."""
+        assert "quality_piotroski_score" in MARKET_FACTORS[Market.ASIA]
+
+    def test_europe_has_price_target_upside(self):
+        """PATCH 07: partial FMP price-target-consensus coverage for EU."""
+        assert "price_target_upside_score" in MARKET_FACTORS[Market.EUROPE]
+
+    def test_asia_has_price_target_upside(self):
+        """PATCH 07: partial FMP price-target-consensus coverage for Asia."""
+        assert "price_target_upside_score" in MARKET_FACTORS[Market.ASIA]
+
+    def test_us_has_twelve_factors(self):
+        """PATCH 07: US now has 12 factors (added analyst + quality + transcript)."""
+        assert len(MARKET_FACTORS[Market.US]) == 12
 
     def test_low_coverage_threshold_is_sane(self):
         """LOW_COVERAGE_THRESHOLD is applied in the RENORMALIZED weight space (sum=1.0).

@@ -931,7 +931,7 @@ class FMPClient:
                          bucket="ratings") or []
         return data[0] if isinstance(data, list) and data else {}
 
-    def get_upside_to_target(self, ticker: str) -> Optional[float]:
+    def get_upside_to_target(self, ticker: str, max_age_days: int = 90) -> Optional[float]:
         """Analyst consensus price target upside score in [0, 1], or None.
 
         Computes score_price_target_upside(targetConsensus, currentPrice)
@@ -939,29 +939,49 @@ class FMPClient:
           - get_price_target_consensus() → stable/price-target-consensus (ratings bucket, 6h TTL)
           - get_quote()                  → stable/quote (quote bucket, 5min TTL)
 
-        Writes nothing to cache — delegates entirely to those two methods.
-        Zero additional API calls: both results are cached from earlier in the
-        pipeline run.
+        Staleness check: if the consensus target is older than max_age_days (default 90),
+        returns None rather than a misleading score based on a stale target.
 
         Returns None when:
           - No API key
           - targetConsensus or price is missing, zero, or non-numeric
+          - Target is older than max_age_days (stale — treated as dead signal)
           - Either delegated call raises an exception
 
-        None signals "no analyst coverage / data missing" — the caller converts
-        this to 0.0 (dead signal) via `or 0.0`, which the cross-sectional
-        normalizer penalizes. This is distinct from 0.50 (at-target, valid data).
+        None → caller converts to 0.0 via `or 0.0` → dead signal penalized
+        in cross-sectional normalization. Distinct from 0.50 (at-target, valid data).
         """
         if not self._api_key:
             return None
         try:
             from regime_trader.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
+            from datetime import date as _date  # noqa: PLC0415
             target_data = self.get_price_target_consensus(ticker)
             quote_data = self.get_quote(ticker)
             target = target_data.get("targetConsensus")
             price = quote_data.get("price")
             if not target or not price:
                 return None
+
+            target_date_str = (
+                target_data.get("targetConsensusDate")
+                or target_data.get("lastUpdated")
+                or ""
+            )
+            if target_date_str:
+                try:
+                    target_date = _date.fromisoformat(str(target_date_str)[:10])
+                    age_days = (datetime.now(timezone.utc).date() - target_date).days
+                    if age_days > max_age_days:
+                        log.debug(
+                            "get_upside_to_target %s: target is %dd old (> %dd threshold) — "
+                            "returning None (stale, treated as dead signal)",
+                            ticker, age_days, max_age_days,
+                        )
+                        return None
+                except Exception:
+                    pass  # unparseable date — proceed without staleness filter
+
             return score_price_target_upside(float(target), float(price))
         except Exception as exc:
             log.debug("get_upside_to_target %s failed: %s", ticker, exc)

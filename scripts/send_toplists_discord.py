@@ -444,7 +444,38 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
             signals.append(f"analyst revision ({n} analysts)")
 
     result = " · ".join(signals[:3])
-    return (result or _NO_CATALYST)[:80]
+    catalyst_str = (result or _NO_CATALYST)[:80]
+
+    # PATCH 09: Append double-count warning when both insider and congress fire.
+    # Grinold & Kahn (2000): correlated signals overstate effective signal strength.
+    if entry.get("_correlated_signal_flag"):
+        warning = " ⚠double-signal"
+        if len(catalyst_str) + len(warning) <= 80:
+            catalyst_str = catalyst_str + warning
+        else:
+            catalyst_str = catalyst_str[:80 - len(warning)] + warning
+
+    # PATCH 12B: Advisory risk flags for negative signals.
+    risk_flags: list[str] = []
+
+    mom = float(entry.get("momentum_spy_relative", 0) or 0)
+    if mom < -0.10:
+        risk_flags.append(f"⚠ mom {mom*100:.0f}%")
+
+    rev_score = float(entry.get("analyst_revision_score") or 0.0)
+    if 0.0 < rev_score < 0.35:
+        risk_flags.append("⚠ rev↓")
+
+    quality = float(entry.get("quality_piotroski_score") or 0.0)
+    if 0.0 < quality < 0.30:
+        risk_flags.append("⚠ F-Score↓")
+
+    if risk_flags:
+        risk_str = " ".join(risk_flags[:2])
+        combined = f"{catalyst_str} | {risk_str}"
+        catalyst_str = combined[:80]
+
+    return catalyst_str
 
 
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:

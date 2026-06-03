@@ -25,11 +25,90 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+import statistics
+
 from .alert_state import update_after_evaluation
 from .evaluate import evaluate
 from .slack_notifier import send_discord_alert as send_slack_alert
 
 log = logging.getLogger("monitoring.check_metrics")
+
+_SCORE_BUCKETS = (
+    "top_buys", "top_buys_usa", "top_buys_europe",
+    "top_buys_asia", "mid_caps", "small_caps",
+)
+
+
+def check_score_distribution(
+    log_dir: Path,
+    min_stdev: float = 0.05,
+    min_max_score: float = 0.40,
+    min_entries: int = 3,
+) -> bool:
+    """Assert that top_lists.json score distribution is non-degenerate.
+
+    Detects dead-feed scenarios where all tickers score near the weight-floor
+    value (~0.18 when all factors return 0.0). Returns True when healthy,
+    False when degenerate. Missing or unreadable files are treated as skips
+    (return True) so canary does not fail on a missing artifact.
+    """
+    tl_path = Path(log_dir) / "top_lists.json"
+    if not tl_path.exists():
+        log.warning("check_score_distribution: top_lists.json not found — skipping")
+        return True
+
+    try:
+        data = json.loads(tl_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("check_score_distribution: cannot parse top_lists.json — %s", exc)
+        return True
+
+    scores: list[float] = []
+    for bucket in _SCORE_BUCKETS:
+        for entry in data.get(bucket, []):
+            s = entry.get("final_score")
+            if s is not None:
+                scores.append(float(s))
+
+    scores = list(set(scores))  # deduplicate same ticker across lists
+
+    if len(scores) < min_entries:
+        log.warning(
+            "check_score_distribution: only %d unique scores (need >= %d) — skipping",
+            len(scores), min_entries,
+        )
+        return True
+
+    stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
+    max_score = max(scores)
+    mean_score = statistics.mean(scores)
+    degenerate = False
+
+    if stdev < min_stdev:
+        log.error(
+            "::error::SCORE DISTRIBUTION DEGENERATE: stdev=%.4f < %.4f threshold. "
+            "All tickers scoring near %.4f — data feeds may be dead. "
+            "Check FMP endpoint health (fmp_health.json).",
+            stdev, min_stdev, mean_score,
+        )
+        degenerate = True
+
+    if max_score < min_max_score:
+        log.error(
+            "::error::DEAD SIGNAL DETECTED: max_score=%.4f < %.4f threshold. "
+            "No ticker reached the minimum actionable score — "
+            "insider/news/congress feeds may all be returning 0.0.",
+            max_score, min_max_score,
+        )
+        degenerate = True
+
+    if not degenerate:
+        log.info(
+            "check_score_distribution: OK — stdev=%.4f max=%.4f mean=%.4f (%d entries)",
+            stdev, max_score, mean_score, len(scores),
+        )
+
+    return not degenerate
 
 
 def _format_alert_body(metrics: dict, reasons: List[str]) -> str:
@@ -88,6 +167,16 @@ def main(argv: list[str] | None = None) -> int:
                 log.error("FMP structural failure detected: %s", failed_routes)
         except Exception as exc:
             log.warning("could not read fmp_health.json: %s", exc)
+
+    # ── Score distribution gate (PATCH 11) ────────────────────────────────────
+    # Catches dead-feed scenarios where all factors return 0.0 and the
+    # cross-sectional normaliser collapses every final_score to ~0.18.
+    if not check_score_distribution(args.log_dir):
+        reasons.append(
+            "Score distribution degenerate: stdev < 0.05 or max_score < 0.40 "
+            "— insider/news/congress feeds may all be returning 0.0"
+        )
+        ok = False
 
     decision = update_after_evaluation(ok)
 

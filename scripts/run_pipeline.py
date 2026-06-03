@@ -81,6 +81,14 @@ _SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 _cik_map: Dict[str, str] = {}   # TICKER → zero-padded 10-digit CIK
 _cik_map_loaded  = False
 
+# PATCH 08: Track structural FMP endpoint failures found inside _score_ticker().
+# The existing structural_failure_seen event only covers fetch_fmp_insider_all().
+# This set tracks any other endpoint (analyst, transcript, etc.) that returns 4xx.
+# Written from multiple threads — using a thread-safe set via a lock.
+import threading as _threading
+_structural_failures_lock = _threading.Lock()
+_structural_failures_in_scoring: set = set()  # set of broken endpoint paths
+
 # ── SEC rate-limited HTTP ─────────────────────────────────────────────────────
 # data.sec.gov allows up to 10 req/sec; we stay at ~8 with a shared lock so
 # all worker threads collectively respect the limit (not per-thread).
@@ -371,6 +379,141 @@ def _fetch_spy_return() -> float:
     except Exception as exc:
         log.warning("FMP SPY 12-1m baseline failed: %s — using 0.0", exc)
         return 0.0
+
+
+def _fetch_regional_return(ticker: str, label: str) -> float:
+    """Fetch 12-1 month return for a regional benchmark ETF via FMP.
+
+    PATCH 06: Generic helper for EU/Asia regional momentum benchmarks.
+    Jegadeesh & Titman (1993): momentum should be measured relative to
+    the local peer group, not a foreign index.
+
+    Args:
+        ticker: ETF symbol (e.g. "EZU" for Europe, "AAXJ" for Asia ex-Japan)
+        label:  Human-readable label for log messages
+
+    Returns:
+        12-1 month return as decimal, or 0.0 on any failure.
+    """
+    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays  # noqa: PLC0415
+    try:
+        rows = _FC().get_historical_prices(ticker, limit=310)
+        closes, _, _ = fmp_prices_to_arrays(rows)
+        if len(closes) < 252:
+            log.warning(
+                "Regional benchmark %s (%s): only %d bars, need 252 — falling back to 0.0",
+                ticker, label, len(closes),
+            )
+            return 0.0
+        idx_far  = max(0, len(closes) - 252)
+        idx_near = max(1, len(closes) - 21)
+        ret = float((closes[idx_near] - closes[idx_far]) / closes[idx_far])
+        log.info("Regional benchmark %s (%s) 12-1m return: %.4f (%.1f%%)", ticker, label, ret, ret * 100)
+        return ret
+    except Exception as exc:
+        log.warning("FMP %s (%s) 12-1m baseline failed: %s — using 0.0", ticker, label, exc)
+        return 0.0
+
+
+def _fetch_eu_return() -> float:
+    """iShares MSCI Eurozone ETF (EZU) 12-1 month return.
+
+    EZU tracks the MSCI EMU Index (Eurozone large/mid cap).
+    Used as the benchmark for European momentum signals.
+    Fallback: 0.0 (neutral — no bias to local or US market).
+    """
+    return _fetch_regional_return("EZU", "MSCI Eurozone")
+
+
+def _fetch_asia_return() -> float:
+    """iShares MSCI All Country Asia ex Japan ETF (AAXJ) 12-1 month return.
+
+    AAXJ covers large/mid cap across China, Korea, Taiwan, India, etc.
+    Used as the benchmark for Asia ex-Japan momentum signals.
+    Fallback: 0.0 (neutral).
+    """
+    return _fetch_regional_return("AAXJ", "MSCI Asia ex-Japan")
+
+
+def _compute_spy_regime(spy_return_12_1m: float, spy_return_63d: Optional[float]) -> str:
+    """Classify current SPY momentum regime.
+
+    PATCH 10: Provides early warning for bear markets that develop without
+    triggering VIX >= 30 (e.g. 2022 rate shock: VIX ~37 peak, SPY -19%).
+    Hull (2015): regime shifts can occur while VIX is still moderate.
+
+    Labels:
+        BEAR_CRASH    : 63d return < -20%  (rapid collapse)
+        BEAR_MOMENTUM : 63d return < -10%  (persistent selling)
+        BEAR_TREND    : 12-1m return < -15% (long-term downtrend)
+        BULL_STRONG   : 12-1m return > +30% (strong bull — watch for reversal)
+        NORMAL        : everything else
+
+    Args:
+        spy_return_12_1m: SPY 12-1 month return (skip-month adjusted)
+        spy_return_63d:   SPY 63-calendar-day return (None if unavailable)
+
+    Returns:
+        Regime label string.
+    """
+    if spy_return_63d is not None:
+        if spy_return_63d < -0.20:
+            return "BEAR_CRASH"
+        if spy_return_63d < -0.10:
+            return "BEAR_MOMENTUM"
+    if spy_return_12_1m < -0.15:
+        return "BEAR_TREND"
+    if spy_return_12_1m > 0.30:
+        return "BULL_STRONG"
+    return "NORMAL"
+
+
+def _fetch_spy_full_regime() -> Tuple[float, Optional[float], str]:
+    """Fetch SPY 12-1m return, 63d return, and momentum regime label.
+
+    PATCH 10: Extends _fetch_spy_return() to also compute the 63-day return
+    for momentum regime classification.
+
+    Returns:
+        (spy_return_12_1m, spy_return_63d, regime_label)
+        spy_return_63d is None if < 63 bars available.
+    """
+    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays  # noqa: PLC0415
+    try:
+        rows = _FC().get_historical_prices("SPY", limit=310)
+        closes, _, _ = fmp_prices_to_arrays(rows)
+        if len(closes) < 22:
+            return 0.0, None, "NORMAL"
+
+        # 12-1m return (Jegadeesh-Titman skip-month momentum)
+        if len(closes) >= 252:
+            idx_far  = max(0, len(closes) - 252)
+            idx_near = max(1, len(closes) - 21)
+            ret_12_1m = float((closes[idx_near] - closes[idx_far]) / closes[idx_far])
+        else:
+            ret_12_1m = 0.0
+
+        # 63-day return (regime detection)
+        if len(closes) >= 63:
+            idx_63 = max(0, len(closes) - 63)
+            ret_63d: Optional[float] = float(
+                (closes[-1] - closes[idx_63]) / closes[idx_63]
+            ) if closes[idx_63] != 0 else None
+        else:
+            ret_63d = None
+
+        regime = _compute_spy_regime(ret_12_1m, ret_63d)
+        log.info(
+            "SPY regime: 12-1m=%.4f (%.1f%%) 63d=%s regime=%s",
+            ret_12_1m, ret_12_1m * 100,
+            f"{ret_63d:.4f}" if ret_63d is not None else "N/A",
+            regime,
+        )
+        return ret_12_1m, ret_63d, regime
+
+    except Exception as exc:
+        log.warning("_fetch_spy_full_regime failed: %s — defaulting to NORMAL", exc)
+        return 0.0, None, "NORMAL"
 
 
 def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
@@ -722,12 +865,22 @@ def score_news_sentiment_combined(
             base_source = "fmp"
 
     # PEAD boost — FMP /stable/earnings-surprises (Bernard & Thomas 1989)
+    # PATCH 04: Apply exponential decay with half-life = 20 days.
+    # Bernard & Thomas (1989): drift is ~100% of peak at day 1, ~50% at day 20,
+    # ~25% at day 40, and ~12% at day 60. A flat 90-day window overstates
+    # the boost for old surprises. Decay formula: exp(-days * ln(2) / 20).
     surprise_pct, days_since = client.get_earnings_surprise(ticker)
 
     if surprise_pct is not None and days_since <= 90 and base_source != "none":
-        # Dampen to ±20pp max so an extreme beat can't dominate the sentiment score
-        boost = max(-0.20, min(0.20, surprise_pct * 0.5))
+        _PEAD_HALF_LIFE_DAYS = 20.0  # Bernard & Thomas (1989), JAE
+        pead_decay = math.exp(-days_since * math.log(2) / _PEAD_HALF_LIFE_DAYS)
+        # Dampen to ±20pp max, then apply decay so older surprises contribute less
+        boost = max(-0.20, min(0.20, surprise_pct * 0.5 * pead_decay))
         final_score = max(0.0, min(1.0, headline_score + boost))
+        log.debug(
+            "PEAD boost %s: surprise=%.3f days=%d decay=%.3f boost=%.4f",
+            ticker, surprise_pct, days_since, pead_decay, boost,
+        )
         return round(final_score, 4), "fmp+eps", round(surprise_pct, 6), days_since
 
     return headline_score, base_source, surprise_pct, days_since
@@ -1096,13 +1249,26 @@ def fetch_edgar_data(
             "INSIDER %s: %d P-txs $%.0f ceo_buy=%s ceo_usd=%.0f",
             ticker, len(p_transactions), total_purchases_usd, ceo_buy, ceo_purchase_usd,
         )
-        if form4_filings:
-            most_recent_date_str = form4_filings[0]["date"]
+        # PATCH 01: Use transaction date (not filing date) for recency.
+        # SEC Form 4 filing deadline is 2 business days after the transaction,
+        # so filing_date can overstate signal freshness by 0–2 days.
+        # _parse_form4_xml populates tx["date"] from <transactionDate/value>.
+        # Fall back to filing date only when transaction dates are unavailable.
+        tx_dates = [tx.get("date", "") for tx in p_transactions if tx.get("date")]
+        if tx_dates:
+            most_recent_date_str = max(tx_dates)  # most recent TRANSACTION date
+            log.debug("INSIDER %s: using transaction date %s for recency", ticker, most_recent_date_str)
+        elif form4_filings:
+            most_recent_date_str = form4_filings[0]["date"]  # fallback: filing date
+            log.debug("INSIDER %s: no tx dates found, using filing date %s", ticker, most_recent_date_str)
+        else:
+            most_recent_date_str = ""
+        if most_recent_date_str:
             try:
                 from datetime import date as _date
                 delta = (
                     datetime.now(timezone.utc).date()
-                    - _date.fromisoformat(most_recent_date_str)
+                    - _date.fromisoformat(most_recent_date_str[:10])
                 ).days
                 days_since_most_recent = max(0, delta)
             except Exception:
@@ -1195,8 +1361,31 @@ def _score_ticker_international(
         volume_spike = float(rf.get("volume_spike", 0.0) or 0.0)
         volume_attention_score = score_volume_attention(volume_spike)
 
+        # ── PATCH 07: quality_piotroski via FMP ratios-ttm (PASS for EU/Asia) ────
+        # Piotroski (2000): F-Score is an accounting-identity signal — universally
+        # applicable regardless of exchange. FMP stable/ratios-ttm confirmed PASS
+        # for SAP.DE and 7203.T in Phase-0 smoke test (2026-05-30).
+        # Novy-Marx (2013): gross profitability is a cross-regime premium.
+        quality_piotroski_score = 0.0
+        price_target_upside_score = 0.0
+        try:
+            from regime_trader.services.fmp_client import FMPClient as _FC_intl  # noqa: PLC0415
+            _intl_client = _FC_intl()
+            if _intl_client._api_key:
+                quality_piotroski_score = _intl_client.get_quality_score(entry.ticker)
+                pt_upside = _intl_client.get_upside_to_target(entry.ticker)
+                price_target_upside_score = pt_upside if pt_upside is not None else 0.0
+                log.debug(
+                    "PATCH 07 %s (%s): quality=%.4f pt_upside=%.4f",
+                    entry.ticker, market_str, quality_piotroski_score, price_target_upside_score,
+                )
+        except Exception as exc:
+            log.debug("PATCH 07 quality/pt_upside fetch %s: %s", entry.ticker, exc)
+            quality_piotroski_score = 0.0
+            price_target_upside_score = 0.0
+
         # ── structurally absent factors → None ───────────────────────────────
-        # congress, insider, news: no data source for non-US markets as of Fix #5.
+        # congress, insider, news: no data source for non-US markets.
         # None signals "weight excluded" in renormalize_weights_for_market.
         return {
             "ticker":                    entry.ticker,
@@ -1205,26 +1394,26 @@ def _score_ticker_international(
             "cap_tier":                  entry.cap_tier,
             "market":                    market_str,
             "source_reliability":        entry.source_reliability,
-            # Available factor scores
+            # Available factor scores (PATCH 07: added quality + pt_upside)
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
+            "quality_piotroski_score":   quality_piotroski_score,   # FMP ratios-ttm ✅
+            "price_target_upside_score": price_target_upside_score, # partial coverage
             # Structurally absent — None (not 0.0)
             "insider_conviction_score":  None,
             "insider_breadth_score":     None,
             "congress_score":            None,
             "news_sentiment_score":      None,
             "news_buzz_score":           None,
-            "price_target_upside_score": None,
-            "quality_piotroski_score":   None,
+            "analyst_consensus_score":   None,
+            "analyst_revision_score":    None,
+            "transcript_tone_score":     None,
             # Raw inputs (diagnostic)
             "return_12_1m":              return_12_1m,
             "volume_spike":              volume_spike,
             "news_sentiment_source":     "none",
             "news_buzz_source":          "none",
-            # Validator-required fields: present but structurally zero for non-US
-            # validate_amounts() checks market_cap > 0 and insider_usd is finite.
-            # Use 1.0 as market_cap sentinel (avoids log-scale math errors) and
-            # 0.0 for insider_usd (valid "no purchases" value per validator spec).
+            # Validator-required fields
             "market_cap":                1.0,
             "insider_usd":               0.0,
             # final_score computed downstream after cross-sectional neutralization
@@ -1288,10 +1477,25 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     log.info("Fetching congress trading data…")
     congress_data = fetch_congress_buys()
 
-    # ── SPY baseline — fetched once so all threads share same benchmark ───────
-    log.info("Fetching SPY 12-1 month return (Jegadeesh-Titman baseline)…")
-    spy_return_baseline = _fetch_spy_return()
-    log.info("SPY 12-1m return: %.4f (%.1f%%)", spy_return_baseline, spy_return_baseline * 100)
+    # ── SPY baseline + regime — fetched once, shared across all worker threads ─
+    # PATCH 10: Extended to include 63-day return for momentum regime classification.
+    # Hull (2015): regime shifts can occur while VIX is moderate — the 63d return
+    # provides early detection of bear markets like 2022 rate shock (VIX <30, SPY -19%).
+    log.info("Fetching SPY 12-1 month return + momentum regime (Jegadeesh-Titman + PATCH 10)…")
+    spy_return_baseline, _spy_return_63d, _spy_momentum_regime = _fetch_spy_full_regime()
+    log.info(
+        "SPY: 12-1m=%.4f (%.1f%%)  63d=%s  regime=%s",
+        spy_return_baseline, spy_return_baseline * 100,
+        f"{_spy_return_63d:.4f} ({_spy_return_63d*100:.1f}%)" if _spy_return_63d is not None else "N/A",
+        _spy_momentum_regime,
+    )
+    if _spy_momentum_regime in ("BEAR_CRASH", "BEAR_MOMENTUM"):
+        log.warning(
+            "PATCH 10 MOMENTUM REGIME ALERT: %s — "
+            "VIX may not yet be >= 30 but price action signals a bear regime. "
+            "Consider manual risk reduction.",
+            _spy_momentum_regime,
+        )
 
     # ── FMP insider — primary source (Form 4, cached 12h, limit=500) ─────────────
     # get_insider_purchases() returns (total_usd, days) per ticker.
@@ -1528,6 +1732,77 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "volume_spike":            float(price_data["volume_spike"]),
                 "_edgar_ok":               edgar_ok,
                 "_scoring_error":          False,
+                # PATCH 09: Correlated signal flag (Grinold & Kahn 2000).
+                # Both insider conviction AND congress firing on the same ticker
+                # creates a double-counting risk — they share informational overlap
+                # (both reflect informed buying of the same security at the same time).
+                # This flag is diagnostic only — it does NOT change final_score.
+                # The Discord embed and portfolio advisor use this flag to warn
+                # the human reviewer about potential score inflation.
+                "_correlated_signal_flag": (
+                    conviction_score > 0.50 and c_score > 0.50
+                ),
+                "_correlated_signal_discount_advisory": (
+                    # Advisory: suggested 5pp discount on final_score when both fire.
+                    # Human decision — not applied automatically.
+                    0.05 if (conviction_score > 0.50 and c_score > 0.50) else 0.0
+                ),
+            }
+        except FMPEndpointError as fmp_exc:
+            # PATCH 08: FMPEndpointError is a structural failure (HTTP 4xx),
+            # NOT a data-absence event. Log the broken endpoint and track it
+            # so fmp_health.json captures non-insider structural failures too.
+            log.error(
+                "FMP STRUCTURAL FAILURE in _score_ticker %s: endpoint=%s status=%d. "
+                "Factor scores zeroed. This endpoint is broken — do NOT lower "
+                "circuit-breaker thresholds to compensate.",
+                ticker, fmp_exc.path, fmp_exc.status,
+            )
+            with _structural_failures_lock:
+                _structural_failures_in_scoring.add(fmp_exc.path)
+
+            return {
+                "ticker":                  ticker,
+                "sector":                  sector.get(ticker, "Unknown"),
+                "cap_tier":                cap_tier.get(ticker, "large"),
+                "market_cap":              mktcap,
+                "insider_conviction_score": 0.0,
+                "insider_breadth_score":    0.0,
+                "momentum_long_score":      0.0,
+                "volume_attention_score":   0.0,
+                "news_sentiment_score":     0.0,
+                "news_buzz_score":          0.0,
+                "analyst_consensus_score":  0.0,
+                "analyst_revision_score":   0.0,
+                "analyst_revision_n":       0,
+                "transcript_tone_score":    0.0,
+                "transcript_tone_source":   "none",
+                "recent_upgrade_downgrade": {},
+                "target_price":             None,
+                "current_price":            None,
+                "price_target_upside_score": 0.0,
+                "quality_piotroski_score":  0.0,
+                "congress_score":           0.0,
+                "edgar_score_legacy":       0.0,
+                "insider_score_legacy":     0.0,
+                "news_score_legacy":        0.0,
+                "momentum_score_legacy":    0.0,
+                "ceo_buy":                 ceo_buy,
+                "form4_count":             form4_count,
+                "form4_purchase_count":    0,
+                "quiver_evidence":         {},
+                "news_sentiment_source":   "none",
+                "news_buzz_source":        "none",
+                "analyst_consensus_source": "none",
+                "earnings_surprise_pct":   None,
+                "earnings_surprise_days":  0,
+                "insider_usd":             float(total_purchases_usd),
+                "return_12_1m":            None,
+                "momentum_spy_relative":   0.0,
+                "volume_spike":            1.0,
+                "_edgar_ok":               edgar_ok,
+                "_scoring_error":          True,
+                "_fmp_structural_failure": fmp_exc.path,  # PATCH 08: track broken endpoint
             }
         except Exception as exc:
             log.warning("Scoring failed for %s: %s", ticker, exc)
@@ -1620,15 +1895,44 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 e.cap_tier = m.get("cap_tier", "large")
                 e.raw_factors["company_name"] = m.get("company_name", "")
 
-            # Fix #5: unified scorer with same formulas as US, no source_reliability multiplier
+            # PATCH 06: Fetch regional benchmarks before EU/Asia scoring.
+            # Jegadeesh & Titman (1993): momentum is measured vs the local peer group.
+            # EZU = iShares MSCI Eurozone, AAXJ = iShares MSCI Asia ex-Japan.
+            log.info("Fetching regional momentum benchmarks for EU/Asia scoring…")
+            eu_return_baseline   = _fetch_eu_return()
+            asia_return_baseline = _fetch_asia_return()
             log.info(
-                "Fix #5: _score_ticker_international routes EU/Asia entries. "
-                "momentum_long + volume_attention only (yfinance). "
-                "insider/news/congress=None (structurally absent — FMP 403 for non-US)."
+                "Regional baselines: EU(EZU)=%.4f (%.1f%%), Asia(AAXJ)=%.4f (%.1f%%)",
+                eu_return_baseline, eu_return_baseline * 100,
+                asia_return_baseline, asia_return_baseline * 100,
             )
+            log.info(
+                "Orchestrator raw entries: %d EU, %d Asia (benchmarks: EU=EZU %.4f, Asia=AAXJ %.4f)",
+                len(eu_raw), len(asia_raw),
+                eu_return_baseline if eu_raw else 0.0,
+                asia_return_baseline if asia_raw else 0.0,
+            )
+
+            # Fix #5 + PATCH 06: unified scorer with regional benchmark injection
+            log.info(
+                "Fix #5 + PATCH 06: _score_ticker_international uses regional benchmarks. "
+                "EU entries benchmark vs EZU, Asia entries vs AAXJ. "
+                "insider/news/congress=None (structurally absent for non-US)."
+            )
+
+            def _regional_baseline(entry) -> float:
+                """Return the correct 12-1m benchmark for this market."""
+                if entry.market.value == "EUROPE":
+                    return eu_return_baseline
+                if entry.market.value == "ASIA":
+                    return asia_return_baseline
+                return spy_return_baseline  # fallback — should not occur
+
             with ThreadPoolExecutor(max_workers=4) as eu_pool:
                 eu_futures = {
-                    eu_pool.submit(_score_ticker_international, e, spy_return_baseline): e.ticker
+                    eu_pool.submit(
+                        _score_ticker_international, e, _regional_baseline(e)
+                    ): e.ticker
                     for e in raw_entries
                     if e.market.value in ("EUROPE", "ASIA")
                 }
@@ -1644,6 +1948,19 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             log.info("Scored: %d EU entries, %d Asia entries added to results", eu_scored, asia_scored)
         else:
             log.warning("No EU/Asia fetchers active — both sections will be empty in Discord")
+
+    # PATCH 08: Report any structural FMP failures found during _score_ticker().
+    if _structural_failures_in_scoring:
+        log.error(
+            "PATCH 08: %d structural FMP endpoint failure(s) detected in scoring: %s. "
+            "These endpoints returned HTTP 4xx — do NOT lower circuit-breaker thresholds.",
+            len(_structural_failures_in_scoring),
+            ", ".join(sorted(_structural_failures_in_scoring)),
+        )
+        # Inject into fmp_client health report so fmp_health.json captures it
+        for path in _structural_failures_in_scoring:
+            _fmp_client.endpoint_failures[path] += 1
+        _structural_failures_in_scoring.clear()
 
     # edgar_count = tickers where EDGAR was reachable (even if 0 filings returned).
     edgar_count   = sum(1 for r in results if r.get("_edgar_ok", False))
@@ -1874,7 +2191,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     )
 
     status = {
-        "run_id":      os.getenv("GITHUB_RUN_ID", "local"),  # Fix #5: surfaced in Discord footer
+        "run_id":              os.getenv("GITHUB_RUN_ID", "local"),
+        "spy_momentum_regime": _spy_momentum_regime,  # PATCH 10: NORMAL/BEAR_MOMENTUM/etc.
+        "spy_return_63d":      round(_spy_return_63d, 6) if _spy_return_63d is not None else None,
         "_edgar_meta": {
             "last_run":             pipeline_run_ts,
             "run_duration_seconds": duration,

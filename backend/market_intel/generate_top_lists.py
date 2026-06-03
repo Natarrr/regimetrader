@@ -1,13 +1,9 @@
 """backend/market_intel/generate_top_lists.py
-Seven-factor weighted scoring → top_lists.json + top5.csv
+Twelve-factor weighted scoring → top_lists.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
-and applies Markowitz (1990 Nobel) portfolio ranking. Weights mirror
-run_pipeline.WEIGHTS exactly (see WEIGHTS below):
-
-  final_score = 0.30×insider_conviction + 0.15×insider_breadth + 0.22×congress
-              + 0.10×news_sentiment + 0.05×news_buzz
-              + 0.15×momentum_long + 0.03×volume_attention
+and applies Markowitz (1990 Nobel) portfolio ranking. WEIGHTS are imported
+directly from run_pipeline.py (single source of truth — PATCH 02).
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -49,27 +45,58 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 log = logging.getLogger("generate_top_lists")
 
 
-# Fix #2+#3: align with the canonical 7-factor top-lists scoring schema.
-# These weights reflect the core ranking signal used by the Discord/UI advisor.
-WEIGHTS: Dict[str, float] = {
-    "insider_conviction": 0.30,
-    "insider_breadth":    0.15,
-    "congress":           0.22,
-    "news_sentiment":     0.10,
-    "news_buzz":          0.05,
-    "momentum_long":      0.15,
-    "volume_attention":   0.03,
-}
+# PATCH 02: Import canonical WEIGHTS from run_pipeline to ensure a single
+# source of truth. Both intel_source_status.json and top_lists.json will
+# now use identical factor weights.
+# Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
+try:
+    import importlib.util as _ilu
+    import pathlib as _pl
+    _rp_path = _pl.Path(__file__).resolve().parent.parent.parent / "scripts" / "run_pipeline.py"
+    _rp_spec = _ilu.spec_from_file_location("_run_pipeline_weights", _rp_path)
+    _rp_mod = _ilu.module_from_spec(_rp_spec)
+    _rp_spec.loader.exec_module(_rp_mod)
+    WEIGHTS: Dict[str, float] = dict(_rp_mod.WEIGHTS)
+    del _rp_path, _rp_spec, _rp_mod, _ilu, _pl
+except Exception as _e:
+    # Fallback: hardcoded 12-factor weights matching run_pipeline.py
+    # UPDATE THIS if run_pipeline.WEIGHTS changes.
+    log.warning("Could not import WEIGHTS from run_pipeline.py: %s — using hardcoded fallback", _e)
+    WEIGHTS: Dict[str, float] = {
+        "insider_conviction":  0.18,
+        "insider_breadth":     0.12,
+        "congress":            0.08,
+        "news_sentiment":      0.10,
+        "news_buzz":           0.03,
+        "momentum_long":       0.22,
+        "volume_attention":    0.03,
+        "analyst_consensus":   0.04,
+        "analyst_revision":    0.06,
+        "price_target_upside": 0.04,
+        "quality_piotroski":   0.06,
+        "transcript_tone":     0.04,
+    }
+
+assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
+    f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
+    "Check run_pipeline.WEIGHTS."
+)
 
 # Maps factor key → field name in intel_source_status.json results
+# PATCH 02: Extended to all 12 factors matching run_pipeline.WEIGHTS.
 FACTOR_FIELDS: Dict[str, str] = {
-    "insider_conviction": "insider_conviction_score",
-    "insider_breadth":    "insider_breadth_score",
-    "congress":           "congress_score",
-    "news_sentiment":     "news_sentiment_score",
-    "news_buzz":          "news_buzz_score",
-    "momentum_long":      "momentum_long_score",
-    "volume_attention":   "volume_attention_score",
+    "insider_conviction":  "insider_conviction_score",
+    "insider_breadth":     "insider_breadth_score",
+    "congress":            "congress_score",
+    "news_sentiment":      "news_sentiment_score",
+    "news_buzz":           "news_buzz_score",
+    "momentum_long":       "momentum_long_score",
+    "volume_attention":    "volume_attention_score",
+    "analyst_consensus":   "analyst_consensus_score",
+    "analyst_revision":    "analyst_revision_score",
+    "price_target_upside": "price_target_upside_score",
+    "quality_piotroski":   "quality_piotroski_score",
+    "transcript_tone":     "transcript_tone_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
@@ -762,6 +789,20 @@ def generate(
     )[:5]
 
     kill_switch = current_vix is not None and current_vix >= 30
+    if kill_switch:
+        log.warning(
+            "KILL SWITCH ACTIVE — VIX=%.1f >= 30.0. "
+            "Score multiplier: %.2f. All final_scores dampened. "
+            "BUY signals suppressed in Discord output. "
+            "SELL signals remain active (asymmetric protection).",
+            current_vix,
+            _apply_vix_overlay(1.0, current_vix),
+        )
+    else:
+        log.info(
+            "Kill switch INACTIVE — VIX=%.1f < 30.0. Normal scoring active.",
+            current_vix if current_vix is not None else 0.0,
+        )
 
     _log_promoted(top_buys, shadow_top_buys, log_dir, run_id)
 
@@ -802,6 +843,8 @@ def generate(
             "final_score", "badge", "ceo_buy", "form4_count",
             "insider_conviction", "insider_breadth", "congress",
             "news_sentiment", "news_buzz", "momentum_long", "volume_attention",
+            "analyst_consensus", "analyst_revision", "price_target_upside",
+            "quality_piotroski", "transcript_tone",
         ])
         for rank, entry in enumerate(top_buys, 1):
             f = entry["factors"]
@@ -822,6 +865,11 @@ def generate(
                 f.get("news_buzz", 0.0),
                 f.get("momentum_long", 0.0),
                 f.get("volume_attention", 0.0),
+                f.get("analyst_consensus", 0.0),
+                f.get("analyst_revision", 0.0),
+                f.get("price_target_upside", 0.0),
+                f.get("quality_piotroski", 0.0),
+                f.get("transcript_tone", 0.0),
             ])
     log.info("Wrote %s", out_csv)
 
