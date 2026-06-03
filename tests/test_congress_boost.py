@@ -146,6 +146,11 @@ class TestShadowScore:
                 "news_buzz_score":           score,
                 "momentum_long_score":       score,
                 "volume_attention_score":    score,
+                "analyst_consensus_score":   score,
+                "analyst_revision_score":    score,
+                "price_target_upside_score": score,
+                "quality_piotroski_score":   score,
+                "transcript_tone_score":     score,
                 "ceo_buy":                   False,
                 "form4_count":               5,
                 "quiver_evidence": {

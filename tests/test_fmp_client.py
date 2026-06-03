@@ -78,6 +78,10 @@ class TestFMPClientCongress:
     in the Phase-0 smoke-test (2026-05-30). Congress uses S3 Stock Watcher feeds.
     All calls return {} regardless of session state."""
 
+    def setup_method(self):
+        # Reset the class-level probe flag so each test starts clean.
+        FMPClient._fmp_congress_probe_done = True  # skip probe — no real network in tests
+
     def test_returns_empty_dict_stub(self, client):
         """Stub always returns {} — congress routes are dead on this plan."""
         result = client.get_congress_trades("NVDA", lookback_days=180)

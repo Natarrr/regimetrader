@@ -49,6 +49,12 @@ def _raw_row(
         "news_buzz_score":           round(news * 0.85, 4),
         "momentum_long_score":       momentum,
         "volume_attention_score":    round(momentum * 0.90, 4),
+        # 12-factor model additions (sparse but non-zero so schema gate passes)
+        "analyst_consensus_score":   round(news * 0.50, 4),
+        "analyst_revision_score":    round(momentum * 0.40, 4),
+        "price_target_upside_score": round(momentum * 0.30, 4),
+        "quality_piotroski_score":   round(edgar * 0.60, 4),
+        "transcript_tone_score":     round(news * 0.20, 4),
         "ceo_buy":                   False,
         "form4_count":               3,
         "quiver_evidence":           {},
@@ -211,12 +217,21 @@ class TestGenerateTopLists:
         assert star["final_score"] >= star["factors"].get("insider_conviction", 0), \
             "final_score below individual factor — weighting broken"
 
-    def test_factors_dict_has_seven_keys(self, tmp_path):
+    def test_factors_dict_has_expected_keys(self, tmp_path):
+        # FACTOR_FIELDS now covers all 12 factors (expanded from 7 in the 12-factor model).
         rows = [_raw_row(f"T{i}") for i in range(5)]
         out = self._generate(rows, tmp_path)
+        expected_keys = {
+            "insider_conviction", "insider_breadth", "congress",
+            "news_sentiment", "news_buzz", "momentum_long", "volume_attention",
+            "analyst_consensus", "analyst_revision", "price_target_upside",
+            "quality_piotroski", "transcript_tone",
+        }
         for entry in out["top_buys"]:
             factors = entry["factors"]
-            assert len(factors) == 7, f"expected 7 factors, got {len(factors)}: {factors}"
+            assert set(factors.keys()) == expected_keys, (
+                f"unexpected factor keys: {set(factors.keys()) ^ expected_keys}"
+            )
 
     def test_all_zero_scores_raises_integrity_error(self, tmp_path):
         # When every ticker has all-zero factors the circuit breaker must fire —

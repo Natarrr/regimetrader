@@ -127,7 +127,7 @@ def score_price_target_upside(
 
 
 def score_quality_piotroski(ratios: dict) -> float:
-    """Simplified 9-point Piotroski F-score, in [0, 1].
+    """Simplified 8-point Piotroski F-score, in [0, 1].
 
     Captures fundamental quality as a value-trap gate: high-conviction insider
     buying in a deteriorating business is a false signal. Piotroski (2000)
@@ -137,27 +137,21 @@ def score_quality_piotroski(ratios: dict) -> float:
     Ilmanen (2011) documents quality as a cross-regime premium independent of
     momentum — which makes it a natural complement to score_momentum_long.
 
-    9 binary points (each worth 1/9 of the final score):
-        Profitability (4):
-          1. returnOnAssetsTTM > 0         — profitable at all
-          2. returnOnAssetsTTM > 0.05      — strong ROA (> 5%)
-          3. operatingCashFlowPerShareTTM > 0  — positive operating cash flow
-             (or operatingProfitMarginTTM > 0 as proxy when CFO/share unavailable)
-          4. CFO-to-assets proxy > ROA     — accruals quality signal
-             (grossProfitMarginTTM > returnOnAssetsTTM * 1.5 as proxy)
-        Leverage/Liquidity (3):
-          5. debtEquityRatioTTM < 1.0      — manageable leverage
-          6. debtEquityRatioTTM < 0.5      — low leverage (bonus)
-          7. currentRatioTTM > 1.5         — liquid balance sheet
-        Efficiency (2):
-          8. grossProfitMarginTTM > 0.30   — 30%+ gross margin = pricing power
-          9. netProfitMarginTTM > 0.05     — profitable after all costs
+    8 binary points (each worth 1/8 of the final score):
+        1. returnOnAssetsTTM > 0         — profitable at all
+        2. returnOnAssetsTTM > 0.05      — strong ROA (>5%)
+        3. operatingProfitMarginTTM > 0  — positive operating income (OCF proxy)
+        4. debtEquityRatioTTM < 1.0      — manageable leverage
+        5. debtEquityRatioTTM < 0.5      — low leverage (bonus)
+        6. currentRatioTTM > 1.5         — liquid balance sheet
+        7. grossProfitMarginTTM > 0.30   — 30%+ gross margin = pricing power
+        8. netProfitMarginTTM > 0.05     — profitable after all costs
 
-    score = round(points_earned / 9.0, 4)
+    score = round(points_earned / 8.0, 4)
 
     Partial-data handling: a missing or None field contributes 0 for its
-    point(s) but does not collapse the entire score. A company with 7 of 9
-    fields and 6 passing scores 6/9 = 0.667.
+    point(s) but does not collapse the entire score. A company with 6 of 8
+    fields and 5 passing scores 5/8 = 0.625.
 
     Negative D/E (negative book equity) fails both leverage points — it
     signals structural distress, not low debt.
@@ -187,53 +181,33 @@ def score_quality_piotroski(ratios: dict) -> float:
         except (TypeError, ValueError):
             return None
 
-    roa           = _get("returnOnAssetsTTM")
-    cfo_per_share = _get("operatingCashFlowPerShareTTM")
-    opm           = _get("operatingProfitMarginTTM")
-    de            = _get("debtEquityRatioTTM")
-    cr            = _get("currentRatioTTM")
-    gpm           = _get("grossProfitMarginTTM")
-    npm           = _get("netProfitMarginTTM")
+    roa  = _get("returnOnAssetsTTM")
+    opm  = _get("operatingProfitMarginTTM")
+    de   = _get("debtEquityRatioTTM")
+    cr   = _get("currentRatioTTM")
+    gpm  = _get("grossProfitMarginTTM")
+    npm  = _get("netProfitMarginTTM")
 
     # Guard: all fields missing → dead signal
-    if all(v is None for v in (roa, cfo_per_share, opm, de, cr, gpm, npm)):
+    if all(v is None for v in (roa, opm, de, cr, gpm, npm)):
         return 0.0
 
     points = 0
-
-    # Profitability (4 points)
     if roa is not None and roa > 0:
         points += 1
     if roa is not None and roa > 0.05:
         points += 1
-
-    # Point 3: positive operating cash flow
-    # Use CFO/share if available; fall back to operating margin proxy
-    if cfo_per_share is not None:
-        if cfo_per_share > 0:
-            points += 1
-    elif opm is not None and opm > 0:
+    if opm is not None and opm > 0:
         points += 1
-
-    # Point 4: accruals quality proxy (Piotroski 2000: CFO > ROA)
-    # grossProfitMarginTTM > returnOnAssetsTTM * 1.5 approximates cash earnings
-    # exceeding accrual earnings when CFO/assets is unavailable from ratios-ttm.
-    if gpm is not None and roa is not None and roa > 0:
-        if gpm > roa * 1.5:
-            points += 1
-
-    # Leverage/Liquidity (3 points)
     if de is not None and 0 <= de < 1.0:  # negative D/E fails both leverage points
         points += 1
     if de is not None and 0 <= de < 0.5:  # negative D/E fails: 0 <= de is False
         points += 1
     if cr is not None and cr > 1.5:
         points += 1
-
-    # Efficiency (2 points)
     if gpm is not None and gpm > 0.30:
         points += 1
     if npm is not None and npm > 0.05:
         points += 1
 
-    return round(points / 9.0, 4)
+    return round(points / 8.0, 4)

@@ -59,7 +59,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "RKLB",
@@ -84,7 +89,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "INTC",
@@ -109,7 +119,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SNDK",
@@ -134,7 +149,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "CRWV",
@@ -159,7 +179,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "ARM",
@@ -184,7 +209,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "IREN",
@@ -209,7 +239,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "VALE",
@@ -234,7 +269,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "QCOM",
@@ -259,7 +299,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "FIG",
@@ -284,7 +329,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NOW",
@@ -309,7 +359,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SOXS",
@@ -334,7 +389,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SOXX",
@@ -359,7 +419,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "YOU",
@@ -384,7 +449,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SGOV",
@@ -409,7 +479,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "TQQQ",
@@ -434,7 +509,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "TSLA",
@@ -459,7 +539,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NBIS",
@@ -484,7 +569,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "IT",
@@ -509,7 +599,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "UNH",
@@ -534,7 +629,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NET",
@@ -559,7 +659,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "BB",
@@ -584,7 +689,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SOUN",
@@ -609,7 +719,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "TSM",
@@ -634,7 +749,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SMCI",
@@ -659,7 +779,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "RXT",
@@ -684,7 +809,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "VOO",
@@ -709,7 +839,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SOXL",
@@ -734,7 +869,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "GRPN",
@@ -759,7 +899,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "UAE",
@@ -784,7 +929,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "DTE",
@@ -809,7 +959,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "RDDT",
@@ -834,7 +989,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "AM",
@@ -859,7 +1019,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "UFO",
@@ -884,7 +1049,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "PFE",
@@ -909,7 +1079,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "ASTS",
@@ -934,7 +1109,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "HOOD",
@@ -959,7 +1139,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SPY",
@@ -984,7 +1169,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "INOD",
@@ -1009,7 +1199,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "QQQ",
@@ -1034,7 +1229,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "PLTR",
@@ -1059,7 +1259,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "USO",
@@ -1084,7 +1289,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "POET",
@@ -1109,7 +1319,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NVDA",
@@ -1134,7 +1349,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "AAPL",
@@ -1159,7 +1379,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "TTD",
@@ -1184,7 +1409,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "META",
@@ -1209,7 +1439,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "PYPL",
@@ -1234,7 +1469,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "JPM",
@@ -1259,7 +1499,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "MSFT",
@@ -1284,7 +1529,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "GDX",
@@ -1309,7 +1559,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "AMZN",
@@ -1334,7 +1589,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XLK",
@@ -1359,7 +1619,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "AMD",
@@ -1384,7 +1649,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "GLD",
@@ -1409,7 +1679,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "JNJ",
@@ -1434,7 +1709,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XLP",
@@ -1459,7 +1739,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "V",
@@ -1484,7 +1769,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "ABBV",
@@ -1509,7 +1799,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "CRM",
@@ -1534,7 +1829,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XLV",
@@ -1559,7 +1859,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "TLT",
@@ -1584,7 +1889,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SQ",
@@ -1609,7 +1919,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NFLX",
@@ -1634,7 +1949,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XLU",
@@ -1659,7 +1979,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XOM",
@@ -1684,7 +2009,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "GOOGL",
@@ -1709,7 +2039,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "LMT",
@@ -1734,7 +2069,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "COIN",
@@ -1759,7 +2099,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "GOOG",
@@ -1784,7 +2129,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NEM",
@@ -1809,7 +2159,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XLE",
@@ -1834,7 +2189,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "CVX",
@@ -1859,7 +2219,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "XLF",
@@ -1884,7 +2249,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "ORCL",
@@ -1909,7 +2279,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "BAC",
@@ -1934,7 +2309,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "AVGO",
@@ -1959,7 +2339,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "NOC",
@@ -1984,7 +2369,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "FCX",
@@ -2009,7 +2399,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "GS",
@@ -2034,7 +2429,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "SNOW",
@@ -2059,7 +2459,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "RTX",
@@ -2084,7 +2489,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     },
     {
       "ticker": "MA",
@@ -2109,7 +2519,12 @@
       "_scoring_error": false,
       "cap_tier": "large",
       "news_source": "none",
-      "insider_source": "none"
+      "insider_source": "none",
+      "analyst_consensus_score": 0.5,
+      "analyst_revision_score": 0.5,
+      "price_target_upside_score": 0.5,
+      "quality_piotroski_score": 0.5,
+      "transcript_tone_score": 0.5
     }
   ],
   "computed_at": "2026-05-16T15:38:30.064462+00:00"

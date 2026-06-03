@@ -137,7 +137,10 @@ class TestBuildAdviceWeightsAndKeys:
         }
 
     def test_final_score_uses_correct_weights(self):
-        """insider_conviction_score=1.0, all others=0 → final_score=0.30 (canonical weight)."""
+        """insider_conviction_score=1.0, all others 0 or absent.
+        The 5 new factor fields are absent (None) → excluded from weight denominator.
+        7 available factors sum to 0.76; effective weight = 0.15/0.76 ≈ 0.1974.
+        """
         from regime_trader.ui.portfolio_advisor_engine import build_advice
 
         status = self._make_status()
@@ -156,8 +159,14 @@ class TestBuildAdviceWeightsAndKeys:
 
         assert len(result) == 1
         adv = result[0]
-        # insider_conviction_score=1.0, all others=0 → final_score = 0.30 (canonical weight)
-        assert adv.final_score == pytest.approx(0.30, abs=1e-4)
+        # 5 new factor fields absent → excluded from denominator.
+        # 7 available factors sum to 0.76; effective weight = 0.15/0.76 ≈ 0.1974.
+        from scripts.run_pipeline import WEIGHTS
+        _7_FACTOR_KEYS = {"insider_conviction", "insider_breadth", "congress",
+                          "news_sentiment", "news_buzz", "momentum_long", "volume_attention"}
+        live_total = sum(WEIGHTS[k] for k in _7_FACTOR_KEYS)
+        expected = round(WEIGHTS["insider_conviction"] / live_total, 4)
+        assert adv.final_score == pytest.approx(expected, abs=1e-4)
 
     def test_factors_dict_has_7_canonical_keys(self):
         """factors dict must have exactly the 7 canonical short names from WEIGHTS."""

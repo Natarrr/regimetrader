@@ -16,20 +16,25 @@ from backend.market_intel.generate_top_lists import WEIGHTS, FACTOR_FIELDS
 
 
 def _us_row(overrides: dict | None = None) -> dict:
-    """A synthetic intel_source_status.json result row — all 7 factors present."""
+    """A synthetic intel_source_status.json result row — all 12 factors present."""
     row = {
-        # 7-factor *_score fields (as written by run_pipeline.py)
-        "insider_conviction_score": 0.60,
-        "insider_breadth_score":    0.45,
-        "congress_score":           0.30,
-        "news_sentiment_score":     0.55,
-        "news_buzz_score":          0.40,
-        "momentum_long_score":      0.70,
-        "volume_attention_score":   0.20,
-        "market":                   "USA",
-        "sector":                   "Information Technology",
-        "cap_tier":                 "large",
-        "ticker":                   "AAPL",
+        # 12-factor *_score fields (as written by run_pipeline.py)
+        "insider_conviction_score":  0.60,
+        "insider_breadth_score":     0.45,
+        "congress_score":            0.30,
+        "news_sentiment_score":      0.55,
+        "news_buzz_score":           0.40,
+        "momentum_long_score":       0.70,
+        "volume_attention_score":    0.20,
+        "analyst_consensus_score":   0.65,
+        "analyst_revision_score":    0.50,
+        "price_target_upside_score": 0.55,
+        "quality_piotroski_score":   0.75,
+        "transcript_tone_score":     0.60,
+        "market":                    "USA",
+        "sector":                    "Information Technology",
+        "cap_tier":                  "large",
+        "ticker":                    "AAPL",
     }
     if overrides:
         row.update(overrides)
@@ -51,7 +56,7 @@ def _expected_score(row: dict) -> float:
 
 
 def test_advisor_matches_generate_top_lists_all_factors():
-    """With all 7 factors present, _compute_final_score == canonical weighted sum."""
+    """With all 12 factors present, _compute_final_score == canonical weighted sum."""
     row = _us_row()
     advisor_score, factors = _compute_final_score(row)
     expected = _expected_score(row)
@@ -73,12 +78,12 @@ def test_advisor_weight_redistribution_for_missing_factor():
     """When a factor is absent (EU/Asia pattern), weight is redistributed pro-rata.
 
     A row with congress_score=None should still produce a non-zero score that
-    equals the sum of the remaining 6 factors with renormalized weights.
+    equals the sum of the remaining 11 factors with renormalized weights.
     """
     row = _us_row({"congress_score": None})
     advisor_score, factors = _compute_final_score(row)
 
-    # Recompute manually: redistribute congress weight (0.22) across the 6 live factors
+    # Recompute manually: redistribute congress weight across the 11 live factors
     live_weights = {k: v for k, v in WEIGHTS.items() if k != "congress"}
     live_total = sum(live_weights.values())
     eff = {k: w / live_total for k, w in live_weights.items()}

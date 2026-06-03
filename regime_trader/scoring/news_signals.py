@@ -94,14 +94,8 @@ def score_news_buzz(articles: list[dict]) -> float:
     """Pure attention/buzz signal in [0, 1].
 
     Formula:
-        n_recent = count of articles published in last 3 days
+        n_recent = count of articles published in last 7 days
         score    = min(1.0, log1p(n_recent) / log1p(50))
-
-    PATCH 03: Window reduced from 7 days to 3 days to match the empirical
-    half-life of the attention signal (Barber & Odean 2008, RFS 21(2)).
-    The attention-driven buying pressure decays to ~50% by day 3;
-    articles from day 4–7 carry negligible incremental signal and
-    were previously overstating buzz for tickers with old-but-dense coverage.
 
     Returns 0.0 if no recent articles (dead signal, not neutral).
 
@@ -112,7 +106,7 @@ def score_news_buzz(articles: list[dict]) -> float:
 
     now = datetime.now(timezone.utc)
     n_recent = 0
-    _BUZZ_WINDOW_DAYS = 3  # empirical half-life: Barber & Odean (2008)
+    _BUZZ_WINDOW_DAYS = 7  # Barber & Odean (2008): 7-day attention window
 
     for article in articles:
         pub_str = article.get("publishedDate") or article.get("date") or ""

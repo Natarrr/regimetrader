@@ -128,6 +128,10 @@ class FMPClient:
         cache_root: Directory for file-based TTL cache. Defaults to .cache/fmp/.
     """
 
+    # Class-level flag: congress route probe fires once per process lifetime.
+    # Prevents per-ticker spam; can be reset in tests via FMPClient._fmp_congress_probe_done = False.
+    _fmp_congress_probe_done: bool = False
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -293,10 +297,9 @@ class FMPClient:
         # These return HTTP 404 (not in current plan per Phase-0 smoke test).
         # We track the failure in endpoint_failures so fmp_health.json is
         # accurate — the S3 fallback below is the actual data source.
-        # Probe is gated on a short-lived "done" flag to avoid per-ticker
-        # API calls (we only need to confirm once that the route is dead).
-        _fmp_congress_probe_done = "_fmp_congress_probe_done"
-        if self._api_key and not self._cache_read("congress", _fmp_congress_probe_done):
+        # Class-level flag avoids per-ticker API calls (probe only needed once).
+        if self._api_key and not FMPClient._fmp_congress_probe_done:
+            FMPClient._fmp_congress_probe_done = True
             try:
                 self._get(
                     "senate-trading",
@@ -313,8 +316,6 @@ class FMPClient:
                     )
             except Exception as exc:
                 log.debug("FMP congress probe failed (non-4xx): %s", exc)
-            finally:
-                self._cache_write("congress", _fmp_congress_probe_done, True)
 
         for url, name_key in [(_SENATE_URL, "senator"), (_HOUSE_URL, "representative")]:
             try:

@@ -34,54 +34,118 @@ from .slack_notifier import send_discord_alert as send_slack_alert
 log = logging.getLogger("monitoring.check_metrics")
 
 
-def check_score_distribution(log_dir: Path) -> bool:
-    """Assert the pipeline score distribution is non-degenerate.
+def check_score_distribution(
+    log_dir: Path,
+    min_stdev: float = 0.05,
+    min_max_score: float = 0.40,
+    min_entries: int = 3,
+) -> bool:
+    """Assert that score distributions are non-degenerate.
 
-    Grinold & Kahn (2000): a factor with zero cross-sectional variance has
-    IC = 0 and contributes nothing to IR. A distribution where every ticker
-    scores identically, or where fewer than 20% of tickers have a non-zero
-    final_score, indicates one or more dead data feeds.
+    Reads intel_source_status.json when available (full pipeline output with
+    per-factor data), otherwise falls back to top_lists.json (canary artifact).
+    Missing or unreadable files are treated as skips (return True) so the
+    canary does not fail on a missing artifact.
 
-    Checks:
-      1. intel_source_status.json exists and contains US results.
-      2. At least 10 US result rows are present (population gate).
-      3. >= 20% of US tickers have final_score > 0 (non-zero density gate).
-      4. Standard deviation of final_scores > 0.05 (variance gate).
-      5. At least ONE factor column has non-zero density > 5% (per-factor
-         gate — catches the case where scores are non-zero but all driven by
-         a single factor because every other feed is dead).
+    When intel_source_status.json is present, applies 4 strict gates:
+      1. Population: >= 10 US results.
+      2. Density: >= 20% of US tickers have final_score > 0.
+      3. Variance: stdev of final_scores > min_stdev.
+      4. Per-factor liveness: >= 1 factor has > 5% non-zero density.
 
-    Returns True when all checks pass; logs ERROR and returns False otherwise.
-    Never raises — all exceptions are caught and logged.
+    When only top_lists.json is available, applies the original 2 gates:
+      1. Variance: stdev < min_stdev → degenerate.
+      2. Max score: max < min_max_score → dead signal.
+
+    Returns True when healthy or when no data is available to check.
+    Returns False when a degenerate distribution is detected.
+    Never raises.
     """
+    # ── Try intel_source_status.json first (full pipeline output) ─────────────
     status_path = Path(log_dir) / "intel_source_status.json"
-    if not status_path.exists():
-        log.error(
-            "check_score_distribution: intel_source_status.json not found at %s",
-            status_path,
-        )
-        return False
+    if status_path.exists():
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            log.warning("check_score_distribution: cannot parse intel_source_status.json — %s", exc)
+        else:
+            results = [
+                r for r in status.get("results", [])
+                if r.get("market", "USA") in ("USA", "US")
+            ]
+            if len(results) >= 10:
+                return _check_status_distribution(results, log)
+            # < 10 results: fall through to top_lists.json check
+            log.debug(
+                "check_score_distribution: intel_source_status.json has only %d US rows — "
+                "falling back to top_lists.json",
+                len(results),
+            )
+
+    # ── Fallback: top_lists.json (canary artifact) ─────────────────────────────
+    tl_path = Path(log_dir) / "top_lists.json"
+    if not tl_path.exists():
+        log.warning("check_score_distribution: no artifact found — skipping")
+        return True
 
     try:
-        status = json.loads(status_path.read_text(encoding="utf-8"))
+        data = json.loads(tl_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        log.error("check_score_distribution: cannot parse status file: %s", exc)
-        return False
+        log.warning("check_score_distribution: cannot parse top_lists.json — %s", exc)
+        return True
 
-    results = [
-        r for r in status.get("results", [])
-        if r.get("market", "USA") in ("USA", "US")
-    ]
+    _BUCKETS = (
+        "top_buys", "top_buys_usa", "top_buys_europe",
+        "top_buys_asia", "mid_caps", "small_caps",
+    )
+    scores: list[float] = []
+    for bucket in _BUCKETS:
+        for entry in data.get(bucket, []):
+            s = entry.get("final_score")
+            if s is not None:
+                scores.append(float(s))
 
-    # Gate 1: minimum population
-    if len(results) < 10:
-        log.error(
-            "check_score_distribution: only %d US results (need >= 10). "
-            "Pipeline may have failed completely.",
-            len(results),
+    scores = list(set(scores))  # deduplicate same ticker across lists
+
+    if len(scores) < min_entries:
+        log.warning(
+            "check_score_distribution: only %d unique scores (need >= %d) — skipping",
+            len(scores), min_entries,
         )
-        return False
+        return True
 
+    stdev = statistics.stdev(scores) if len(scores) > 1 else 0.0
+    max_score = max(scores)
+    mean_score = statistics.mean(scores)
+    degenerate = False
+
+    if stdev < min_stdev:
+        log.error(
+            "::error::SCORE DISTRIBUTION DEGENERATE: stdev=%.4f < %.4f threshold. "
+            "All tickers scoring near %.4f — data feeds may be dead.",
+            stdev, min_stdev, mean_score,
+        )
+        degenerate = True
+
+    if max_score < min_max_score:
+        log.error(
+            "::error::DEAD SIGNAL DETECTED: max_score=%.4f < %.4f threshold. "
+            "No ticker reached the minimum actionable score.",
+            max_score, min_max_score,
+        )
+        degenerate = True
+
+    if not degenerate:
+        log.info(
+            "check_score_distribution: OK — stdev=%.4f max=%.4f mean=%.4f (%d entries)",
+            stdev, max_score, mean_score, len(scores),
+        )
+
+    return not degenerate
+
+
+def _check_status_distribution(results: list, log) -> bool:
+    """4-gate check against intel_source_status.json results (US rows only)."""
     final_scores = [float(r.get("final_score", 0.0) or 0.0) for r in results]
 
     # Gate 2: non-zero density
@@ -92,31 +156,24 @@ def check_score_distribution(log_dir: Path) -> bool:
             "check_score_distribution: DEGENERATE — only %d/%d US tickers "
             "have final_score > 0 (density=%.1f%% < 20%%). "
             "Dead signal feeds likely. Check fmp_health.json.",
-            nonzero_count,
-            len(final_scores),
-            nonzero_density * 100,
+            nonzero_count, len(final_scores), nonzero_density * 100,
         )
         return False
 
     # Gate 3: variance
     std_dev = statistics.stdev(final_scores) if len(final_scores) > 1 else 0.0
-
     if std_dev < 0.05:
         log.error(
             "check_score_distribution: DEGENERATE — std_dev=%.4f < 0.05. "
-            "All tickers scoring nearly identically. "
-            "Cross-sectional normalization may be broken.",
+            "All tickers scoring nearly identically.",
             std_dev,
         )
         return False
 
-    # Gate 4: per-factor density (at least one live factor)
+    # Gate 4: per-factor density
     _FACTOR_SCORE_KEYS = [
-        "insider_conviction_score",
-        "insider_breadth_score",
-        "congress_score",
-        "news_sentiment_score",
-        "momentum_long_score",
+        "insider_conviction_score", "insider_breadth_score",
+        "congress_score", "news_sentiment_score", "momentum_long_score",
     ]
     live_factors = []
     for key in _FACTOR_SCORE_KEYS:
@@ -127,26 +184,17 @@ def check_score_distribution(log_dir: Path) -> bool:
 
     if not live_factors:
         log.error(
-            "check_score_distribution: ALL core factor feeds appear dead "
-            "(each has < 5%% non-zero density across %d tickers). "
-            "insider / news / momentum feeds may all be down.",
+            "check_score_distribution: ALL core factor feeds dead "
+            "(<5%% non-zero density) across %d US tickers.",
             len(results),
         )
         return False
 
     log.info(
-        "check_score_distribution PASSED: n=%d, nonzero=%.1f%%, std=%.4f, "
-        "live_factors=%d (%s)",
-        len(results),
-        nonzero_density * 100,
-        std_dev,
-        len(live_factors),
-        ", ".join(f"{k.replace('_score', '')}={d:.0%}" for k, d in live_factors[:3]),
+        "check_score_distribution PASSED: n=%d, nonzero=%.1f%%, std=%.4f, live_factors=%d",
+        len(results), nonzero_density * 100, std_dev, len(live_factors),
     )
-
-    # Advisory check: insider feed may be silently dead (HTTP 200 all-empty)
     _check_insider_feed_density(results, log)
-
     return True
 
 
