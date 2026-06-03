@@ -3,34 +3,16 @@ name: edgar_3x
 # ─────────────────────────────────────────────────────────────────────────────
 # EDGAR data pipeline — 3× daily at 00:00, 08:00, 16:00 UTC.
 #
-# FMP Ultimate tier: 3,000 calls/min (50 req/s).  All per-ticker FMP loops
-# have been replaced with bulk endpoints — 160 individual calls → 1 call each:
+# FMP Ultimate tier: 3,000 calls/min (50 req/s).
+# Confirmed-working bulk endpoints (stable/ NDJSON, 2026-06-03):
+#   upgrades-downgrades-consensus-bulk → analyst_consensus score
+#   ratios-ttm-bulk                    → Piotroski verification + quality factors
+#   key-metrics-ttm-bulk               → fundamental context
 #
-#   financial-scores-bulk          → quality_piotroski (piotroskiScore)
-#   upgrades-downgrades-consensus-bulk → analyst_consensus
-#   earnings-surprises-bulk        → PEAD boost to news_sentiment
-#   price-target-summary-bulk      → price_target_upside
-#   ratios-ttm-bulk                → Piotroski verification + quality factors
-#   key-metrics-ttm-bulk           → additional fundamental context
-#   eod-bulk                       → replaces per-ticker EOD price fetches
-#
-# Net FMP call reduction per run: ~1,280 → ~20  (98% reduction)
-# Timeout reduced from 60 → 25 minutes now that FMP is no longer the bottleneck.
-#
-# WEIGHTS (enforced in generate_top_lists, must sum to 1.0):
-#   insider_conviction:  0.25   # was 0.30
-#   insider_breadth:     0.12   # was 0.15
-#   congress:            0.12   # was 0.22 — binary US-only signal, reduced
-#   news_sentiment:      0.10
-#   news_buzz:           0.05
-#   momentum_long:       0.15
-#   volume_attention:    0.03
-#   analyst_consensus:   0.10   # NEW — upgrades-downgrades-consensus-bulk
-#   quality_piotroski:   0.08   # NEW — financial-scores-bulk (piotroskiScore gate)
-#   TOTAL:               1.00
-#
-# EU/Asia note: analyst_consensus and quality_piotroski apply to all exchanges.
-# congress_score remains 0.0 (not 0.5) for non-US tickers.
+# Per-ticker FMP (not available as bulk):
+#   quality_piotroski  → FMPClient.get_quality_score() (ratios-ttm per-ticker)
+#   PEAD boost         → FMPClient.get_earnings_surprise() per-ticker
+#   price_target_upside → FMPClient.get_upside_to_target() per-ticker
 #
 # Relation to other workflows:
 #   canary.yml              — 10-ticker health check 3×/day (separate group)
@@ -107,19 +89,8 @@ jobs:
         run: pip install -r requirements.txt
 
       # ── 4. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
-      # Download all seven bulk snapshots once before the ticker loop.
-      # Each bulk endpoint returns all symbols; the pipeline filters to universe.
-      # Writes to .cache/bulk_snapshots/ so the 00:00 run's cache is reused
-      # by the 08:00 and 16:00 runs (TTL=24h enforced in fetch script).
-      #
-      # Endpoints used (all stable/ routes, Ultimate-exclusive):
-      #   financial-scores-bulk          — piotroskiScore (0-9)
-      #   upgrades-downgrades-consensus-bulk — analyst consensus grade
-      #   earnings-surprises-bulk        — most-recent EPS surprise for PEAD
-      #   price-target-summary-bulk      — consensus PT, analyst count, age
-      #   ratios-ttm-bulk                — ROA, CFO, debtRatio, currentRatio, etc.
-      #   key-metrics-ttm-bulk           — revenuePerShare, peRatio cross-checks
-      #   eod-bulk                       — last EOD close for all tickers
+      # Confirmed-working stable/ NDJSON endpoints (verified 2026-06-03).
+      # Cache is shared across the three intraday runs via actions/cache.
       - name: FMP bulk pre-fetch (Ultimate)
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
@@ -132,11 +103,8 @@ jobs:
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
-                         earnings-surprises-bulk \
-                         price-target-summary-bulk \
                          ratios-ttm-bulk \
                          key-metrics-ttm-bulk \
-                         eod-bulk \
             --verbose
 
       # ── 5. EDGAR fetch — 3-attempt retry ────────────────────────────────────

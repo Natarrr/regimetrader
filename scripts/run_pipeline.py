@@ -1468,11 +1468,12 @@ def run(
     if bulk_cache is not None:
         try:
             from scripts.fmp_bulk_prefetch import build_ticker_index as _bti  # noqa: PLC0415
-            _bulk_piotroski_idx = _bti(bulk_cache, "financial-scores-bulk")
+            # financial-scores-bulk has no FMP stable/ route; piotroski is per-ticker.
+            # _bulk_piotroski_idx stays {} — scoring falls back to FMPClient.get_quality_score().
             _bulk_consensus_idx = _bti(bulk_cache, "upgrades-downgrades-consensus-bulk")
             log.info(
-                "Bulk cache loaded: piotroski=%d symbols, consensus=%d symbols",
-                len(_bulk_piotroski_idx), len(_bulk_consensus_idx),
+                "Bulk cache loaded: consensus=%d symbols (piotroski: per-ticker FMP)",
+                len(_bulk_consensus_idx),
             )
         except Exception as _bexc:
             log.warning("Bulk cache load failed (%s) — falling back to per-ticker FMP", _bexc)

@@ -3,31 +3,26 @@
 """
 FMP Ultimate — Bulk endpoint pre-fetcher.
 
-Downloads one or more bulk snapshot endpoints and writes them to a local
-cache directory with a configurable TTL.  All subsequent per-ticker scoring
-functions read from cache rather than making individual FMP calls.
+Downloads bulk snapshot endpoints and writes them to a local cache directory
+with a configurable TTL.  Scoring functions read from cache to avoid per-ticker
+FMP round-trips.
 
-Supported endpoints (all Ultimate-tier, stable/ routes):
-  upgrades-downgrades-consensus-bulk → consensusRating, strongBuy, buy, hold, etc.
-  earnings-surprises-bulk            → actualEarningResult, estimatedEarning, date
-  price-target-summary-bulk          → targetHigh, targetLow, targetConsensus, count
+Confirmed working stable/ routes (verified 2026-06-03):
+  upgrades-downgrades-consensus-bulk → consensusRating field; analyst_consensus score
   ratios-ttm-bulk                    → returnOnAssets, currentRatio, debtRatio, etc.
   key-metrics-ttm-bulk               → peRatioTTM, revenuePerShareTTM, etc.
-  eod-bulk                           → close, volume, date for most recent EOD
 
-Note on response format: FMP bulk endpoints return NDJSON (newline-delimited JSON),
-not a JSON array.  Each line is a separate JSON object.  The parser handles both
-formats transparently.
+Response format: FMP returns NDJSON (one JSON object per line), not a JSON array.
+The parser handles both formats transparently.
 
-Note on financial-scores-bulk: FMP has no stable/ bulk endpoint for financial scores.
-quality_piotroski is sourced per-ticker via FMPClient.get_quality_score() instead.
+Removed endpoints (not available or no scoring consumer):
+  financial-scores-bulk   — FMP stable/ 404; piotroski sourced per-ticker via FMPClient
+  eod-bulk                — FMP stable/ 404; no scoring consumer
+  earnings-surprises-bulk — no scoring consumer; PEAD boost uses per-ticker FMPClient
+  price-target-summary-bulk — no scoring consumer; PT upside uses per-ticker FMPClient
 
-Note on earnings-surprises-bulk: requires ?year=YYYY parameter (current year used).
-
-Note on eod-bulk: uses stable/batch-request-end-of-day-prices?date=YYYY-MM-DD.
-
-Cache format: one JSON file per endpoint at {cache_dir}/{endpoint}.json
-Includes a _cached_at ISO timestamp and _ttl_hours field for TTL enforcement.
+Cache format: {cache_dir}/{endpoint}.json
+Metadata: _cached_at (ISO), _ttl_hours, _record_count.
 
 Usage:
   python scripts/fmp_bulk_prefetch.py \\
@@ -45,7 +40,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, date as _date, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -53,53 +48,20 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Stable route base URL — never use /api/v3/ or /api/v4/ directly
 FMP_BASE = "https://financialmodelingprep.com/stable"
 
-# Endpoint → stable route mapping.
-# financial-scores-bulk is intentionally absent: no stable/ bulk route exists.
-# quality_piotroski is sourced per-ticker via FMPClient.get_quality_score().
+# Only confirmed-working stable/ routes that have at least one scoring consumer.
 ENDPOINT_ROUTES: dict[str, str] = {
     "upgrades-downgrades-consensus-bulk": "upgrades-downgrades-consensus-bulk",
-    "earnings-surprises-bulk":            "earnings-surprises-bulk",
-    "price-target-summary-bulk":          "price-target-summary-bulk",
     "ratios-ttm-bulk":                    "ratios-ttm-bulk",
     "key-metrics-ttm-bulk":               "key-metrics-ttm-bulk",
-    "eod-bulk":                           "batch-request-end-of-day-prices",
-}
-
-# Endpoints that return NDJSON (newline-delimited JSON) rather than a JSON array.
-# These are parsed line-by-line; _fetch_endpoint handles both formats automatically.
-_NDJSON_ENDPOINTS: frozenset[str] = frozenset({
-    "upgrades-downgrades-consensus-bulk",
-    "price-target-summary-bulk",
-    "ratios-ttm-bulk",
-    "key-metrics-ttm-bulk",
-})
-
-# Endpoints that require extra query parameters beyond just apikey.
-# Values are callables (no args) so the date is resolved at fetch time.
-_EXTRA_PARAMS: dict[str, dict[str, Any]] = {}  # populated at module level below
-
-def _earnings_surprises_params() -> dict[str, Any]:
-    return {"year": datetime.now(timezone.utc).year}
-
-def _eod_bulk_params() -> dict[str, Any]:
-    return {"date": _date.today().isoformat()}
-
-_ENDPOINT_PARAM_FACTORIES: dict[str, Any] = {
-    "earnings-surprises-bulk": _earnings_surprises_params,
-    "eod-bulk":                _eod_bulk_params,
 }
 
 # Approximate response sizes (for logging)
 ENDPOINT_SIZES_MB: dict[str, float] = {
     "upgrades-downgrades-consensus-bulk": 4.0,
-    "earnings-surprises-bulk":            5.0,
-    "price-target-summary-bulk":          3.0,
     "ratios-ttm-bulk":                    15.0,
     "key-metrics-ttm-bulk":               12.0,
-    "eod-bulk":                           8.0,
 }
 
 
@@ -122,15 +84,9 @@ def _is_cache_valid(cache_dir: Path, endpoint: str, ttl_hours: float) -> bool:
         cached_at = datetime.fromisoformat(cached_at_str)
         age_h = (datetime.now(timezone.utc) - cached_at).total_seconds() / 3600
         if age_h < ttl_hours:
-            logger.info(
-                "Cache HIT %s (age=%.1fh < ttl=%.1fh)",
-                endpoint, age_h, ttl_hours,
-            )
+            logger.info("Cache HIT %s (age=%.1fh < ttl=%.1fh)", endpoint, age_h, ttl_hours)
             return True
-        logger.info(
-            "Cache STALE %s (age=%.1fh >= ttl=%.1fh)",
-            endpoint, age_h, ttl_hours,
-        )
+        logger.info("Cache STALE %s (age=%.1fh >= ttl=%.1fh)", endpoint, age_h, ttl_hours)
         return False
     except Exception as exc:
         logger.warning("Cache read error for %s: %s", endpoint, exc)
@@ -140,23 +96,21 @@ def _is_cache_valid(cache_dir: Path, endpoint: str, ttl_hours: float) -> bool:
 def _parse_response(endpoint: str, text: str) -> list[dict[str, Any]]:
     """Parse FMP bulk response — handles both JSON array and NDJSON formats.
 
-    FMP bulk endpoints return NDJSON (one JSON object per line) rather than
-    a JSON array.  Attempt JSON array first; fall back to line-by-line parse.
+    FMP bulk endpoints return NDJSON (one JSON object per line).
+    Attempts JSON array first for forward compatibility; falls back to NDJSON.
     """
     text = text.strip()
     if not text:
         return []
 
-    # Try JSON array first (future-proofing if FMP changes format)
     if text.startswith("["):
         try:
             data = json.loads(text)
             if isinstance(data, list):
                 return data
         except json.JSONDecodeError:
-            pass  # fall through to NDJSON
+            pass
 
-    # NDJSON: one JSON object per line
     records = []
     for line in text.splitlines():
         line = line.strip()
@@ -167,7 +121,7 @@ def _parse_response(endpoint: str, text: str) -> list[dict[str, Any]]:
             if isinstance(obj, dict):
                 records.append(obj)
         except json.JSONDecodeError as exc:
-            logger.debug("NDJSON line parse error (%s): %s — skipping line", endpoint, exc)
+            logger.debug("NDJSON line skip (%s): %s", endpoint, exc)
     return records
 
 
@@ -185,20 +139,11 @@ def _fetch_endpoint(
     url = f"{FMP_BASE}/{route}"
     params: dict[str, Any] = {"apikey": api_key}
 
-    # Inject any endpoint-specific required parameters
-    factory = _ENDPOINT_PARAM_FACTORIES.get(endpoint)
-    if factory is not None:
-        params.update(factory())
-
-    # Respect rate limit — sleep before each call
     delay = 1.0 / rps if rps > 0 else 0
     if delay > 0:
         time.sleep(delay)
 
-    logger.info(
-        "Fetching %s (~%.0f MB expected)...",
-        endpoint, ENDPOINT_SIZES_MB.get(endpoint, 0),
-    )
+    logger.info("Fetching %s (~%.0f MB expected)...", endpoint, ENDPOINT_SIZES_MB.get(endpoint, 0))
 
     t0 = time.monotonic()
     resp = session.get(url, params=params, timeout=120)
@@ -207,20 +152,14 @@ def _fetch_endpoint(
     if resp.status_code == 401:
         raise PermissionError(f"FMP 401 on {endpoint} — check FMP_API_KEY and plan tier")
     if resp.status_code == 403:
-        raise PermissionError(
-            f"FMP 403 on {endpoint} — endpoint may require Ultimate tier upgrade"
-        )
+        raise PermissionError(f"FMP 403 on {endpoint} — may require Ultimate tier upgrade")
     if resp.status_code == 404:
         raise ValueError(f"FMP 404 on {endpoint} — route {url!r} not found")
     if not resp.ok:
         raise RuntimeError(f"FMP {resp.status_code} on {endpoint}: {resp.text[:200]}")
 
     data = _parse_response(endpoint, resp.text)
-
-    logger.info(
-        "Fetched %s: %d records in %.1fs",
-        endpoint, len(data), elapsed,
-    )
+    logger.info("Fetched %s: %d records in %.1fs", endpoint, len(data), elapsed)
     return data
 
 
@@ -231,8 +170,7 @@ def prefetch(
     api_key: str,
     rps: float,
 ) -> dict[str, bool]:
-    """
-    Fetch all requested endpoints, writing to cache.
+    """Fetch all requested endpoints, writing to cache.
     Returns dict of {endpoint: success}.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -267,11 +205,10 @@ def prefetch(
 
 
 def load_bulk(cache_dir: Path, endpoint: str) -> list[dict[str, Any]]:
-    """
-    Load a cached bulk endpoint.  Call this from scoring functions.
+    """Load a cached bulk endpoint.
 
     Returns list of records, or empty list if cache is absent.
-    Never raises — callers must handle empty gracefully (soft failure rule).
+    Never raises — callers must handle empty gracefully.
     """
     p = _cache_path(cache_dir, endpoint)
     if not p.exists():
@@ -290,8 +227,7 @@ def build_ticker_index(
     endpoint: str,
     key_field: str = "symbol",
 ) -> dict[str, dict[str, Any]]:
-    """
-    Load bulk cache and return a dict keyed by ticker symbol.
+    """Load bulk cache and return a dict keyed by ticker symbol.
     Handles both 'symbol' and 'ticker' field names across endpoints.
     """
     records = load_bulk(cache_dir, endpoint)
@@ -316,12 +252,9 @@ def main() -> None:
     parser.add_argument(
         "--endpoints", nargs="+", required=True,
         choices=list(ENDPOINT_ROUTES.keys()),
-        help="Bulk endpoints to fetch (financial-scores-bulk not available — use per-ticker FMP)",
+        help="Bulk endpoints to fetch",
     )
-    parser.add_argument(
-        "--verbose", action="store_true",
-        help="Enable DEBUG logging",
-    )
+    parser.add_argument("--verbose", action="store_true", help="Enable DEBUG logging")
     args = parser.parse_args()
 
     logging.basicConfig(

@@ -82,11 +82,8 @@ jobs:
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
-                         earnings-surprises-bulk \
-                         price-target-summary-bulk \
                          ratios-ttm-bulk \
                          key-metrics-ttm-bulk \
-                         eod-bulk \
             --verbose
 
       # ── Run pipeline ─────────────────────────────────────────────────────────
