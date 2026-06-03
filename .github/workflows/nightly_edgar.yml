@@ -1,17 +1,18 @@
 name: nightly_edgar
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Nightly full-universe EDGAR backfill (160 tickers, 00:00 UTC).
-# Distinct from canary (10 tickers, 3×/day health check) and market_intel
-# (push/PR unit tests + scheduled partial fetch).
+# Manual full-universe EDGAR backfill (160 tickers).
+# Schedule disabled — edgar_3x.yml covers the 00:00 UTC run.
+# Use workflow_dispatch for deep historical backfills or recovery runs.
 #
-# Concurrency group "nightly_edgar" is separate from "edgar_canary" so the
-# canary and this workflow never block each other at the SEC rate-limit level.
+# FMP Ultimate changes:
+#   - FMP_MAX_RPS corrected to 50 (was 30 — stale from Premium tier)
+#   - Bulk pre-fetch step added before the ticker loop
+#   - max-workers raised to 8 (EDGAR is the bottleneck, not FMP)
+#   - timeout-minutes reduced from 45 to 25
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  # Schedule disabled — edgar_3x.yml runs at 00:00 UTC and covers this.
-  # Kept as workflow_dispatch for manual full-universe backfills.
   workflow_dispatch:
     inputs:
       tickers_file:
@@ -19,62 +20,80 @@ on:
         required: false
         default: "config/universe.csv"
       min_coverage:
-        description: "Min EDGAR coverage ratio that passes threshold gate (0–1)"
+        description: "Min EDGAR coverage ratio (0–1)"
         required: false
         default: "0.80"
+      skip_bulk_cache:
+        description: "Force fresh bulk download (bypass cache)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
 
 jobs:
   nightly-edgar:
     runs-on: ubuntu-latest
-    # 160 tickers × ~5s each at 7 req/s SEC rate limit ≈ 15 min nominal.
-    # 45-min ceiling absorbs SEC throttling, slow nights, and up to 2 retries.
-    timeout-minutes: 45
+    timeout-minutes: 25   # was 45 — bulk migration + higher parallelism
 
-    # SEC rate-limits per IP — never run two fetches in parallel.
     concurrency:
       group: nightly_edgar
       cancel-in-progress: false
 
     steps:
 
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 3a. Lightweight CI deps first (fast, cached) ─────────────────────────
       - name: Install CI deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
 
-      # ── 3b. Full pipeline deps (yfinance, hmmlearn, pydantic, loguru …) ──────
       - name: Install full pipeline deps
         run: pip install -r requirements.txt
 
-      # ── 4. EDGAR full-universe fetch — 3-attempt retry with linear backoff ───
-      #
-      # Exit codes from run_pipeline.py:
-      #   0 — all tickers processed successfully
-      #   1 — partial failure (some tickers errored, pipeline completed)
-      #   2 — fatal failure (no data returned at all)
-      #
-      # Strategy: treat exit 1 as a soft failure and retry; treat exit 2 as hard.
-      # Backoff: attempt 1 → immediate, attempt 2 → 30s, attempt 3 → 60s.
+      # ── FMP bulk pre-fetch ────────────────────────────────────────────────────
+      # TTL=0 with skip_bulk_cache=true forces fresh download on recovery runs.
+      - name: FMP bulk pre-fetch (Ultimate)
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+        run: |
+          TTL="23"
+          if [ "${{ github.event.inputs.skip_bulk_cache }}" = "true" ]; then
+            TTL="0"
+            echo "Bulk cache bypass requested — forcing fresh download"
+          fi
+          python scripts/fmp_bulk_prefetch.py \
+            --cache-dir  "$BULK_CACHE_DIR" \
+            --ttl-hours  "$TTL" \
+            --endpoints  financial-scores-bulk \
+                         upgrades-downgrades-consensus-bulk \
+                         earnings-surprises-bulk \
+                         price-target-summary-bulk \
+                         ratios-ttm-bulk \
+                         key-metrics-ttm-bulk \
+                         eod-bulk \
+            --verbose
+
+      # ── EDGAR full-universe fetch ─────────────────────────────────────────────
       - name: EDGAR full-universe fetch
         env:
           EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
-          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '30' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          # FMP Ultimate: 3,000 req/min = 50 req/s. Was 30 (Premium-era setting).
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           EDGAR_FIRST: "true"
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
         run: |
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
           LOG_DIR="logs"
@@ -87,8 +106,9 @@ jobs:
 
             if python scripts/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
-              --max-workers  4 \
+              --max-workers  8 \
               --log-dir      "$LOG_DIR" \
+              --bulk-cache   "$BULK_CACHE_DIR" \
               --verbose; then
               END=$(date +%s)
               echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
@@ -106,16 +126,10 @@ jobs:
           done
 
           if [ "$SUCCESS" != "true" ]; then
-            echo "::error::All 3 EDGAR fetch attempts failed — SEC unreachable or data unavailable"
+            echo "::error::All 3 EDGAR fetch attempts failed"
             exit 1
           fi
 
-      # ── 5. Export metrics from _edgar_meta block ─────────────────────────────
-      #
-      # Reads logs/intel_source_status.json and writes logs/metrics.json with
-      # the six canonical keys: last_run, run_duration_seconds, ticker_count,
-      # edgar_count, fmp_count, error_count. (Coverage is derived downstream by
-      # monitoring.evaluate as edgar_count / ticker_count.)
       - name: Export metrics
         if: always()
         run: |
@@ -123,7 +137,6 @@ jobs:
             --log-dir logs \
             --duration-seconds "${DURATION_SECONDS:-0}"
 
-      # ── 6. Print metrics to run log (diagnostic, never fails the job) ─────────
       - name: Show metrics
         if: always()
         run: |
@@ -131,14 +144,9 @@ jobs:
             echo "=== metrics.json ==="
             cat logs/metrics.json
           else
-            echo "metrics.json not found — pipeline may have failed before writing outputs"
+            echo "metrics.json not found"
           fi
 
-      # ── 7. Coverage threshold gate + Slack alert on breach ────────────────────
-      #
-      # Exits 0 if: edgar_count/ticker_count >= min_coverage AND error_count <= max_errors.
-      # Exits 2 on breach and fires a Discord message via DISCORD_WEBHOOK_URL.
-      # max-errors: 5 allows up to 5 tickers to fail (10% of 50) before alert.
       - name: Check coverage thresholds
         if: always()
         env:
@@ -149,16 +157,6 @@ jobs:
             --min-coverage "${{ github.event.inputs.min_coverage || '0.80' }}" \
             --max-errors   5
 
-      # ── 8. Minsky insider stress alert ───────────────────────────────────────
-      #
-      # Reads intel_source_status.json and evaluates three accumulation signals:
-      #   1. CEO buy ratio    : fraction of tickers with key-exec purchases ≥ 40%
-      #   2. Filing velocity  : mean Form 4 count per ticker ≥ 5.0
-      #   3. Insider breadth  : fraction with insider_breadth_score ≥ 0.70, ≥ 50%
-      #
-      # Levels:  CLEAR (0/3) | WATCH (1/3) | WARNING (2/3) | CRITICAL (3/3).
-      # Observational only — always exits 0. WARNING/CRITICAL fire a Discord alert.
-      # Graceful: missing / malformed intel_source_status.json → exit 0 (no-op).
       - name: Check Minsky insider stress
         if: always()
         env:
@@ -166,7 +164,6 @@ jobs:
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 
-      # ── 9. Job summary (visible in GitHub Actions UI) ─────────────────────────
       - name: Write job summary
         if: always()
         run: |
@@ -176,6 +173,7 @@ jobs:
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tickers file | \`${{ github.event.inputs.tickers_file || 'config/universe.csv' }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Min coverage | \`${{ github.event.inputs.min_coverage || '0.80' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Bulk cache bypass | \`${{ github.event.inputs.skip_bulk_cache || 'false' }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f logs/metrics.json ]; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
@@ -185,7 +183,6 @@ jobs:
             echo "_No metrics.json — pipeline failed before producing outputs._" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # ── 9. Upload artifacts (90-day retention — nightly data is long-lived) ───
       - name: Upload nightly artifacts
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,9 +1,9 @@
 """backend/market_intel/generate_top_lists.py
-Twelve-factor weighted scoring → top_lists.json + top5.csv
+Nine-factor weighted scoring → top_lists.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
 and applies Markowitz (1990 Nobel) portfolio ranking. WEIGHTS are imported
-directly from run_pipeline.py (single source of truth — PATCH 02).
+from regime_trader.weights (canonical single source of truth).
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -45,45 +45,30 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 log = logging.getLogger("generate_top_lists")
 
 
-# PATCH 02: Import canonical WEIGHTS from run_pipeline to ensure a single
-# source of truth. Both intel_source_status.json and top_lists.json will
-# now use identical factor weights.
+# Canonical 9-factor weights — single source of truth in regime_trader/weights.py.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
 try:
-    import importlib.util as _ilu
-    import pathlib as _pl
-    _rp_path = _pl.Path(__file__).resolve().parent.parent.parent / "scripts" / "run_pipeline.py"
-    _rp_spec = _ilu.spec_from_file_location("_run_pipeline_weights", _rp_path)
-    _rp_mod = _ilu.module_from_spec(_rp_spec)
-    _rp_spec.loader.exec_module(_rp_mod)
-    WEIGHTS: Dict[str, float] = dict(_rp_mod.WEIGHTS)
-    del _rp_path, _rp_spec, _rp_mod, _ilu, _pl
+    from regime_trader.weights import WEIGHTS  # noqa: F401
 except Exception as _e:
-    # Fallback: hardcoded 12-factor weights matching run_pipeline.py
-    # UPDATE THIS if run_pipeline.WEIGHTS changes.
-    log.warning("Could not import WEIGHTS from run_pipeline.py: %s — using hardcoded fallback", _e)
+    log.warning("Could not import WEIGHTS from regime_trader.weights: %s — using hardcoded fallback", _e)
     WEIGHTS: Dict[str, float] = {
-        "insider_conviction":  0.15,
+        "insider_conviction":  0.25,
         "insider_breadth":     0.12,
-        "congress":            0.08,
+        "congress":            0.12,
         "news_sentiment":      0.10,
-        "news_buzz":           0.03,
-        "momentum_long":       0.25,
+        "news_buzz":           0.05,
+        "momentum_long":       0.15,
         "volume_attention":    0.03,
-        "analyst_consensus":   0.04,
-        "analyst_revision":    0.05,
-        "price_target_upside": 0.03,
+        "analyst_consensus":   0.10,
         "quality_piotroski":   0.08,
-        "transcript_tone":     0.04,
     }
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
-    "Check run_pipeline.WEIGHTS."
+    "Check regime_trader/weights.py."
 )
 
-# Maps factor key → field name in intel_source_status.json results
-# PATCH 02: Extended to all 12 factors matching run_pipeline.WEIGHTS.
+# Maps factor key → field name in intel_source_status.json results (9-factor schema).
 FACTOR_FIELDS: Dict[str, str] = {
     "insider_conviction":  "insider_conviction_score",
     "insider_breadth":     "insider_breadth_score",
@@ -93,10 +78,7 @@ FACTOR_FIELDS: Dict[str, str] = {
     "momentum_long":       "momentum_long_score",
     "volume_attention":    "volume_attention_score",
     "analyst_consensus":   "analyst_consensus_score",
-    "analyst_revision":    "analyst_revision_score",
-    "price_target_upside": "price_target_upside_score",
     "quality_piotroski":   "quality_piotroski_score",
-    "transcript_tone":     "transcript_tone_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
@@ -934,6 +916,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Directory containing intel_source_status.json (default: logs)")
     parser.add_argument("--run-id", type=str, default="local",
                         help="Identifier stamped into top_lists.json (e.g. $GITHUB_RUN_ID)")
+    parser.add_argument("--bulk-cache", type=Path, default=None,
+                        help="Bulk snapshot dir (informational; data already scored by run_pipeline)")
     parser.add_argument("--force", action="store_true",
                         help="Re-generate even if top_lists.json is less than 2 hours old")
     parser.add_argument("--verbose", action="store_true")

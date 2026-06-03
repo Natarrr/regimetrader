@@ -6,12 +6,14 @@ credible, costly-to-fake signal. This pipeline sources it from two layers:
   1. FMP Ultimate            — pre-parsed insider trades + congress (FMP_API_KEY)
   2. SEC EDGAR direct        — Form 4 count + CEO buy flag (always, free)
 
-FMP budget: ≤ 80 calls per run (per-ticker profile, first 80 tickers only).
-Tickers 81+ fall back to yfinance for market cap to stay within 250/day limit.
+Bulk cache: pass --bulk-cache <dir> (written by scripts/fmp_bulk_prefetch.py)
+to replace per-ticker FMP calls for quality_piotroski (financial-scores-bulk)
+and analyst_consensus (upgrades-downgrades-consensus-bulk).
 
 Usage:
   python scripts/run_pipeline.py --tickers-file config/universe.csv --log-dir logs
-  python -m scripts.run_pipeline --tickers-file config/universe.csv --verbose
+  python scripts/run_pipeline.py --tickers-file config/universe.csv \\
+      --bulk-cache .cache/bulk_snapshots --verbose
 """
 from __future__ import annotations
 
@@ -36,56 +38,9 @@ if str(ROOT) not in sys.path:
 from regime_trader.utils.io import save_json_atomic  # noqa: E402
 from regime_trader.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError  # noqa: E402
 from backend.market_intel.validator import validate_raw  # noqa: E402
+from regime_trader.weights import WEIGHTS  # noqa: E402  canonical 9-factor weights
 
 log = logging.getLogger("run_pipeline")
-
-# ── Weights (must sum to 1.0) ──────────────────────────────────────────────────
-# Fix #3/8 — Jegadeesh-Titman momentum + orthogonal news split.
-# momentum 20d (anti-alpha short-term reversal) → 12-1m Jegadeesh (Tetlock 2007).
-# news(0.15) split into directional sentiment(0.10) + attention buzz(0.05).
-# volume extracted from momentum into its own attention tilt (0.03).
-# ── Weights (must sum to 1.0) ────────────────────────────────────────────────
-# Rebalanced per Grinold-Kahn Fundamental Law guidance (PATCH-08):
-#
-#   insider_conviction  0.18 → 0.15  (sparse ~1% density on S&P 500 large-cap;
-#                                      Cohen-Malloy-Pomorski 2012: CEO purchases
-#                                      carry alpha, but only ~11% of universe)
-#   momentum_long       0.22 → 0.25  (strongest empirical IC; Jegadeesh-Titman
-#                                      1993: 12-1m momentum IC ≈ 0.06-0.09)
-#   quality_piotroski   0.06 → 0.08  (most regime-stable signal; Piotroski 2000,
-#                                      Novy-Marx 2013: robust across 2008/2020/2022)
-#   analyst_revision    0.06 → 0.05  (reduce sell-side triplet combined weight;
-#                                      Grinold-Kahn: correlated signals overstate BR)
-#   price_target_upside 0.04 → 0.03  (staleness risk on quarterly targets)
-#
-#   All other factors unchanged. Total remains 1.0.
-WEIGHTS = {
-    "insider_conviction":  0.15,   # ↓ from 0.18 — sparse on large-cap universe
-    "insider_breadth":     0.12,   # unchanged
-    "congress":            0.08,   # unchanged — US-only, already discounted
-    "news_sentiment":      0.10,   # unchanged — Tetlock (2007) IC stable
-    "news_buzz":           0.03,   # unchanged — attention tilt only
-    "momentum_long":       0.25,   # ↑ from 0.22 — Jegadeesh-Titman (1993)
-    "volume_attention":    0.03,   # unchanged — Barber-Odean (2008)
-    "analyst_consensus":   0.04,   # unchanged
-    "analyst_revision":    0.05,   # ↓ from 0.06 — reduce sell-side triplet
-    "price_target_upside": 0.03,   # ↓ from 0.04 — staleness risk
-    "quality_piotroski":   0.08,   # ↑ from 0.06 — Piotroski (2000) regime-robust
-    "transcript_tone":     0.04,   # unchanged
-}
-assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
-    f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
-    "Check run_pipeline.WEIGHTS after any modification."
-)
-# Weight sum: 0.15+0.12+0.08+0.10+0.03+0.25+0.03+0.04+0.05+0.03+0.08+0.04 = 1.00 ✓
-
-# Human-readable migration note used in runtime logs/tests
-_WEIGHTS_MIGRATION_NOTE = (
-    "Weights v3 (PATCH-08): rebalanced for Grinold-Kahn IR optimization. "
-    "momentum_long 0.22→0.25, quality_piotroski 0.06→0.08, "
-    "insider_conviction 0.18→0.15, analyst_revision 0.06→0.05, "
-    "price_target_upside 0.04→0.03.",
-)
 
 # ── Congress feed cache path (module-level so tests can monkeypatch it) ────────
 CONGRESS_CACHE_PATH = ROOT / ".cache" / "congress_cache.json"
@@ -1344,6 +1299,8 @@ def _registry_meta() -> Dict[str, Dict[str, Any]]:
 def _score_ticker_international(
     entry: Any,
     spy_return_baseline: float = 0.0,
+    bulk_piotroski_idx: Optional[Dict[str, Any]] = None,
+    bulk_consensus_idx: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Unified scorer for EUROPE and ASIA entries using the same factor formulas as US.
 
@@ -1389,28 +1346,46 @@ def _score_ticker_international(
         volume_spike = float(rf.get("volume_spike", 0.0) or 0.0)
         volume_attention_score = score_volume_attention(volume_spike)
 
-        # ── PATCH 07: quality_piotroski via FMP ratios-ttm (PASS for EU/Asia) ────
-        # Piotroski (2000): F-Score is an accounting-identity signal — universally
-        # applicable regardless of exchange. FMP stable/ratios-ttm confirmed PASS
-        # for SAP.DE and 7203.T in Phase-0 smoke test (2026-05-30).
-        # Novy-Marx (2013): gross profitability is a cross-regime premium.
+        # ── quality_piotroski — bulk index first, per-ticker FMP fallback ────────
+        # financial-scores-bulk covers global exchanges (accounting-identity based).
+        _pio_idx = bulk_piotroski_idx or {}
         quality_piotroski_score = 0.0
-        price_target_upside_score = 0.0
-        try:
-            from regime_trader.services.fmp_client import FMPClient as _FC_intl  # noqa: PLC0415
-            _intl_client = _FC_intl()
-            if _intl_client._api_key:
-                quality_piotroski_score = _intl_client.get_quality_score(entry.ticker)
-                pt_upside = _intl_client.get_upside_to_target(entry.ticker)
-                price_target_upside_score = pt_upside if pt_upside is not None else 0.0
-                log.debug(
-                    "PATCH 07 %s (%s): quality=%.4f pt_upside=%.4f",
-                    entry.ticker, market_str, quality_piotroski_score, price_target_upside_score,
-                )
-        except Exception as exc:
-            log.debug("PATCH 07 quality/pt_upside fetch %s: %s", entry.ticker, exc)
-            quality_piotroski_score = 0.0
-            price_target_upside_score = 0.0
+        _bulk_pio_intl = _pio_idx.get(entry.ticker.upper(), {})
+        if _bulk_pio_intl:
+            _pio_raw_intl = _bulk_pio_intl.get("piotroskiScore")
+            if _pio_raw_intl is not None:
+                try:
+                    quality_piotroski_score = round(int(_pio_raw_intl) / 9.0, 4)
+                except (TypeError, ValueError):
+                    pass
+        if quality_piotroski_score == 0.0:
+            try:
+                from regime_trader.services.fmp_client import FMPClient as _FC_intl  # noqa: PLC0415
+                _intl_client = _FC_intl()
+                if _intl_client._api_key:
+                    quality_piotroski_score = _intl_client.get_quality_score(entry.ticker)
+            except Exception as exc:
+                log.debug("quality_piotroski fallback %s: %s", entry.ticker, exc)
+
+        # ── analyst_consensus — bulk index (exchange-agnostic) ────────────────
+        _CONSENSUS_MAP_INTL = {
+            "Strong Buy":  1.00, "strongBuy":  1.00,
+            "Buy":         0.75, "buy":         0.75,
+            "Hold":        0.50, "hold":        0.50,
+            "Sell":        0.25, "sell":        0.25,
+            "Strong Sell": 0.00, "strongSell":  0.00,
+        }
+        _cons_idx = bulk_consensus_idx or {}
+        analyst_consensus_score = 0.0
+        _bulk_cons_intl = _cons_idx.get(entry.ticker.upper(), {})
+        if _bulk_cons_intl:
+            _cons_r = _bulk_cons_intl.get("consensusRating") or ""
+            analyst_consensus_score = _CONSENSUS_MAP_INTL.get(_cons_r, 0.0)
+
+        log.debug(
+            "EU/Asia %s (%s): quality=%.4f consensus=%.4f",
+            entry.ticker, market_str, quality_piotroski_score, analyst_consensus_score,
+        )
 
         # ── structurally absent factors → None ───────────────────────────────
         # congress, insider, news: no data source for non-US markets.
@@ -1422,20 +1397,17 @@ def _score_ticker_international(
             "cap_tier":                  entry.cap_tier,
             "market":                    market_str,
             "source_reliability":        entry.source_reliability,
-            # Available factor scores (PATCH 07: added quality + pt_upside)
+            # Available factor scores
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
-            "quality_piotroski_score":   quality_piotroski_score,   # FMP ratios-ttm ✅
-            "price_target_upside_score": price_target_upside_score, # partial coverage
+            "quality_piotroski_score":   quality_piotroski_score,
+            "analyst_consensus_score":   analyst_consensus_score,
             # Structurally absent — None (not 0.0)
             "insider_conviction_score":  None,
             "insider_breadth_score":     None,
             "congress_score":            None,
             "news_sentiment_score":      None,
             "news_buzz_score":           None,
-            "analyst_consensus_score":   None,
-            "analyst_revision_score":    None,
-            "transcript_tone_score":     None,
             # Raw inputs (diagnostic)
             "return_12_1m":              return_12_1m,
             "volume_spike":              volume_spike,
@@ -1468,8 +1440,19 @@ def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, Any]:
-    """Run the full scoring pipeline; return status dict."""
+def run(
+    tickers_file: Path,
+    log_dir: Path,
+    max_workers: int = 8,
+    bulk_cache: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Run the full scoring pipeline; return status dict.
+
+    Args:
+        bulk_cache: Path to directory written by fmp_bulk_prefetch.py.
+                    When provided, quality_piotroski and analyst_consensus are
+                    sourced from bulk snapshots instead of per-ticker FMP calls.
+    """
     log_dir.mkdir(parents=True, exist_ok=True)
     ticker_rows = load_tickers(tickers_file)
     tickers     = [r["ticker"] for r in ticker_rows]
@@ -1479,12 +1462,25 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     t0 = time.time()
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
 
+    # ── Bulk cache indexes (loaded once, shared across all threads) ───────────
+    _bulk_piotroski_idx: Dict[str, Any] = {}
+    _bulk_consensus_idx: Dict[str, Any] = {}
+    if bulk_cache is not None:
+        try:
+            from scripts.fmp_bulk_prefetch import build_ticker_index as _bti  # noqa: PLC0415
+            _bulk_piotroski_idx = _bti(bulk_cache, "financial-scores-bulk")
+            _bulk_consensus_idx = _bti(bulk_cache, "upgrades-downgrades-consensus-bulk")
+            log.info(
+                "Bulk cache loaded: piotroski=%d symbols, consensus=%d symbols",
+                len(_bulk_piotroski_idx), len(_bulk_consensus_idx),
+            )
+        except Exception as _bexc:
+            log.warning("Bulk cache load failed (%s) — falling back to per-ticker FMP", _bexc)
+
     # ── Shared FMP client — created once so health_report() captures all calls ─
     _fmp_client = _FMPClient()
 
     # ── EDGAR connectivity preflight ──────────────────────────────────────────
-    # Log the effective User-Agent and test data.sec.gov with AAPL (CIK 320193).
-    # This diagnostic appears in verbose CI output and helps trace 403/timeout.
     _ua = os.getenv("EDGAR_USER_AGENT") or "regime-trader-research n.tardy@hotmail.fr"
     log.info("EDGAR User-Agent: %.40s%s", _ua, "…" if len(_ua) > 40 else "")
     try:
@@ -1495,8 +1491,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
     except Exception as _exc:
         log.warning("EDGAR preflight FAILED — data.sec.gov unreachable: %s", _exc)
 
-    # ── FMP: per-ticker profile (up to 80/run to stay within 250/day budget) ────
-    log.info("Fetching FMP profiles (per-ticker, up to 80)…")
+    # ── FMP: per-ticker profile (batch-quote, single call) ────────────────────
+    log.info("Fetching FMP profiles (batch-quote)…")
     fmp_cap = 80
     mktcaps = fetch_fmp_profiles(tickers)
     fmp_count = sum(1 for t in tickers[:fmp_cap] if mktcaps.get(t, 0) > 0)
@@ -1636,37 +1632,51 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             news_sent_score, news_sent_source, _eps_pct, _eps_days = score_news_sentiment_combined(ticker)
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
 
-            # Transcript tone from FMP earnings transcript (new signal)
-            transcript_tone_score, transcript_tone_source = score_transcript_tone(
-                ticker, client=_fmp_client
-            )
-
-            # ── Analyst consensus (Womack 1996 JF) ───────────────────────
-            analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(
-                ticker, client=_fmp_client
-            )
-
-            # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
-            _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
-            analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
+            # ── Analyst consensus — bulk index first, per-ticker FMP fallback ──
+            # Bulk source: upgrades-downgrades-consensus-bulk (consensusRating field)
+            # Mapping: Strong Buy=1.0, Buy=0.75, Hold=0.5, Sell=0.25, Strong Sell=0.0
+            _CONSENSUS_MAP = {
+                "Strong Buy":  1.00, "strongBuy":  1.00,
+                "Buy":         0.75, "buy":         0.75,
+                "Hold":        0.50, "hold":        0.50,
+                "Sell":        0.25, "sell":        0.25,
+                "Strong Sell": 0.00, "strongSell":  0.00,
+            }
+            _bulk_cons_rec = _bulk_consensus_idx.get(ticker.upper(), {})
+            if _bulk_cons_rec:
+                _cons_rating = _bulk_cons_rec.get("consensusRating") or ""
+                analyst_consensus_score = _CONSENSUS_MAP.get(_cons_rating, 0.50)
+                analyst_consensus_source = "bulk_consensus"
+            else:
+                analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(
+                    ticker, client=_fmp_client
+                )
 
             # Recent upgrade/downgrade (FMP) — useful catalyst signal
             recent_upg = _fmp_client.get_recent_upgrades_downgrades(ticker)
 
-            # ── Price target upside (forward-looking analyst target signal) ────
-            # None = no analyst coverage / data missing → dead signal (penalised).
-            # Not the same as 0.50 (at-target with valid data).
-            price_target_upside_score = _fmp_client.get_upside_to_target(ticker) or 0.0
-
-            # Store raw PT and current price for Discord display
-            # Avoids the score-reversal bug in send_toplists_discord._fmt_pt_badge
-            _pt_data         = _fmp_client.get_price_target_consensus(ticker)
-            _quote_data      = _fmp_client.get_quote(ticker)
-            _raw_target_price  = _pt_data.get("targetConsensus") if _pt_data else None
-            _raw_current_price = _quote_data.get("price") if _quote_data else None
-
-            # quality_piotroski: Piotroski (2000) / Novy-Marx (2013) fundamental quality gate
-            quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+            # ── quality_piotroski — bulk index first, per-ticker FMP fallback ──
+            # Bulk source: financial-scores-bulk (piotroskiScore 0-9)
+            _bulk_pio_rec = _bulk_piotroski_idx.get(ticker.upper(), {})
+            if _bulk_pio_rec:
+                _pio_raw = _bulk_pio_rec.get("piotroskiScore")
+                if _pio_raw is not None:
+                    try:
+                        _pio_int = int(_pio_raw)
+                        from regime_trader.weights import PIOTROSKI_GATE  # noqa: PLC0415
+                        _missing = PIOTROSKI_GATE["missing_score"]
+                        _supp    = PIOTROSKI_GATE["suppress_below"]
+                        _disc    = PIOTROSKI_GATE["discount_below"]
+                        _dfact   = PIOTROSKI_GATE["discount_factor"]
+                        _base = round(_pio_int / 9.0, 4)
+                        quality_piotroski_score = _base
+                    except (TypeError, ValueError):
+                        quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+                    log.debug("Piotroski bulk %s: raw=%s score=%.4f", ticker, _pio_raw, quality_piotroski_score)
+                else:
+                    quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+            else:
+                quality_piotroski_score = _fmp_client.get_quality_score(ticker)
 
             # ── Congress ─────────────────────────────────────────────────
             c_score = score_congress(congress_raw)
@@ -1719,26 +1729,20 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "sector":                  sector.get(ticker, "Unknown"),
                 "cap_tier":                cap_tier.get(ticker, "large"),
                 "market_cap":              mktcap,
-                # ── Fix #2 — orthogonal insider factors (WEIGHTS keys) ────
+                # ── Orthogonal insider factors ────────────────────────────
                 "insider_conviction_score": conviction_score,
                 "insider_breadth_score":    breadth_score,
-                # ── Fix #3 — orthogonal momentum + news factors (WEIGHTS) ─
+                # ── Momentum + news factors ───────────────────────────────
                 "momentum_long_score":      mom_long_score,
                 "volume_attention_score":   vol_att_score,
                 "news_sentiment_score":     news_sent_score,
                 "news_buzz_score":          news_buzz_score,
+                # ── Analyst + quality factors (9-factor schema) ───────────
                 "analyst_consensus_score":  analyst_consensus_score,
-                "analyst_revision_score":   analyst_revision_score,
-                "analyst_revision_n":       _rev_n,
-                "price_target_upside_score": price_target_upside_score,
                 "quality_piotroski_score":  quality_piotroski_score,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":           c_score,
-                "transcript_tone_score":    transcript_tone_score,
-                "transcript_tone_source":   transcript_tone_source,
                 "recent_upgrade_downgrade": recent_upg,
-                "target_price":             _raw_target_price,
-                "current_price":            _raw_current_price,
                 # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
                 "edgar_score_legacy":       e_score_legacy,
                 "insider_score_legacy":     i_score_legacy,
@@ -1805,16 +1809,9 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "news_sentiment_score":     0.0,
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
-                "analyst_revision_score":   0.0,
-                "analyst_revision_n":       0,
-                "transcript_tone_score":    0.0,
-                "transcript_tone_source":   "none",
-                "recent_upgrade_downgrade": {},
-                "target_price":             None,
-                "current_price":            None,
-                "price_target_upside_score": 0.0,
                 "quality_piotroski_score":  0.0,
                 "congress_score":           0.0,
+                "recent_upgrade_downgrade": {},
                 "edgar_score_legacy":       0.0,
                 "insider_score_legacy":     0.0,
                 "news_score_legacy":        0.0,
@@ -1834,7 +1831,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "volume_spike":            1.0,
                 "_edgar_ok":               edgar_ok,
                 "_scoring_error":          True,
-                "_fmp_structural_failure": fmp_exc.path,  # PATCH 08: track broken endpoint
+                "_fmp_structural_failure": fmp_exc.path,
             }
         except Exception as exc:
             log.warning("Scoring failed for %s: %s", ticker, exc)
@@ -1850,23 +1847,16 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
                 "news_sentiment_score":     0.0,
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
-                "analyst_revision_score":   0.0,
-                "analyst_revision_n":       0,
-                "transcript_tone_score":    0.0,
-                "transcript_tone_source":   "none",
-                "recent_upgrade_downgrade": {},
-                "target_price":             None,
-                "current_price":            None,
-                "price_target_upside_score": 0.0,
                 "quality_piotroski_score":  0.0,
                 "congress_score":           0.0,
+                "recent_upgrade_downgrade": {},
                 "edgar_score_legacy":       0.0,
                 "insider_score_legacy":     0.0,
                 "news_score_legacy":        0.0,
                 "momentum_score_legacy":    0.0,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
-                "form4_purchase_count":    0,  # Fix #6: scoring failed → no parsed purchases
+                "form4_purchase_count":    0,
                 "quiver_evidence":         {},
                 "news_sentiment_source":   "none",
                 "news_buzz_source":        "none",
@@ -1963,7 +1953,8 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
             with ThreadPoolExecutor(max_workers=4) as eu_pool:
                 eu_futures = {
                     eu_pool.submit(
-                        _score_ticker_international, e, _regional_baseline(e)
+                        _score_ticker_international, e, _regional_baseline(e),
+                        _bulk_piotroski_idx, _bulk_consensus_idx
                     ): e.ticker
                     for e in raw_entries
                     if e.market.value in ("EUROPE", "ASIA")
@@ -2009,7 +2000,7 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         )
 
     # ── Orthogonality diagnostics (Fix #2 + Fix #3) ──────────────────────────
-    log.warning(_WEIGHTS_MIGRATION_NOTE)
+    log.info("Weights (9-factor schema): %s", WEIGHTS)
     from regime_trader.scoring.insider_signals import log_conviction_breadth_correlation  # noqa: PLC0415
     _us_results = [r for r in results if r.get("market", "USA") == "USA"]
     log_conviction_breadth_correlation(_us_results)
@@ -2052,27 +2043,11 @@ def run(tickers_file: Path, log_dir: Path, max_workers: int = 8) -> Dict[str, An
         "momentum_long,momentum_legacy", 0.2,
     )
 
-    # Analyst triplet orthogonality (all three are sell-side derived — check for redundancy)
+    # analyst_consensus vs momentum (check for sell-side momentum chasing)
     _pearson(
         [r.get("analyst_consensus_score", 0.0) for r in _us_results],
-        [r.get("analyst_revision_score", 0.0) for r in _us_results],
-        "analyst_consensus,analyst_revision", 0.5,
-    )
-    _pearson(
-        [r.get("analyst_consensus_score", 0.0) for r in _us_results],
-        [r.get("price_target_upside_score", 0.0) for r in _us_results],
-        "analyst_consensus,price_target_upside", 0.5,
-    )
-    _pearson(
-        [r.get("analyst_revision_score", 0.0) for r in _us_results],
-        [r.get("price_target_upside_score", 0.0) for r in _us_results],
-        "analyst_revision,price_target_upside", 0.5,
-    )
-    # Transcript vs news sentiment (both are text-based — check overlap)
-    _pearson(
-        [r.get("transcript_tone_score", 0.0) for r in _us_results],
-        [r.get("news_sentiment_score", 0.0) for r in _us_results],
-        "transcript_tone,news_sentiment", 0.4,
+        [r.get("momentum_long_score", 0.0) for r in _us_results],
+        "analyst_consensus,momentum_long", 0.4,
     )
 
     # ── Fix #5: source_reliability migration notice ───────────────────────────
@@ -2312,6 +2287,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--tickers-file", type=Path, default=Path("config/universe.csv"))
     parser.add_argument("--log-dir",      type=Path, default=Path("logs"))
     parser.add_argument("--max-workers",  type=int,  default=8)
+    parser.add_argument("--bulk-cache",   type=Path, default=None,
+                        help="Path to bulk snapshot dir (from fmp_bulk_prefetch.py)")
     parser.add_argument("--verbose",      action="store_true")
     args = parser.parse_args(argv)
 
@@ -2322,7 +2299,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     try:
-        run(args.tickers_file, args.log_dir, args.max_workers)
+        run(args.tickers_file, args.log_dir, args.max_workers, bulk_cache=args.bulk_cache)
         return 0
     except Exception as exc:
         log.exception("Pipeline failed: %s", exc)

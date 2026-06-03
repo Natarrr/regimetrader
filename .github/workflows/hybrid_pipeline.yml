@@ -4,23 +4,31 @@ name: hybrid_pipeline
 # Hybrid Quant + Claude pipeline
 #
 # Flow:
-#   1. [quant]         Run EDGAR/FMP scoring → produce shortlist JSON artifact
-#   2. [regime]        Fit regime detector → tag current regime in shortlist
-#   3. [claude]        Run Claude analysis on shortlist (gated by FMP_KEY + ANTHROPIC_KEY)
-#   4. [gate]          Validate JSON schema; apply auto-execution thresholds
-#   5. [audit]         Upload full audit bundle (cache, schema report, cost summary)
+#   1. [quant]              Load edgar_3x top-lists; validate freshness
+#   2. [reshape]            Reshape to 9-factor shortlist schema
+#   3. [regime]             Detect regime (VIX thresholds aligned with kill-switch)
+#   4. [preflight_cost]     Token cost estimate — accounts for transcript size
+#   5. [claude]             Claude analysis on shortlist with full factor context
+#   6. [gate]               Schema validation + auto-execute gate
+#   7. [audit]              Upload full audit bundle
 #
 # Triggers:
 #   - schedule: 08:30 ET on trading days (12:30 UTC)
 #   - workflow_dispatch with optional overrides
 #
+# VIX regime thresholds (aligned with _apply_vix_overlay kill-switch):
+#   VIX < 20  → Normal
+#   VIX 20-29 → Bear (graduated caution — reduce shortlist floor to 85)
+#   VIX ≥ 30  → Panic/Crash (kill-switch: BUY signals suppressed)
+#
+# Cost model (transcript-aware, claude-sonnet-4-6):
+#   Input:  (8000 transcript + 600 quant context) tokens × $3/Mtoken
+#   Output: 450 tokens × $15/Mtoken
+#   Per symbol: ~$0.031.  At 20 shortlist: $0.62.  Cap: $2.00 → max 64 symbols.
+#
 # Secrets required:
 #   ANTHROPIC_API_KEY, FMP_API_KEY
-#   DISCORD_WEBHOOK_URL (optional — for run summary notification)
-#
-# Cost controls:
-#   CLAUDE_COST_CAP_USD  (default $2.00 per run)
-#   SHORTLIST_QUINTILE_FLOOR (default 80 — top 20%)
+#   DISCORD_WEBHOOK_URL (optional)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -50,6 +58,12 @@ on:
         default: "true"
         type: choice
         options: ["true", "false"]
+      include_transcripts:
+        description: "Include earnings call transcripts in Claude prompt"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
 
 permissions:
   contents: read
@@ -57,26 +71,26 @@ permissions:
 
 concurrency:
   group: hybrid_pipeline
-  cancel-in-progress: false   # never kill a live trading run
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: "3.11"
   CLAUDE_MODEL: "claude-sonnet-4-6"
   CLAUDE_COST_CAP_USD: ${{ github.event.inputs.cost_cap_usd || '2.00' }}
   SHORTLIST_QUINTILE_FLOOR: ${{ github.event.inputs.shortlist_floor || '80' }}
+  INCLUDE_TRANSCRIPTS: ${{ github.event.inputs.include_transcripts || 'true' }}
 
-# ─────────────────────────────────────────────────────────────────────────────
 jobs:
 
-  # ── 1. Quant scoring ────────────────────────────────────────────────────────
+  # ── 1. Load & reshape quant data ────────────────────────────────────────────
   quant:
     name: Load edgar_3x top lists
     runs-on: ubuntu-latest
-    # edgar_3x 08:00 UTC run takes ~40 min → completes ~08:40. hybrid_pipeline fires at
-    # 12:30 UTC — safe margin. dawidd6 fetches the most recent successful edgar_3x artifact.
     outputs:
       shortlist_artifact: ${{ steps.export.outputs.artifact_name }}
       regime: ${{ steps.regime.outputs.regime }}
+      vix: ${{ steps.regime.outputs.vix }}
+      kill_switch: ${{ steps.regime.outputs.kill_switch }}
 
     steps:
       - name: Checkout
@@ -91,8 +105,7 @@ jobs:
           cache: pip
 
       - name: Install minimal deps
-        run: |
-          python -m pip install --upgrade pip
+        run: python -m pip install --upgrade pip
 
       - name: Download edgar_3x top-lists artifact
         uses: dawidd6/action-download-artifact@v8
@@ -110,7 +123,6 @@ jobs:
           from datetime import datetime, timezone
           from pathlib import Path
 
-          # Check intel_source_status.json first, fall back to top_lists.json
           candidates = [
               Path("logs/intel_source_status.json"),
               Path("logs/top_lists.json"),
@@ -126,11 +138,9 @@ jobs:
                       print(f"::warning::Could not parse {p.name}: {e}")
 
           if data is None:
-              print("::warning::No edgar_3x artifact found — shortlist will be empty. "
-                    "Check edgar_3x workflow on GitHub Actions.")
-              sys.exit(0)  # Soft fail: produce empty shortlist rather than block
+              print("::warning::No edgar_3x artifact found — shortlist will be empty.")
+              sys.exit(0)
 
-          # Extract timestamp from either schema
           ts_str = (
               data.get("computed_at")
               or data.get("generated_at")
@@ -139,7 +149,7 @@ jobs:
           )
 
           if not ts_str:
-              print("::warning::Artifact has no timestamp field — cannot verify freshness. Proceeding.")
+              print("::warning::Artifact has no timestamp — cannot verify freshness. Proceeding.")
               sys.exit(0)
 
           try:
@@ -150,21 +160,18 @@ jobs:
               sys.exit(0)
 
           print(f"Artifact age: {age_h:.1f}h (timestamp: {ts_str[:19]})")
-
-          # Hard fail if artifact is more than 12 hours old
           MAX_AGE_HOURS = 12
           if age_h > MAX_AGE_HOURS:
               print(
                   f"::error::Artifact is {age_h:.1f}h old (threshold: {MAX_AGE_HOURS}h). "
-                  f"edgar_3x has likely failed multiple consecutive runs. "
-                  f"hybrid_pipeline should not proceed with stale data."
+                  f"edgar_3x has likely failed. Refusing stale data."
               )
               sys.exit(1)
-
           print(f"Freshness OK: {age_h:.1f}h < {MAX_AGE_HOURS}h threshold.")
           PYEOF
 
-      - name: Reshape top_lists → shortlist.json
+      # Reshape to 9-factor schema — includes analyst_consensus and quality_piotroski
+      - name: Reshape top_lists → shortlist.json (9-factor schema)
         run: |
           python - <<'PYEOF'
           import json, os, pathlib
@@ -179,27 +186,41 @@ jobs:
               shortlist = [e["ticker"] for e in top_buys]
               candidates = [
                   {
-                      "symbol":            e["ticker"],
-                      "smart_money_score": e.get("final_score", 0.0),
-                      # 7-factor schema (with legacy 5-factor fallback keys)
-                      "insider_score":     (e.get("factors", {}).get("insider_conviction")
-                                            or e.get("factors", {}).get("insider", 0.0)),
-                      "inst_score":        e.get("factors", {}).get("congress", 0.0),
-                      "momentum_score":    (e.get("factors", {}).get("momentum_long")
-                                            or e.get("factors", {}).get("momentum", 0.0)),
-                      "edgar_score":       (e.get("factors", {}).get("insider_breadth")
-                                            or e.get("factors", {}).get("edgar", 0.0)),
+                      "symbol":              e["ticker"],
+                      "smart_money_score":   e.get("final_score", 0.0),
+                      # 9-factor schema
+                      "insider_conviction":  e.get("factors", {}).get("insider_conviction", 0.0),
+                      "insider_breadth":     e.get("factors", {}).get("insider_breadth", 0.0),
+                      "congress":            e.get("factors", {}).get("congress", 0.0),
+                      "news_sentiment":      e.get("factors", {}).get("news_sentiment", 0.0),
+                      "news_buzz":           e.get("factors", {}).get("news_buzz", 0.0),
+                      "momentum_long":       e.get("factors", {}).get("momentum_long", 0.0),
+                      "volume_attention":    e.get("factors", {}).get("volume_attention", 0.0),
+                      "analyst_consensus":   e.get("factors", {}).get("analyst_consensus", 0.0),
+                      "quality_piotroski":   e.get("factors", {}).get("quality_piotroski", 0.0),
+                      # Metadata for Claude context
+                      "badge":               e.get("badge", ""),
+                      "market_cap_tier":     e.get("market_cap_tier", ""),
+                      "piotroski_raw":       e.get("piotroski_raw", None),
                   }
                   for e in top_buys
               ]
-              payload = {"shortlist": shortlist, "candidates": candidates}
+              payload = {
+                  "shortlist": shortlist,
+                  "candidates": candidates,
+                  "weights": data.get("weights", {}),
+                  "vix": data.get("vix", 0.0),
+                  "kill_switch": data.get("kill_switch", False),
+              }
 
           out = pathlib.Path("data/pipeline/shortlist.json")
           out.parent.mkdir(parents=True, exist_ok=True)
           out.write_text(json.dumps(payload, indent=2))
-          print(f"Wrote shortlist: {len(payload['shortlist'])} tickers")
+          print(f"Wrote shortlist: {len(payload['shortlist'])} tickers (9-factor schema)")
           PYEOF
 
+      # VIX regime thresholds now aligned with kill-switch logic:
+      #   <20 = Normal, 20-29 = Bear (graduated), ≥30 = Panic/Crash (kill-switch)
       - name: Detect regime
         id: regime
         run: |
@@ -209,22 +230,30 @@ jobs:
           src = pathlib.Path("logs/top_lists.json")
           if not src.exists():
               regime = "Normal"
+              vix_val = 0.0
+              kill_switch = False
           else:
               data = json.loads(src.read_text())
-              if data.get("kill_switch"):
-                  regime = "Panic/Crash"
+              kill_switch = bool(data.get("kill_switch", False))
+              try:
+                  vix_val = float(data.get("vix") or 0)
+              except (TypeError, ValueError):
+                  vix_val = 0.0
+
+              if kill_switch or vix_val >= 30:
+                  regime = "Panic/Crash"   # kill-switch active — BUYs suppressed
+              elif vix_val >= 20:
+                  regime = "Bear"          # graduated caution
               else:
-                  try:
-                      vix_val = float(data.get("vix") or 0)
-                  except (TypeError, ValueError):
-                      vix_val = 0.0
-                  regime = "Bear" if vix_val >= 25 else "Normal"
+                  regime = "Normal"
 
           out = os.environ.get("GITHUB_OUTPUT", "")
           if out:
               with open(out, "a") as f:
                   f.write(f"regime={regime}\n")
-          print(f"Regime: {regime}")
+                  f.write(f"vix={vix_val:.1f}\n")
+                  f.write(f"kill_switch={str(kill_switch).lower()}\n")
+          print(f"Regime: {regime} | VIX: {vix_val:.1f} | Kill-switch: {kill_switch}")
           PYEOF
 
       - name: Export artifact name
@@ -238,12 +267,16 @@ jobs:
           path: data/pipeline/
           retention-days: 7
 
-  # ── 2. Preflight cost gate ──────────────────────────────────────────────────
+  # ── 2. Preflight cost gate (transcript-aware) ────────────────────────────────
   preflight_cost_gate:
     name: Preflight Cost Gate
     needs: quant
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
+    # Skip Claude if kill-switch is active — no point running analysis on suppressed BUYs
+    if: needs.quant.outputs.kill_switch != 'true'
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -256,33 +289,58 @@ jobs:
           name: ${{ needs.quant.outputs.shortlist_artifact }}
           path: data/pipeline/
 
-      - name: Evaluate inbound shortlist cost surface
+      # Transcript-aware cost model:
+      # With transcripts (default): 8000 token transcript + 600 quant context = 8600 input
+      # Without transcripts: 600 input tokens only
+      # Output: 450 tokens (structured JSON analysis)
+      # claude-sonnet-4-6: $3/Mtoken input, $15/Mtoken output
+      - name: Evaluate cost surface (transcript-aware)
         env:
           CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
+          INCLUDE_TRANSCRIPTS: ${{ env.INCLUDE_TRANSCRIPTS }}
         run: |
-          python3 -c "
+          python3 - <<'EOF'
           import json, os, sys
 
           with open('data/pipeline/shortlist.json') as f:
               pipeline_data = json.load(f)
 
           shortlist = pipeline_data.get('shortlist', [])
-          # ~1500 input + 300 output tokens per symbol (includes 2000-char transcript block)
-          # at claude-sonnet-4-6 pricing (\$3/Mtoken input, \$15/Mtoken output)
-          input_cost  = len(shortlist) * 1500 * 3.00  / 1_000_000
-          output_cost = len(shortlist) * 300  * 15.00 / 1_000_000
+          include_transcripts = os.getenv('INCLUDE_TRANSCRIPTS', 'true').lower() == 'true'
+
+          # Token model — transcript-aware
+          TRANSCRIPT_TOKENS = 8_000  # FMP earning-call-transcript-latest median
+          QUANT_CONTEXT_TOKENS = 600  # 9-factor scores + metadata
+          OUTPUT_TOKENS = 450
+
+          if include_transcripts:
+              input_tokens_per_symbol = TRANSCRIPT_TOKENS + QUANT_CONTEXT_TOKENS
+          else:
+              input_tokens_per_symbol = QUANT_CONTEXT_TOKENS
+
+          # claude-sonnet-4-6 pricing
+          input_cost  = len(shortlist) * input_tokens_per_symbol * 3.00  / 1_000_000
+          output_cost = len(shortlist) * OUTPUT_TOKENS             * 15.00 / 1_000_000
           estimated_cost = round(input_cost + output_cost, 4)
+          cost_per_symbol = round((input_cost + output_cost) / max(len(shortlist), 1), 5)
 
           cap = float(os.getenv('CLAUDE_COST_CAP_USD', '2.00'))
-          print(f'Shortlist size: {len(shortlist)} symbols')
-          print(f'Estimated API cost: \${estimated_cost:.4f} (cap: \${cap:.2f})')
+          max_symbols = int(cap / cost_per_symbol) if cost_per_symbol > 0 else 999
+
+          print(f"Shortlist size: {len(shortlist)} symbols")
+          print(f"Mode: {'with transcripts' if include_transcripts else 'quant only'}")
+          print(f"Tokens/symbol: {input_tokens_per_symbol} input + {OUTPUT_TOKENS} output")
+          print(f"Cost/symbol: ${cost_per_symbol:.5f}")
+          print(f"Estimated total: ${estimated_cost:.4f} (cap: ${cap:.2f})")
+          print(f"Max symbols at cap: {max_symbols}")
 
           if estimated_cost > cap:
-              print(f'CRITICAL: Estimated cost \${estimated_cost:.4f} exceeds cap \${cap:.2f}. Aborting.')
+              print(f"CRITICAL: ${estimated_cost:.4f} exceeds cap ${cap:.2f}.")
+              print(f"Trim shortlist to {max_symbols} symbols or raise cost_cap_usd.")
               sys.exit(1)
 
           print('Preflight cost validation cleared.')
-          "
+          EOF
 
   # ── 3. Claude analysis ──────────────────────────────────────────────────────
   claude:
@@ -315,11 +373,13 @@ jobs:
       - name: Run Claude analysis on shortlist
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT || '' }}
           CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
           REGIME: ${{ needs.quant.outputs.regime }}
+          VIX: ${{ needs.quant.outputs.vix }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          INCLUDE_TRANSCRIPTS: ${{ env.INCLUDE_TRANSCRIPTS }}
         run: |
           python - <<'EOF'
           import json, sys, os, logging
@@ -328,12 +388,16 @@ jobs:
 
           from analysis.claude_client import ClaudeClient, validate_analysis_schema
           from analysis.earnings_analyzer import (
-              build_prompt, cross_check_citations, should_auto_execute
+              build_prompt, cross_check_citations, should_auto_execute,
+              fetch_transcript,   # NEW: Ultimate-tier earning-call-transcript-latest
           )
 
           regime = os.getenv("REGIME", "Unknown")
+          vix = os.getenv("VIX", "0.0")
           dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+          include_transcripts = os.getenv("INCLUDE_TRANSCRIPTS", "true").lower() == "true"
           run_id = f"gh-{os.getenv('GITHUB_RUN_ID', 'local')}"
+          fmp_key = os.getenv("FMP_API_KEY", "")
 
           with open("data/pipeline/shortlist.json") as f:
               pipeline_data = json.load(f)
@@ -350,14 +414,33 @@ jobs:
 
           for symbol in shortlist:
               quant_data = quant_map.get(symbol, {})
-              prompt = build_prompt(symbol, quant_data, [], regime)
+
+              # Fetch transcript if enabled (FMP Ultimate: earning-call-transcript-latest)
+              # Cycle time 4-6h — safe at 12:30 UTC for prior-session transcripts
+              transcript_text = ""
+              if include_transcripts and fmp_key and not dry_run:
+                  try:
+                      transcript_text = fetch_transcript(symbol, fmp_key)
+                  except Exception as e:
+                      logging.warning(f"{symbol}: transcript fetch failed ({e}) — proceeding without")
+
+              # build_prompt now accepts transcript kwarg and 9-factor quant_data
+              prompt = build_prompt(
+                  symbol,
+                  quant_data,
+                  [],
+                  regime,
+                  vix=vix,
+                  transcript=transcript_text,
+              )
 
               if dry_run:
                   print(f"[DRY RUN] Would analyse {symbol} — skipping API call")
                   results.append({
                       "symbol": symbol,
                       "dry_run": True,
-                      "prompt_preview": prompt[:200] + "...",
+                      "prompt_preview": prompt[:300] + "...",
+                      "has_transcript": bool(transcript_text),
                   })
                   continue
 
@@ -365,7 +448,7 @@ jobs:
                   analysis = client.analyze(
                       symbol=symbol,
                       prompt=prompt,
-                      prompt_version="v1.2",
+                      prompt_version="v1.3",   # bumped: 9-factor + transcript context
                   )
                   violations = cross_check_citations(analysis, [])
                   auto_exec = should_auto_execute(
@@ -378,8 +461,15 @@ jobs:
                       "analysis": analysis,
                       "citation_violations": violations,
                       "auto_execute": auto_exec,
+                      "has_transcript": bool(transcript_text),
+                      "regime": regime,
+                      "vix": vix,
                   })
-                  print(f"{symbol}: score={analysis['score']} conf={analysis['confidence']:.2f} action={analysis['recommended_action']} auto_exec={auto_exec}")
+                  print(
+                      f"{symbol}: score={analysis['score']} conf={analysis['confidence']:.2f} "
+                      f"action={analysis['recommended_action']} auto_exec={auto_exec} "
+                      f"transcript={'Y' if transcript_text else 'N'}"
+                  )
               except Exception as exc:
                   print(f"ERROR {symbol}: {exc}")
                   results.append({"symbol": symbol, "error": str(exc)})
@@ -438,7 +528,21 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  # ── 4. Gate & human review summary ─────────────────────────────────────────
+  # ── 4. Kill-switch bypass summary ────────────────────────────────────────────
+  kill_switch_notice:
+    name: Kill-Switch Active Notice
+    needs: quant
+    runs-on: ubuntu-latest
+    if: needs.quant.outputs.kill_switch == 'true'
+    steps:
+      - name: Log kill-switch state
+        run: |
+          echo "## ⚠️ VIX Kill-Switch Active" >> $GITHUB_STEP_SUMMARY
+          echo "VIX=${{ needs.quant.outputs.vix }} ≥ 30 — BUY signals suppressed." >> $GITHUB_STEP_SUMMARY
+          echo "Claude analysis skipped. SELL signals remain live." >> $GITHUB_STEP_SUMMARY
+          echo "Kill-switch state logged for audit trail: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_STEP_SUMMARY
+
+  # ── 5. Gate & human review summary ──────────────────────────────────────────
   gate:
     name: Gate & Audit Summary
     needs: [quant, claude]
@@ -459,18 +563,23 @@ jobs:
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| Regime | ${{ needs.quant.outputs.regime }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| VIX | ${{ needs.quant.outputs.vix }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Kill-switch | ${{ needs.quant.outputs.kill_switch }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Cost cap | \$${CLAUDE_COST_CAP_USD} |" >> $GITHUB_STEP_SUMMARY
           echo "| Shortlist floor | ${SHORTLIST_QUINTILE_FLOOR} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Transcripts | ${INCLUDE_TRANSCRIPTS} |" >> $GITHUB_STEP_SUMMARY
 
           if [ -f data/pipeline/claude_results.json ]; then
             python3 - <<'EOF'
-          import json, os
+          import json
           with open("data/pipeline/claude_results.json") as f:
               results = json.load(f)
-          approved = [r for r in results if r.get("auto_execute")]
+          approved   = [r for r in results if r.get("auto_execute")]
           violations = [r for r in results if r.get("citation_violations")]
-          errors = [r for r in results if r.get("error")]
+          with_tx    = [r for r in results if r.get("has_transcript")]
+          errors     = [r for r in results if r.get("error")]
           print(f"- Analysed: {len(results)}")
+          print(f"- With transcripts: {len(with_tx)}")
           print(f"- Auto-execute approved: {len(approved)}")
           print(f"- Citation violations: {len(violations)}")
           print(f"- Errors: {len(errors)}")
@@ -481,5 +590,5 @@ jobs:
                   print(f"| {r['symbol']} | {a.get('score')} | {a.get('recommended_action')} |")
           EOF
           else
-            echo "No Claude results (dry run or skipped)"
+            echo "No Claude results (dry run, kill-switch, or skipped)"
           fi

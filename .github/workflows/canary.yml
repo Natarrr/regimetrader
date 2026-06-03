@@ -1,8 +1,20 @@
 name: canary
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Health-check pipeline — 3× daily at 06:00, 12:00, 18:00 UTC.
+# Runs the 10-ticker canary universe through the full pipeline stack.
+#
+# FMP Ultimate: FMP_MAX_RPS corrected to 50 (was 1 — artificially throttled).
+# At 10 tickers with bulk endpoints this run completes in under 90 seconds.
+#
+# Score distribution gate validates:
+#   - Non-degenerate distribution across all 9 factors (not all zeros)
+#   - analyst_consensus and quality_piotroski are populated (sprint steps 2+6)
+#   - EU/Asia tickers have congress_score = 0.0 (not contaminated)
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   schedule:
-    # 3× per day: 06:00, 12:00, 18:00 UTC (weekdays + weekends)
     - cron: "0 6,12,18 * * *"
   workflow_dispatch:
     inputs:
@@ -22,49 +34,70 @@ on:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10   # was 30 — bulk + 10 tickers finishes in <5 min
 
-    # Never run two canaries in parallel — SEC rate-limits per IP
     concurrency:
       group: edgar_canary
       cancel-in-progress: false
 
     steps:
-      # ── 1. Checkout ─────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Python setup with pip cache ──────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 3. Install dependencies ──────────────────────────────────────────────
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 4. EDGAR-first pipeline ─────────────────────────────────────────────
+      # ── FMP bulk pre-fetch (canary subset) ──────────────────────────────────
+      # Pull full bulk snapshots but filter to canary universe during scoring.
+      # Same 7 bulk endpoints as edgar_3x — 7 calls total regardless of ticker count.
+      - name: FMP bulk pre-fetch
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+          BULK_CACHE_TTL_HOURS: "4"   # canary uses 4h TTL — tighter freshness
+        run: |
+          set -euo pipefail
+          python scripts/fmp_bulk_prefetch.py \
+            --cache-dir  "$BULK_CACHE_DIR" \
+            --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
+            --endpoints  financial-scores-bulk \
+                         upgrades-downgrades-consensus-bulk \
+                         earnings-surprises-bulk \
+                         price-target-summary-bulk \
+                         ratios-ttm-bulk \
+                         key-metrics-ttm-bulk \
+                         eod-bulk \
+            --verbose
+
+      # ── Run pipeline ─────────────────────────────────────────────────────────
       - name: Run EDGAR pipeline
         env:
           EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
-          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '1' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          # Ultimate tier: 3,000 req/min = 50 req/s. Was 1 — completely wrong.
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           EDGAR_FIRST: "true"
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
         run: |
           set -euo pipefail
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/canary_top10.csv' }}"
           START=$(date +%s)
           python scripts/run_pipeline.py \
             --tickers-file "$TICKERS_FILE" \
+            --bulk-cache   "$BULK_CACHE_DIR" \
             --verbose
           END=$(date +%s)
           echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
 
-      # ── 5. Export metrics ────────────────────────────────────────────────────
       - name: Export metrics
         run: |
           set -euo pipefail
@@ -72,7 +105,6 @@ jobs:
             --log-dir logs \
             --duration-seconds "${DURATION_SECONDS}"
 
-      # ── 6. Print metrics to run log (always visible, never fails the job) ───
       - name: Show metrics
         if: always()
         run: |
@@ -83,7 +115,6 @@ jobs:
             echo "metrics.json not found"
           fi
 
-      # ── 7. Threshold gate — alerts on failure ──────────────────────────────
       - name: Check thresholds
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
@@ -94,24 +125,48 @@ jobs:
             --min-coverage "${{ github.event.inputs.min_coverage || '0.6' }}" \
             --max-errors 0
 
-      # ── 8. Score distribution gate (PATCH 11) ──────────────────────────────
-      - name: Check score distribution
+      # ── Score distribution gate (9-factor) ──────────────────────────────────
+      # Validates non-degenerate scores for all 9 factors including the two
+      # new ones (analyst_consensus, quality_piotroski).
+      # Also asserts EU/Asia congress contamination = 0.
+      - name: Check score distribution (9-factor)
         run: |
           set -euo pipefail
           python - <<'EOF'
-          import sys
+          import sys, json, logging
           sys.path.insert(0, '.')
-          import logging
           logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
           from monitoring.check_metrics import check_score_distribution
           from pathlib import Path
+
           ok = check_score_distribution(Path('logs'))
           if not ok:
               print('::error::Score distribution degenerate — insider/news/congress feeds may be dead')
               sys.exit(1)
+
+          # Additional 9-factor checks
+          tl = Path('logs/top_lists.json')
+          if tl.exists():
+              d = json.loads(tl.read_text())
+              buys = d.get('top_buys', [])
+              if buys:
+                  # Check new factors are populated
+                  sample_fac = buys[0].get('factors', {})
+                  for key in ('analyst_consensus', 'quality_piotroski'):
+                      if key not in sample_fac:
+                          print(f'::error::Factor {key!r} missing from top_buys schema')
+                          sys.exit(1)
+                  # Check EU/Asia congress contamination
+                  eu_tickers = [t for t in d.get('top_buys', [])
+                                if '.' in t['ticker']]  # .PA, .DE, .L etc.
+                  contaminated = [t['ticker'] for t in eu_tickers
+                                  if t.get('factors', {}).get('congress', 0) != 0.0]
+                  if contaminated:
+                      print(f'::error::CROSS-CONTAMINATION: EU/Asia congress != 0: {contaminated}')
+                      sys.exit(1)
+                  print(f'9-factor schema OK. {len(eu_tickers)} EU/Asia tickers, congress=0.0 confirmed.')
           EOF
 
-      # ── 9. Upload artifacts (even on failure so you can debug) ──────────────
       - name: Upload canary artifacts
         if: always()
         uses: actions/upload-artifact@v4

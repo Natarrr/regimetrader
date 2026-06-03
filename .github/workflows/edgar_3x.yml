@@ -2,17 +2,41 @@ name: edgar_3x
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EDGAR data pipeline — 3× daily at 00:00, 08:00, 16:00 UTC.
-# Each run fetches full 160-ticker universe, generates top_lists.json,
-# and uploads it as artifact "top-lists" for the daily Discord workflow.
 #
-# SEC rate-limit note: concurrency group "edgar_data_fetch" prevents two runs
-# from hitting the SEC simultaneously. If a run is still in progress when the
-# next schedule fires, the new run waits (cancel-in-progress: false).
+# FMP Ultimate tier: 3,000 calls/min (50 req/s).  All per-ticker FMP loops
+# have been replaced with bulk endpoints — 160 individual calls → 1 call each:
+#
+#   financial-scores-bulk          → quality_piotroski (piotroskiScore)
+#   upgrades-downgrades-consensus-bulk → analyst_consensus
+#   earnings-surprises-bulk        → PEAD boost to news_sentiment
+#   price-target-summary-bulk      → price_target_upside
+#   ratios-ttm-bulk                → Piotroski verification + quality factors
+#   key-metrics-ttm-bulk           → additional fundamental context
+#   eod-bulk                       → replaces per-ticker EOD price fetches
+#
+# Net FMP call reduction per run: ~1,280 → ~20  (98% reduction)
+# Timeout reduced from 60 → 25 minutes now that FMP is no longer the bottleneck.
+#
+# WEIGHTS (enforced in generate_top_lists, must sum to 1.0):
+#   insider_conviction:  0.25   # was 0.30
+#   insider_breadth:     0.12   # was 0.15
+#   congress:            0.12   # was 0.22 — binary US-only signal, reduced
+#   news_sentiment:      0.10
+#   news_buzz:           0.05
+#   momentum_long:       0.15
+#   volume_attention:    0.03
+#   analyst_consensus:   0.10   # NEW — upgrades-downgrades-consensus-bulk
+#   quality_piotroski:   0.08   # NEW — financial-scores-bulk (piotroskiScore gate)
+#   TOTAL:               1.00
+#
+# EU/Asia note: analyst_consensus and quality_piotroski apply to all exchanges.
+# congress_score remains 0.0 (not 0.5) for non-US tickers.
 #
 # Relation to other workflows:
-#   canary.yml        — 10-ticker health check 3×/day (separate group)
-#   nightly_edgar.yml — deep backfill at 00:00 UTC (kept for compatibility)
-#   market_intel.yml  — CI unit tests (push/PR triggered)
+#   canary.yml              — 10-ticker health check 3×/day (separate group)
+#   nightly_edgar.yml       — manual full-universe backfill only
+#   market_intel.yml        — CI unit tests (push/PR triggered)
+#   hybrid_pipeline.yml     — weekday Claude analysis at 12:30 UTC
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -36,8 +60,8 @@ on:
 jobs:
   fetch-and-rank:
     runs-on: ubuntu-latest
-    # 160 tickers via ThreadPoolExecutor — EDGAR + FMP + yfinance ≈ 40 min max
-    timeout-minutes: 60
+    # EDGAR + FMP bulk + scoring — 20 min max (was 60 before bulk migration)
+    timeout-minutes: 25
 
     concurrency:
       group: edgar_data_fetch
@@ -58,11 +82,10 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 2b. Restore congress/CIK cache across intraday runs ──────────────────
-      # congress_cache.json has a 24h TTL in run_pipeline.py.  Without persisting
-      # it, each CI run fetches Quiver fresh — intraday data changes cause
-      # cross-sectional congress scores to reshuffle and rankings to flip.
-      # Key resets daily so stale data never survives past midnight UTC.
+      # ── 2b. Restore daily pipeline cache ────────────────────────────────────
+      # Persists congress_cache.json (24h TTL) and bulk snapshot cache across
+      # the three intraday runs.  Bulk EOD/ratios snapshots are large but stable
+      # within a trading day — caching avoids re-downloading 150 MB on each run.
       - name: Get cache date
         id: cache_date
         run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
@@ -84,14 +107,51 @@ jobs:
       - name: Install full pipeline deps
         run: pip install -r requirements.txt
 
-      # ── 4. EDGAR fetch — 3-attempt retry with 30s/60s backoff ───────────────
+      # ── 4. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
+      # Download all seven bulk snapshots once before the ticker loop.
+      # Each bulk endpoint returns all symbols; the pipeline filters to universe.
+      # Writes to .cache/bulk_snapshots/ so the 00:00 run's cache is reused
+      # by the 08:00 and 16:00 runs (TTL=24h enforced in fetch script).
+      #
+      # Endpoints used (all stable/ routes, Ultimate-exclusive):
+      #   financial-scores-bulk          — piotroskiScore (0-9)
+      #   upgrades-downgrades-consensus-bulk — analyst consensus grade
+      #   earnings-surprises-bulk        — most-recent EPS surprise for PEAD
+      #   price-target-summary-bulk      — consensus PT, analyst count, age
+      #   ratios-ttm-bulk                — ROA, CFO, debtRatio, currentRatio, etc.
+      #   key-metrics-ttm-bulk           — revenuePerShare, peRatio cross-checks
+      #   eod-bulk                       — last EOD close for all tickers
+      - name: FMP bulk pre-fetch (Ultimate)
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+          BULK_CACHE_TTL_HOURS: "23"
+        run: |
+          set -euo pipefail
+          python scripts/fmp_bulk_prefetch.py \
+            --cache-dir  "$BULK_CACHE_DIR" \
+            --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
+            --endpoints  financial-scores-bulk \
+                         upgrades-downgrades-consensus-bulk \
+                         earnings-surprises-bulk \
+                         price-target-summary-bulk \
+                         ratios-ttm-bulk \
+                         key-metrics-ttm-bulk \
+                         eod-bulk \
+            --verbose
+
+      # ── 5. EDGAR fetch — 3-attempt retry ────────────────────────────────────
+      # FMP is no longer the bottleneck; EDGAR SEC rate-limit (10 req/s) drives
+      # total runtime.  FMP_MAX_RPS=50 saturates Ultimate without exceeding limit.
       - name: EDGAR full-universe fetch
         id: edgar_fetch
         env:
           EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'regime-trader-research n.tardy@hotmail.fr' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
-          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '48' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           EDGAR_FIRST: "true"
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
         run: |
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
           LOG_DIR="logs"
@@ -101,10 +161,11 @@ jobs:
           for ATTEMPT in 1 2 3; do
             echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
             START=$(date +%s)
-            if timeout 55m python scripts/run_pipeline.py \
+            if timeout 20m python scripts/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
-              --max-workers  4 \
+              --max-workers  8 \
               --log-dir      "$LOG_DIR" \
+              --bulk-cache   "$BULK_CACHE_DIR" \
               --verbose; then
               END=$(date +%s)
               echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
@@ -125,7 +186,7 @@ jobs:
             exit 1
           fi
 
-      # ── 5. Export metrics ────────────────────────────────────────────────────
+      # ── 6. Export metrics ────────────────────────────────────────────────────
       - name: Export metrics
         if: always()
         run: |
@@ -133,36 +194,40 @@ jobs:
             --log-dir logs \
             --duration-seconds "${DURATION_SECONDS:-0}"
 
-      # ── 6. Generate top_lists.json ───────────────────────────────────────────
+      # ── 7. Generate top_lists.json ───────────────────────────────────────────
       #
-      # Seven-factor scoring: insider_conviction(0.30) insider_breadth(0.15)
-      # congress(0.22) news_sentiment(0.10) news_buzz(0.05) momentum_long(0.15)
-      # volume_attention(0.03) — weights mirror run_pipeline.WEIGHTS.
-      # Congress data from House/Senate Stock Watcher S3 (no API key needed).
-      # Market cap tiers assigned by absolute thresholds (large ≥$10B, mid ≥$2B).
+      # Nine-factor scoring (weights enforced: sum = 1.0):
+      #   insider_conviction(0.25) insider_breadth(0.12) congress(0.12)
+      #   news_sentiment(0.10) news_buzz(0.05) momentum_long(0.15)
+      #   volume_attention(0.03) analyst_consensus(0.10) quality_piotroski(0.08)
+      #
+      # quality_piotroski applied as multiplicative gate:
+      #   piotroskiScore < 3 → BUY score multiplied by 0.0 (suppressed)
+      #   piotroskiScore 3-5 → multiplied by 0.6 (discounted)
+      #   piotroskiScore 6+  → multiplied by 1.0 (full weight)
+      #   EU/Asia: gate applies. congress: 0.0 for non-US tickers.
       - name: Generate top lists
         env:
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
         run: |
           FORCE=""
           if [ "${{ github.event.inputs.force_regen }}" = "true" ]; then
             FORCE="--force"
           fi
           python -m backend.market_intel.generate_top_lists \
-            --log-dir logs \
-            --run-id  "$GITHUB_RUN_ID" \
+            --log-dir    logs \
+            --run-id     "$GITHUB_RUN_ID" \
+            --bulk-cache "$BULK_CACHE_DIR" \
             --verbose \
             $FORCE
 
-      # ── 6b. Institutional audit — circuit-breaker before Discord delivery ──────
-      # Validates score range, badge/score consistency, sort order, geographic
-      # leakage, cross-contamination (EU/Asia congress ≠ 0), VIX coherence,
-      # and ticker format.  Exit 1 blocks the pipeline before Discord fires.
-      - name: Audit payload (RT-QA-2026-REV4)
+      # ── 7b. Institutional audit ──────────────────────────────────────────────
+      - name: Audit payload (RT-QA-2026-REV5)
         run: python scripts/audit_payload.py --input logs/top_lists.json
 
-      # ── 6c. Gate — validate top_lists.json before Discord fires ─────────────
+      # ── 7c. Validate top_lists.json ──────────────────────────────────────────
       - name: Validate top_lists.json
         run: |
           python3 - <<'EOF'
@@ -177,20 +242,34 @@ jobs:
               print("::error::top_lists.json exists but top_buys is empty")
               sys.exit(1)
           count = d.get("ticker_count", 0)
-          print(f"Validated: {len(d['top_buys'])} top buys, {count} tickers scored")
+          # Verify 9-factor schema is present
+          sample = d["top_buys"][0].get("factors", {})
+          required = {"analyst_consensus", "quality_piotroski"}
+          missing = required - set(sample.keys())
+          if missing:
+              print(f"::error::Missing 9-factor keys in top_buys[0].factors: {missing}")
+              sys.exit(1)
+          # Weight sum assertion
+          weights = d.get("weights", {})
+          if weights:
+              total = sum(weights.values())
+              if abs(total - 1.0) > 1e-6:
+                  print(f"::error::WEIGHTS sum={total:.8f} != 1.0")
+                  sys.exit(1)
+          print(f"Validated: {len(d['top_buys'])} top buys, {count} tickers scored, 9-factor schema OK")
           EOF
 
-      # ── 7. Generate satellite insights ──────────────────────────────────────
+      # ── 8. Generate satellite insights ──────────────────────────────────────
       - name: Generate satellite insights
         continue-on-error: true
         env:
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY || '' }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
         run: |
           python -m backend.market_intel.satellite_factors \
             --log-dir logs \
             --verbose
 
-      # ── 8. Check Minsky insider stress ──────────────────────────────────────
+      # ── 9. Check Minsky insider stress ──────────────────────────────────────
       - name: Check Minsky insider stress
         if: always()
         env:
@@ -198,17 +277,17 @@ jobs:
         run: |
           python -m monitoring.minsky_alert --log-dir logs
 
-      # ── 9. Generate run execution summary ────────────────────────────────────
+      # ── 10. Run execution summary ────────────────────────────────────────────
       - name: Generate Run Execution Summary
         if: always()
         run: |
           echo "## EDGAR 3× Run — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f logs/top_lists.json ]; then
-            echo "### 📊 Pipeline Ranking Metrics (Top 5 Buys)" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Pipeline Ranking Metrics (Top 5 Buys)" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo '| # | Ticker | Score | Badge | IC | IB | Cong | NS | NB | Mom | Vol |' >> "$GITHUB_STEP_SUMMARY"
-            echo '|---|---|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | IC | IB | Cong | NS | NB | Mom | Vol | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json
           try:
@@ -216,22 +295,24 @@ jobs:
                   d = json.load(f)
               for i, t in enumerate(d.get('top_buys', [])[:5], 1):
                   fac = t.get('factors', {})
-                  print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | {t['badge']} | "
-                        f"{fac.get('insider_conviction', fac.get('edgar', 0)):.2f} | "
-                        f"{fac.get('insider_breadth', fac.get('insider', 0)):.2f} | "
+                  print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | "
+                        f"{fac.get('insider_conviction', 0):.2f} | "
+                        f"{fac.get('insider_breadth', 0):.2f} | "
                         f"{fac.get('congress', 0):.2f} | "
-                        f"{fac.get('news_sentiment', fac.get('news', 0)):.2f} | "
+                        f"{fac.get('news_sentiment', 0):.2f} | "
                         f"{fac.get('news_buzz', 0):.2f} | "
-                        f"{fac.get('momentum_long', fac.get('momentum', 0)):.2f} | "
-                        f"{fac.get('volume_attention', 0):.2f} |")
+                        f"{fac.get('momentum_long', 0):.2f} | "
+                        f"{fac.get('volume_attention', 0):.2f} | "
+                        f"{fac.get('analyst_consensus', 0):.2f} | "
+                        f"{fac.get('quality_piotroski', 0):.2f} |")
           except Exception as e:
-              print(f"| — | _summary unavailable: {e}_ | | | | | | | | | |")
+              print(f"| — | _summary unavailable: {e}_ | | | | | | | | | | |")
           EOF
           else
             echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # ── 10. Upload artifacts ──────────────────────────────────────────────────
+      # ── 11. Upload artifacts ─────────────────────────────────────────────────
       - name: Upload top-lists artifact
         if: always()
         uses: actions/upload-artifact@v4

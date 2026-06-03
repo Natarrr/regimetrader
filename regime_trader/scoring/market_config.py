@@ -1,21 +1,25 @@
 """regime_trader.scoring.market_config — per-market factor availability and weight renormalization.
 
-Diagnostic-driven configuration (updated 2026-05-30 Phase-0 smoke-test):
+Diagnostic-driven configuration (updated 2026-06-03, 9-factor schema):
 
 Phase-0 smoke-test results (FMP Ultimate, stable/ routes):
   PASS:  EU:quote, EU:ratios-ttm, ASIA:quote, ASIA:ratios-ttm
+  PASS:  upgrades-downgrades-consensus-bulk — exchange-agnostic, covers EU/Asia
   EMPTY: EU/ASIA news/stock (returns 0 articles for non-US tickers)
   N/A:   insider/congress — no EU MAR / EDINET / STOCK-Act equivalent via FMP
 
-The earlier claim "all EU/Asia FMP endpoints return 403" was based on retired
-/api/v3/ routes. Under stable/, quote and ratios work for EU/Asia, but the
-factor-availability matrix is unchanged because the EMPTY news routes and the
-structurally-absent insider/congress sources are what drive factor counts.
+Schema migration (12 → 9 factors):
+  Removed: analyst_revision, price_target_upside, transcript_tone
+  Reason:  sell-side triplet correlation risk (Grinold-Kahn 2000); staleness risk
+           on quarterly PT targets; transcript tone redundant with news_sentiment.
 
 Therefore:
-  US     — 12 factors (full WEIGHTS)
-  EUROPE — 4 factors: momentum_long + volume_attention + quality_piotroski + price_target_upside
-  ASIA   — 4 factors: momentum_long + volume_attention + quality_piotroski + price_target_upside
+  US     — 9 factors (full WEIGHTS)
+  EUROPE — 5 factors: momentum_long + volume_attention + quality_piotroski
+                       + analyst_consensus + news_sentiment + news_buzz
+           (analyst_consensus now sourced from upgrades-downgrades-consensus-bulk,
+            which covers global exchanges; news remains EMPTY for EU)
+  ASIA   — same as EUROPE
 
 Structurally absent factors (no data source available) are excluded from
 renormalize_weights_for_market so their weight is redistributed proportionally
@@ -78,10 +82,7 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
         "momentum_long_score",
         "volume_attention_score",
         "analyst_consensus_score",
-        "analyst_revision_score",
-        "price_target_upside_score",
         "quality_piotroski_score",
-        "transcript_tone_score",
     }),
     Market.EUROPE: frozenset({
         # congress_score: STRUCTURALLY ABSENT — no STOCK Act equivalent in EU
@@ -89,13 +90,10 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
         # insider_breadth_score: STRUCTURALLY ABSENT — same
         # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for EU tickers
         # news_buzz_score: STRUCTURALLY ABSENT — same
-        # analyst_consensus_score: STRUCTURALLY ABSENT — FMP grades-consensus US-only
-        # analyst_revision_score: STRUCTURALLY ABSENT — FMP analyst-estimates US-only
-        # transcript_tone_score: STRUCTURALLY ABSENT — FMP transcripts US-only
         "momentum_long_score",       # FMP historical-price-eod/full ✅ (Phase-0 PASS)
         "volume_attention_score",    # FMP historical-price-eod/full ✅
-        "quality_piotroski_score",   # FMP ratios-ttm ✅ (Phase-0 PASS for SAP.DE)
-        "price_target_upside_score", # FMP price-target-consensus — partial coverage
+        "quality_piotroski_score",   # FMP financial-scores-bulk ✅ (exchange-agnostic)
+        "analyst_consensus_score",   # FMP upgrades-downgrades-consensus-bulk ✅ (global)
     }),
     Market.ASIA: frozenset({
         # congress_score: STRUCTURALLY ABSENT
@@ -103,13 +101,10 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
         # insider_breadth_score: STRUCTURALLY ABSENT — same
         # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for Asia tickers
         # news_buzz_score: STRUCTURALLY ABSENT — same
-        # analyst_consensus_score: STRUCTURALLY ABSENT — FMP grades-consensus US-only
-        # analyst_revision_score: STRUCTURALLY ABSENT — FMP analyst-estimates US-only
-        # transcript_tone_score: STRUCTURALLY ABSENT — FMP transcripts US-only
         "momentum_long_score",       # FMP historical-price-eod/full ✅ (Phase-0 PASS for 7203.T)
         "volume_attention_score",    # FMP historical-price-eod/full ✅
-        "quality_piotroski_score",   # FMP ratios-ttm ✅ (Phase-0 PASS for 7203.T)
-        "price_target_upside_score", # FMP price-target-consensus — partial coverage
+        "quality_piotroski_score",   # FMP financial-scores-bulk ✅ (exchange-agnostic)
+        "analyst_consensus_score",   # FMP upgrades-downgrades-consensus-bulk ✅ (global)
     }),
 }
 
@@ -128,14 +123,14 @@ def renormalize_weights_for_market(
     It assumes the relative IC ratios validated on the US universe are a
     reasonable baseline for the subset of available factors.
 
-    Example for EUROPE (momentum_long + volume_attention + quality_piotroski + price_target_upside):
-        base_weights["momentum_long"]       = 0.22
-        base_weights["volume_attention"]    = 0.03
-        base_weights["quality_piotroski"]   = 0.06
-        base_weights["price_target_upside"] = 0.04
-        Sum of available = 0.35
-        renormalized["momentum_long"] = 0.22 / 0.35 ≈ 0.629
-        renormalized["volume_attention"] = 0.03 / 0.35 ≈ 0.086
+    Example for EUROPE (momentum_long + volume_attention + quality_piotroski + analyst_consensus):
+        base_weights["momentum_long"]     = 0.15
+        base_weights["volume_attention"]  = 0.03
+        base_weights["quality_piotroski"] = 0.08
+        base_weights["analyst_consensus"] = 0.10
+        Sum of available = 0.36
+        renormalized["momentum_long"] = 0.15 / 0.36 ≈ 0.417
+        renormalized["analyst_consensus"] = 0.10 / 0.36 ≈ 0.278
         ...
         Sum = 1.0 ✅
 
@@ -185,7 +180,7 @@ def market_weight_coverage(market: Market, base_weights: Dict[str, float]) -> fl
     Used as metadata: EU/Asia tickers have weight_coverage < 1.0 by construction.
     A ticker-level weight_coverage < LOW_COVERAGE_THRESHOLD triggers _low_coverage=True.
 
-    Example: EUROPE has momentum_long(0.22) + volume_attention(0.03) + quality_piotroski(0.06) + price_target_upside(0.04) = 0.35 / 1.0 = 35%.
+    Example: EUROPE has momentum_long(0.15) + volume_attention(0.03) + quality_piotroski(0.08) + analyst_consensus(0.10) = 0.36 / 1.0 = 36%.
     """
     available = MARKET_FACTORS[market]
     return sum(
