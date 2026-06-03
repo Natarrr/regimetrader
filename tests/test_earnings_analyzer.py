@@ -239,8 +239,12 @@ class TestBuildPrompt:
         assert "No specific risk flags" in prompt
 
     def test_prompt_version_constant(self):
-        """Verify PROMPT_VERSION is v1.3 — cache-busting relies on this."""
-        assert PROMPT_VERSION == "v1.3"
+        """PROMPT_VERSION = base.minor + source hash (F5.3: auto drift detection)."""
+        assert PROMPT_VERSION.startswith("v1.3"), f"Base version changed: {PROMPT_VERSION}"
+        # Hash suffix is 4 hex chars: "v1.3-xxxx" = 9 chars total
+        assert len(PROMPT_VERSION) == 9, (
+            f"Expected format 'v1.3-xxxx', got {PROMPT_VERSION!r}"
+        )
 
     def test_returns_string(self):
         prompt = build_prompt("AAPL", self._base_quant(), [], "Bull")

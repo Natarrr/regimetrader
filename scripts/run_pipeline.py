@@ -1566,6 +1566,7 @@ def run(
         from regime_trader.scoring.insider_signals import (  # noqa: PLC0415
             score_insider_conviction,
             score_insider_breadth,
+            orthogonalize_insider_scores,
         )
         from regime_trader.scoring.momentum_signals import (  # noqa: PLC0415
             score_momentum_long,
@@ -1620,6 +1621,12 @@ def run(
             _p_for_breadth = _fmp_btx.get("P") or p_transactions
             _s_for_breadth = _fmp_btx.get("S") or s_transactions
             breadth_score = score_insider_breadth(_p_for_breadth, _s_for_breadth)
+            # F1.1: Gram-Schmidt partial orthogonalization — projects breadth
+            # onto the conviction axis and takes the residual, reducing the
+            # effective double-counting from a shared FMP endpoint (~r=0.75).
+            conviction_score, breadth_score = orthogonalize_insider_scores(
+                conviction_score, breadth_score
+            )
 
             # ── Fix #3: orthogonal momentum + attention signals ───────────
             price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)

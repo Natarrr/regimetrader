@@ -224,6 +224,35 @@ def score_insider_breadth(
     return round(base, 4)
 
 
+def orthogonalize_insider_scores(
+    conviction: float,
+    breadth: float,
+    r: float = 0.75,
+) -> tuple[float, float]:
+    """Gram-Schmidt partial orthogonalization of insider scores.
+
+    conviction and breadth are computed from the same FMP endpoint, producing
+    an estimated cross-sectional correlation of ~0.75 (Lakonishok & Lee 2001
+    proxy).  Without this step the effective combined IR contribution is
+    0.45 × √(1 − 0.75²) ≈ 0.30 rather than the intended 0.45 (Grinold & Kahn).
+
+    breadth_residual = breadth − r × conviction
+    Both outputs are clipped to [0.0, 1.0] and returned as-is for additive
+    weighting — conviction unchanged, breadth de-correlated.
+
+    Args:
+        conviction: raw insider_conviction_score ∈ [0, 1]
+        breadth:    raw insider_breadth_score    ∈ [0, 1]
+        r:          estimated pairwise Pearson r; recalibrate quarterly from
+                    log_conviction_breadth_correlation() output.
+
+    Returns:
+        (conviction, breadth_residual) — both clipped to [0.0, 1.0].
+    """
+    breadth_residual = breadth - r * conviction
+    return conviction, max(0.0, min(1.0, round(breadth_residual, 4)))
+
+
 def log_conviction_breadth_correlation(results: list[dict[str, Any]]) -> None:
     """Log Pearson r between conviction and breadth cross-sectionally.
 

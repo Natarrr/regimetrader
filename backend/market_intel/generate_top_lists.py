@@ -625,6 +625,34 @@ def _read_vix(log_dir: Path) -> Optional[float]:
     return None
 
 
+def _log_kill_switch_state(
+    kill_switch: bool,
+    vix: float,
+    log_dir: Path,
+    run_id: str,
+) -> None:
+    """Append kill-switch state to persistent NDJSON audit log.
+
+    Written at scoring time so the audit trail covers every run, including
+    those where the switch is inactive.  Consumers can grep for
+    kill_switch_active=true to reconstruct suppression history.
+    """
+    import os  # noqa: PLC0415 — local import avoids circular dep at module level
+    entry = {
+        "event": "kill_switch_state",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "kill_switch_active": kill_switch,
+        "vix": round(vix, 2),
+        "run_id": run_id or os.environ.get("GITHUB_RUN_ID", "local"),
+    }
+    audit_log = log_dir / "kill_switch_audit.ndjson"
+    try:
+        with audit_log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception as exc:
+        log.warning("kill_switch_audit.ndjson write failed (non-fatal): %s", exc)
+
+
 def generate(
     status: Dict[str, Any],
     run_id: str,
@@ -839,6 +867,13 @@ def generate(
             "Kill switch INACTIVE — VIX=%.1f < 30.0. Normal scoring active.",
             current_vix if current_vix is not None else 0.0,
         )
+
+    _log_kill_switch_state(
+        kill_switch=kill_switch,
+        vix=current_vix if current_vix is not None else 0.0,
+        log_dir=log_dir,
+        run_id=run_id,
+    )
 
     _log_promoted(top_buys, shadow_top_buys, log_dir, run_id)
 

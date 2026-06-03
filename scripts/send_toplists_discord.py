@@ -475,7 +475,40 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
         combined = f"{catalyst_str} | {risk_str}"
         catalyst_str = combined[:80]
 
+    # F6.2: Append top-3 weighted factor contribution line.
+    # Format: "Top: momentum_long(0.19) analyst_consensus(0.08) insider_conviction(0.05)"
+    # Only appended when entry carries normalized factor scores from top_lists.json.
+    factor_line = _factor_contribution_line(entry)
+    if factor_line:
+        catalyst_str = f"{catalyst_str}\n{factor_line}"
+
     return catalyst_str
+
+
+def _factor_contribution_line(entry: Dict[str, Any]) -> str:
+    """Return top-3 weighted factor contributions as a compact string.
+
+    Contribution = weight × normalized_score.  Pulls weights from the
+    'weights' key in the entry (written by generate_top_lists) or falls back
+    to regime_trader.weights.WEIGHTS.  Returns empty string when no factor
+    data is present.
+    """
+    from regime_trader.weights import WEIGHTS as _DEFAULT_WEIGHTS  # noqa: PLC0415
+
+    factors = entry.get("factors")
+    if not factors:
+        return ""
+    weights = entry.get("weights") or _DEFAULT_WEIGHTS
+    contributions = {
+        k: round(float(weights.get(k, 0.0)) * float(factors.get(k, 0.0)), 4)
+        for k in factors
+        if float(factors.get(k, 0.0) or 0.0) > 0.0
+    }
+    if not contributions:
+        return ""
+    top3 = sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:3]
+    parts = [f"{k.replace('_', ' ')}({v:.2f})" for k, v in top3]
+    return "Top: " + " · ".join(parts)
 
 
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:

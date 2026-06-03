@@ -259,6 +259,57 @@ def _check_insider_feed_density(results: list, log) -> bool:
     return True
 
 
+# Factors that must never be all-zeros when the canary universe has price history.
+# momentum_long and volume_attention are sourced from FMP historical-price-eod/full
+# which is always available for any listed security — an all-zero result is a
+# definitive dead-feed indicator, not sparsity.
+_ALWAYS_NONZERO_FACTORS: dict[str, str] = {
+    "momentum_long_score":    "momentum_long",
+    "volume_attention_score": "volume_attention",
+}
+
+
+def check_per_factor_distribution(log_dir: "Path") -> bool:
+    """Hard gate: factors that must never be all-zeros for any canary run.
+
+    momentum_long and volume_attention are computed from price/volume history,
+    which is structurally always available for listed securities.  If either
+    is all-zeros across the entire top_buys list the price data feed is dead.
+
+    Returns False and logs ERROR if a mandatory-nonzero factor is all-zeros.
+    Returns True (pass) otherwise, including when top_lists.json is absent.
+    """
+    import logging as _log  # noqa: PLC0415
+    _logger = _log.getLogger(__name__)
+
+    tl = log_dir / "top_lists.json"
+    if not tl.exists():
+        return True  # can't check without artifact
+
+    try:
+        d = json.loads(tl.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _logger.warning("check_per_factor_distribution: could not parse top_lists.json: %s", exc)
+        return True
+
+    buys = d.get("top_buys", [])
+    if not buys:
+        return True
+
+    ok = True
+    for score_key, factor_name in _ALWAYS_NONZERO_FACTORS.items():
+        scores = [float(t.get("factors", {}).get(factor_name, 0.0) or 0.0) for t in buys]
+        if all(s == 0.0 for s in scores):
+            _logger.error(
+                "DEAD SIGNAL: factor %r is 0.0 for ALL %d top_buys tickers. "
+                "Price data feed (FMP historical-price-eod/full) may be dead.",
+                factor_name, len(scores),
+            )
+            ok = False
+
+    return ok
+
+
 def _format_alert_body(metrics: dict, reasons: List[str]) -> str:
     lines = ["🚨 EDGAR canary failed:"]
     lines.extend(f"  • {r}" for r in reasons)

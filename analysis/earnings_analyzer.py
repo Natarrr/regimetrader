@@ -33,9 +33,33 @@ from regime_trader.services.fmp_client import FMPClient
 log = logging.getLogger(__name__)
 
 # ── Prompt versioning ─────────────────────────────────────────────────────────
-# Bump MAJOR when prompt intent changes (cache-busting).
-# Bump MINOR for wording tweaks (cache still valid).
-PROMPT_VERSION = "v1.3"
+# MAJOR.MINOR are bumped manually when prompt intent / wording changes.
+# The hash suffix is auto-generated from the build_prompt source so any
+# unintentional drift in the function body is captured in the audit log.
+# PROMPT_VERSION is assigned after build_prompt is defined (bottom of module).
+_PROMPT_VERSION_BASE = "v1.3"
+
+
+def get_prompt_version() -> str:
+    """Return prompt version string with auto-generated source hash.
+
+    Format: "v1.3-{sha256[:4]}" — minor stays manual, hash detects silent drift.
+    A changed hash in claude_audit.ndjson means build_prompt changed without
+    a manual version bump — always investigate before deploying to production.
+
+    Safe to call at any time after the module has finished loading.
+    """
+    import hashlib, inspect  # noqa: PLC0415
+    try:
+        src = inspect.getsource(build_prompt)
+        h = hashlib.sha256(src.encode()).hexdigest()[:4]
+        return f"{_PROMPT_VERSION_BASE}-{h}"
+    except Exception:
+        return _PROMPT_VERSION_BASE
+
+
+# Populated at the bottom of this module after build_prompt is defined.
+PROMPT_VERSION = _PROMPT_VERSION_BASE
 
 # ── Auto-execution thresholds ─────────────────────────────────────────────────
 _DEFAULT_QUANT_THRESHOLD = float(os.getenv("AUTO_EXEC_QUANT_MIN", "80"))
@@ -243,6 +267,10 @@ def build_prompt(
         risk_block=risk_block,
         transcript_block=transcript_block,
     )
+
+
+# Assign after build_prompt is defined so inspect.getsource() succeeds.
+PROMPT_VERSION = get_prompt_version()
 
 
 # ── Shortlist builder ─────────────────────────────────────────────────────────

@@ -305,6 +305,7 @@ jobs:
             logs/form4_summary.csv
             logs/marketintel_events.json
             logs/intel_source_status.json
+            logs/kill_switch_audit.ndjson
             logs/*.log
             .monitoring/edgar_cb.json
             .monitoring/alert_state.json
