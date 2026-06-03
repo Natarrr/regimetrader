@@ -101,8 +101,7 @@ _cik_map_loaded  = False
 # The existing structural_failure_seen event only covers fetch_fmp_insider_all().
 # This set tracks any other endpoint (analyst, transcript, etc.) that returns 4xx.
 # Written from multiple threads — using a thread-safe set via a lock.
-import threading as _threading
-_structural_failures_lock = _threading.Lock()
+_structural_failures_lock = threading.Lock()
 _structural_failures_in_scoring: set = set()  # set of broken endpoint paths
 
 # ── SEC rate-limited HTTP ─────────────────────────────────────────────────────
