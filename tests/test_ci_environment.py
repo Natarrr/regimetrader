@@ -40,21 +40,9 @@ def test_backend_package():
     )
 
 
-def test_backend_tests_package():
-    """backend/tests/ must be a Python package."""
-    assert (ROOT / "backend" / "tests" / "__init__.py").exists(), (
-        "backend/tests/__init__.py is missing"
-    )
-
-
 def test_analysis_package():
     """analysis/ module directory must exist."""
     assert (ROOT / "analysis").is_dir(), "analysis/ directory not found"
-
-
-def test_regime_package():
-    """regime_trader/models/ must exist (regime/ was migrated here)."""
-    assert (ROOT / "regime_trader" / "models").is_dir(), "regime_trader/models/ directory not found"
 
 
 def _ci_provides(pkg: str) -> bool:

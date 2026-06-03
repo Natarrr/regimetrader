@@ -307,12 +307,24 @@ def main(argv: list[str] | None = None) -> int:
     if fmp_health_path.exists():
         try:
             fmp_health = json.loads(fmp_health_path.read_text(encoding="utf-8"))
+            quarantined = set(fmp_health.get("quarantined_endpoints", []))
+            if quarantined:
+                log.info("FMP quarantined endpoints (expected, no alarm): %s", sorted(quarantined))
             if fmp_health.get("has_structural_failure"):
-                failed_routes = fmp_health.get("failures", {})
-                reason = f"FMP structural failure on route(s): {failed_routes}"
-                reasons.append(reason)
-                ok = False
-                log.error("FMP structural failure detected: %s", failed_routes)
+                # Only alarm on failures that are NOT in the quarantine list.
+                failed_routes = {
+                    k: v for k, v in fmp_health.get("failures", {}).items()
+                    if k not in quarantined and v > 0
+                }
+                if failed_routes:
+                    reason = f"FMP structural failure on route(s): {failed_routes}"
+                    reasons.append(reason)
+                    ok = False
+                    log.error("FMP structural failure detected: %s", failed_routes)
+                else:
+                    log.info(
+                        "FMP has_structural_failure=true but all failures are quarantined — no alarm"
+                    )
         except Exception as exc:
             log.warning("could not read fmp_health.json: %s", exc)
 

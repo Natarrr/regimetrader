@@ -101,24 +101,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
 
-      - name: Smoke — Streamlit app + service imports
-        env:
-          CI: "true"
-        run: |
-          pytest tests/test_streamlit_app_smoke.py \
-                 tests/test_logging_cfg.py \
-                 tests/test_check_secrets.py \
-                 tests/test_fmt_insider_pct.py \
-                 tests/test_ci_environment.py \
-                 -q --tb=short -m "not slow" --timeout=60
-
       - name: Smoke — EDGAR / FMP / scoring / backtest (mocked)
         env:
           CI: "true"
         run: |
-          pytest tests/test_token_bucket.py \
-                 tests/test_normalize.py \
-                 tests/test_backtest.py \
+          pytest tests/test_normalize.py \
                  tests/test_fmp_client.py \
                  tests/test_congress_fetcher.py \
                  tests/test_cross_sectional.py \

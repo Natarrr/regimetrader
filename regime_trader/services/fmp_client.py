@@ -51,6 +51,14 @@ _TIMEOUT = 15
 _DEFAULT_CACHE_ROOT = Path(__file__).parent.parent.parent / ".cache" / "fmp"
 _DEFAULT_MAX_RPS = 30.0
 
+# Endpoints confirmed HTTP 404 on stable/ routes as of 2026-06-03.
+# _get() skips these entirely — no HTTP call, no failure count, no health-report alarm.
+# Remove from this set once FMP confirms the route is live and re-verify with fmp_smoke_test.py.
+_DEAD_ENDPOINTS: frozenset[str] = frozenset({
+    "earnings-surprises",   # HTTP 404 all symbols — not yet migrated to stable/
+    "upgrades-downgrades",  # HTTP 404 all symbols — use grades-consensus instead
+})
+
 # Per-bucket cache TTL (seconds).
 _TTL: Dict[str, int] = {
     "congress":     12 * 3600,   # stub — nothing fetched, but preserved for compatibility
@@ -189,6 +197,10 @@ class FMPClient:
         if not self._api_key or self._session is None:
             return None
 
+        if path.lstrip("/") in _DEAD_ENDPOINTS:
+            log.debug("_get: skipping quarantined endpoint %r", path)
+            return None
+
         elapsed = time.monotonic() - self._last_call
         if elapsed < self._min_delay:
             time.sleep(self._min_delay - elapsed)
@@ -251,15 +263,6 @@ class FMPClient:
         return result
 
     # ── Congress ───────────────────────────────────────────────────────────────
-
-    def get_quote_full(self, ticker: str) -> Dict:
-        """Extended quote with 52-week high/low, 50/200-day MA, marketCap.
-
-        Fields: price, yearHigh, yearLow, priceAvg50, priceAvg200, marketCap,
-                volume, previousClose. Replaces yf.Ticker(t).info for price-
-                based filters (cannibal filter, stock picker, macro trend).
-        """
-        return self.get_quote(ticker)
 
     def get_congress_trades(self, ticker: str, lookback_days: int = 180) -> Dict:
         """Congressional trading data from public S3 Stock Watcher feeds.
@@ -748,93 +751,6 @@ class FMPClient:
             pass
         return result
 
-    def get_key_metrics_ttm(self, ticker: str) -> Dict:
-        """TTM key metrics (stable/key-metrics-ttm). PASS in smoke-test.
-
-        Replaces yfinance .info scraping for quality/cannibal filters.
-        """
-        if not self._api_key:
-            return {}
-        cached = self._cache_read("key_metrics", ticker)
-        if cached is not None:
-            return cached
-        data = self._get("key-metrics-ttm",
-                         {"symbol": ticker}, bucket="key_metrics") or []
-        result = data[0] if isinstance(data, list) and data else {}
-        self._cache_write("key_metrics", ticker, result)
-        return result
-
-    def get_key_metrics_ttm_bulk(self, tickers: List[str]) -> Dict[str, Dict]:
-        """Bulk key metrics TTM — stable/key-metrics-ttm/bulk (Ultimate only).
-
-        Returns {ticker: metrics_dict}. Falls back to serial calls if bulk
-        endpoint returns 404 (not available on plan). Uses runtime probe
-        so the fallback is transparent.
-        """
-        if not self._api_key or not tickers:
-            return {}
-
-        cached_probe = self._cache_read("key_metrics", "_bulk_km_available")
-        bulk_available = cached_probe if isinstance(cached_probe, bool) else True
-
-        if bulk_available:
-            try:
-                # FMP bulk accepts comma-separated symbols, max ~200
-                chunks = [tickers[i:i+200] for i in range(0, len(tickers), 200)]
-                combined: Dict[str, Dict] = {}
-                for chunk in chunks:
-                    data = self._get(
-                        "key-metrics-ttm/bulk",
-                        {"symbols": ",".join(chunk)},
-                        bucket="key_metrics",
-                    ) or []
-                    if isinstance(data, list):
-                        for row in data:
-                            sym = row.get("symbol")
-                            if sym:
-                                combined[sym] = row
-                if combined:
-                    self._cache_write("key_metrics", "_bulk_km_available", True)
-                    return combined
-            except FMPEndpointError as exc:
-                if exc.status == 404:
-                    log.warning(
-                        "key-metrics-ttm/bulk: HTTP 404 — endpoint not on plan, "
-                        "caching fallback decision and using serial calls"
-                    )
-                    self._cache_write("key_metrics", "_bulk_km_available", False)
-                    bulk_available = False
-
-        # Serial fallback
-        result: Dict[str, Dict] = {}
-        for ticker in tickers:
-            row = self.get_key_metrics_ttm(ticker)
-            if row:
-                result[ticker] = row
-        return result
-
-    def get_esg_score(self, ticker: str) -> Dict:
-        """ESG score record (stable/esg-scores). PASS in smoke-test.
-
-        ESG is used as a negative screen only — per Harvey, Liu & Zhu (2016):
-        ESG does not generate alpha, only manages risk.
-        """
-        if not self._api_key:
-            return {}
-        cache_key = f"esg_{ticker}"
-        cached = self._cache_read("key_metrics", cache_key)
-        if cached is not None:
-            return cached
-        data = self._get(
-            "esg-scores", {"symbol": ticker}, bucket="key_metrics") or []
-        if isinstance(data, dict):
-            result = data
-        else:
-            result = data[0] if isinstance(data, list) and data else {}
-        if result:
-            self._cache_write("key_metrics", cache_key, result)
-        return result
-
     def get_ratios_ttm(self, ticker: str) -> Dict:
         """TTM financial ratios (stable/ratios-ttm). PASS in smoke-test."""
         if not self._api_key:
@@ -846,47 +762,6 @@ class FMPClient:
             "ratios-ttm", {"symbol": ticker}, bucket="ratios") or []
         result = data[0] if isinstance(data, list) and data else {}
         self._cache_write("ratios", ticker, result)
-        return result
-
-    def get_ratios_ttm_bulk(self, tickers: List[str]) -> Dict[str, Dict]:
-        """Bulk ratios TTM — stable/ratios-bulk (Ultimate only). Falls back to serial."""
-        if not self._api_key or not tickers:
-            return {}
-
-        cached_probe = self._cache_read("ratios", "_bulk_ratios_available")
-        bulk_available = cached_probe if isinstance(cached_probe, bool) else True
-
-        if bulk_available:
-            try:
-                chunks = [tickers[i:i+200] for i in range(0, len(tickers), 200)]
-                combined: Dict[str, Dict] = {}
-                for chunk in chunks:
-                    data = self._get(
-                        "ratios-bulk",
-                        {"symbols": ",".join(chunk)},
-                        bucket="ratios",
-                    ) or []
-                    if isinstance(data, list):
-                        for row in data:
-                            sym = row.get("symbol")
-                            if sym:
-                                combined[sym] = row
-                if combined:
-                    self._cache_write("ratios", "_bulk_ratios_available", True)
-                    return combined
-            except FMPEndpointError as exc:
-                if exc.status == 404:
-                    log.warning(
-                        "ratios-bulk: HTTP 404 — endpoint not on plan, caching fallback"
-                    )
-                    self._cache_write("ratios", "_bulk_ratios_available", False)
-                    bulk_available = False
-
-        result: Dict[str, Dict] = {}
-        for ticker in tickers:
-            row = self.get_ratios_ttm(ticker)
-            if row:
-                result[ticker] = row
         return result
 
     def get_quality_score(self, ticker: str) -> float:
@@ -1122,4 +997,5 @@ class FMPClient:
             "calls": dict(self.endpoint_calls),
             "failures": dict(self.endpoint_failures),
             "has_structural_failure": any(self.endpoint_failures.values()),
+            "quarantined_endpoints": sorted(_DEAD_ENDPOINTS),
         }

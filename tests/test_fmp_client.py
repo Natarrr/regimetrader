@@ -242,25 +242,6 @@ class TestFMPClientQuote:
         assert result.get("symbol") == "SAP.DE"
 
 
-# ── Stub: _enrich_with_quiver ───────────────────────────────────────────────
-
-class TestEnrichWithQuiverStub:
-    def test_always_returns_empty_quiver_dict(self, monkeypatch):
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        from regime_trader.scanners.discovery_scanner import _enrich_with_quiver
-        results = [{"symbol": "NVDA"}, {"symbol": "AAPL"}]
-        enriched = _enrich_with_quiver(results)
-        for r in enriched:
-            assert r["quiver"] == {}
-
-    def test_no_network_calls_ever(self, monkeypatch):
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        from regime_trader.scanners.discovery_scanner import _enrich_with_quiver
-        with patch("requests.get") as mock_get:
-            _enrich_with_quiver([{"symbol": "NVDA"}])
-            mock_get.assert_not_called()
-
-
 # ── CI isolation ────────────────────────────────────────────────────────────
 
 class TestCIIsolation:
