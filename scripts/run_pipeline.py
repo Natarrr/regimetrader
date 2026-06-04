@@ -1248,121 +1248,120 @@ def _score_ticker_international(
     bulk_piotroski_idx: Optional[Dict[str, Any]] = None,
     bulk_consensus_idx: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Unified scorer for EUROPE and ASIA entries using the same factor formulas as US.
+    """Unified scorer for EUROPE and ASIA entries.
 
-    Replaces _score_ticker_eu and _score_ticker_asia (Fix #5).
+    PATCH v2.2-global: reads all factor scores from entry.raw_factors,
+    which is now populated by FMPFetcher.prepare() with the full global
+    factor set (insider, news, analyst consensus, piotroski, price target).
 
-    Fix #5 diagnostic (2026-05-23): FMP Ultimate returns 403 Forbidden for all
-    non-US symbols. yfinance provides price+volume universally. Therefore:
-
-      Available factors:  momentum_long_score, volume_attention_score
-      Structurally absent: insider_conviction_score, insider_breadth_score,
-                           congress_score, news_sentiment_score, news_buzz_score
+    congress_score and transcript_tone_score remain 0.0 — these have no
+    global data source (STOCK Act / FMP transcripts are US-only).
 
     Factor output semantics:
-      - None  → structurally absent: factor was never computable for this market.
-                 Weight excluded from renormalization denominator.
-      - 0.0   → dead signal: factor is available for this market but returned no data
-                 for this ticker (e.g. momentum_long=0.0 for a <252-bar ticker).
-                 Weight is included but ticker is penalized in cross-sectional normalizer.
-
-    final_score is NOT set here — it is computed downstream after cross-sectional
-    neutralization with group_by=("market", "sector", "cap_tier"), then weights
-    are renormalized via renormalize_weights_for_market(WEIGHTS, market).
-
-    source_reliability is preserved as metadata; it is NOT a score multiplier (Fix #5).
+      0.0  — dead signal: factor available but no data for this ticker
+             (e.g. no insider trades in 180d). Weight included, ticker
+             penalized in cross-sectional normalizer.
     """
-    from regime_trader.scoring.momentum_signals import score_momentum_long, score_volume_attention  # noqa: PLC0415
-
     market_str = entry.market.value  # "EUROPE" or "ASIA"
     rf = entry.raw_factors
 
     try:
-        # ── momentum_long_score (Jegadeesh-Titman 1993) ───────────────────────
-        return_12_1m = rf.get("return_12_1m")  # float | None from FMPFetcher
-        if return_12_1m is not None:
-            momentum_long_score = score_momentum_long(
-                float(return_12_1m),
-                spy_return_12_1m=spy_return_baseline,
-            )
-        else:
-            momentum_long_score = 0.0  # dead signal — insufficient history
+        def _rf(key: str, default: float = 0.0) -> float:
+            val = rf.get(key)
+            if val is None:
+                return default
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return default
 
-        # ── volume_attention_score (Barber-Odean 2008) ────────────────────────
-        volume_spike = float(rf.get("volume_spike", 0.0) or 0.0)
-        volume_attention_score = score_volume_attention(volume_spike)
+        momentum_long_score       = _rf("momentum_long_score")
+        volume_attention_score    = _rf("volume_attention_score")
+        news_sentiment_score      = _rf("news_sentiment_score")
+        news_buzz_score           = _rf("news_buzz_score")
+        insider_conviction_score  = _rf("insider_conviction_score")
+        insider_breadth_score     = _rf("insider_breadth_score")
+        analyst_consensus_score   = _rf("analyst_consensus_score")
+        analyst_revision_score    = _rf("analyst_revision_score")
+        quality_piotroski_score   = _rf("quality_piotroski_score")
+        price_target_upside_score = _rf("price_target_upside_score")
 
-        # ── price_target_upside — per-ticker FMP (partial coverage for EU/Asia) ──
-        price_target_upside_score = 0.0
-        try:
-            from regime_trader.services.fmp_client import FMPClient as _FC_pt  # noqa: PLC0415
-            _pt_client = _FC_pt()
-            if _pt_client._api_key:
-                pt_upside = _pt_client.get_upside_to_target(entry.ticker)
-                price_target_upside_score = pt_upside if pt_upside is not None else 0.0
-        except Exception as exc:
-            log.debug("price_target_upside fetch %s: %s", entry.ticker, exc)
-
-        # ── quality_piotroski — bulk index first, per-ticker FMP fallback ────────
-        # financial-scores-bulk covers global exchanges (accounting-identity based).
-        _pio_idx = bulk_piotroski_idx or {}
-        quality_piotroski_score = 0.0
-        _bulk_pio_intl = _pio_idx.get(entry.ticker.upper(), {})
-        if _bulk_pio_intl:
-            _pio_raw_intl = _bulk_pio_intl.get("piotroskiScore")
-            if _pio_raw_intl is not None:
+        # Bulk index fallback for piotroski when raw_factors value absent
+        if quality_piotroski_score == 0.0 and bulk_piotroski_idx:
+            bulk_pio = bulk_piotroski_idx.get(entry.ticker.upper(), {})
+            pio_raw = bulk_pio.get("piotroskiScore")
+            if pio_raw is not None:
                 try:
-                    quality_piotroski_score = round(int(_pio_raw_intl) / 9.0, 4)
+                    quality_piotroski_score = round(int(pio_raw) / 9.0, 4)
                 except (TypeError, ValueError):
                     pass
-        if quality_piotroski_score == 0.0:
-            try:
-                from regime_trader.services.fmp_client import FMPClient as _FC_intl  # noqa: PLC0415
-                _intl_client = _FC_intl()
-                if _intl_client._api_key:
-                    quality_piotroski_score = _intl_client.get_quality_score(entry.ticker)
-            except Exception as exc:
-                log.debug("quality_piotroski fallback %s: %s", entry.ticker, exc)
+
+        # Bulk consensus fallback when raw_factors value absent
+        if analyst_consensus_score == 0.0 and bulk_consensus_idx:
+            bulk_rec = bulk_consensus_idx.get(entry.ticker.upper())
+            if bulk_rec:
+                try:
+                    from regime_trader.scoring.analyst import _score_record as _ac  # noqa: PLC0415
+                    analyst_consensus_score, _ = _ac(entry.ticker, bulk_rec)
+                except Exception:
+                    pass
+
+        return_12_1m = rf.get("return_12_1m")
+        mktcap = _rf("market_cap", 1.0) or 1.0
 
         log.debug(
-            "EU/Asia %s (%s): quality=%.4f pt_upside=%.4f",
-            entry.ticker, market_str, quality_piotroski_score, price_target_upside_score,
+            "EU/Asia %s (%s): IC=%.2f IB=%.2f NS=%.2f NB=%.2f MO=%.2f "
+            "VA=%.2f AC=%.2f AR=%.2f QF=%.2f PT=%.2f",
+            entry.ticker, market_str,
+            insider_conviction_score, insider_breadth_score,
+            news_sentiment_score, news_buzz_score,
+            momentum_long_score, volume_attention_score,
+            analyst_consensus_score, analyst_revision_score,
+            quality_piotroski_score, price_target_upside_score,
         )
 
-        # ── structurally absent factors → None ───────────────────────────────
-        # congress, insider, news, analyst_consensus, analyst_revision,
-        # transcript_tone: no data source for non-US markets.
-        # None signals "weight excluded" in renormalize_weights_for_market.
         return {
             "ticker":                    entry.ticker,
             "company_name":              rf.get("company_name", ""),
             "sector":                    entry.sector,
             "cap_tier":                  entry.cap_tier,
             "market":                    market_str,
+            "market_cap":                mktcap,
             "source_reliability":        entry.source_reliability,
-            # Available factor scores (PATCH 07: momentum, volume, quality, pt_upside)
+            # ── All globally available factor scores ─────────────────────
+            "insider_conviction_score":  insider_conviction_score,
+            "insider_breadth_score":     insider_breadth_score,
+            "news_sentiment_score":      news_sentiment_score,
+            "news_buzz_score":           news_buzz_score,
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
+            "analyst_consensus_score":   analyst_consensus_score,
+            "analyst_revision_score":    analyst_revision_score,
             "quality_piotroski_score":   quality_piotroski_score,
             "price_target_upside_score": price_target_upside_score,
-            # Structurally absent — None (not 0.0)
-            "insider_conviction_score":  None,
-            "insider_breadth_score":     None,
-            "congress_score":            None,
-            "news_sentiment_score":      None,
-            "news_buzz_score":           None,
-            "analyst_consensus_score":   None,   # FMP grades-consensus US-only
-            "analyst_revision_score":    None,   # FMP analyst-estimates US-only
-            "transcript_tone_score":     None,   # FMP transcripts US-only
-            # Raw inputs (diagnostic)
+            # ── Structurally absent — always 0.0 ─────────────────────────
+            "congress_score":            0.0,   # no STOCK Act outside US
+            "transcript_tone_score":     0.0,   # FMP transcripts US-only
+            # ── Raw inputs (diagnostic) ───────────────────────────────────
             "return_12_1m":              return_12_1m,
-            "volume_spike":              volume_spike,
-            "news_sentiment_source":     "none",
-            "news_buzz_source":          "none",
-            # Validator-required fields
-            "market_cap":                1.0,
+            "volume_spike":              _rf("volume_spike", 1.0),
+            "news_sentiment_source":     rf.get("news_sentiment_source", "fmp"),
+            "news_buzz_source":          rf.get("news_buzz_source", "fmp"),
+            "analyst_consensus_source":  rf.get("analyst_consensus_source", "bulk"),
+            "insider_source":            rf.get("insider_source", "fmp"),
+            "target_price":              rf.get("target_price"),
+            "current_price":             rf.get("current_price"),
             "insider_usd":               0.0,
-            # final_score computed downstream after cross-sectional neutralization
+            "ceo_buy":                   False,
+            "form4_count":               0,
+            "form4_purchase_count":      0,
+            "quiver_evidence":           {},
+            "momentum_spy_relative":     float(return_12_1m - spy_return_baseline)
+                                         if return_12_1m is not None else 0.0,
+            "_correlated_signal_flag":   (
+                insider_conviction_score > 0.50 and news_sentiment_score > 0.70
+            ),
+            "_correlated_signal_discount_advisory": 0.0,
         }
 
     except Exception as exc:
@@ -1868,12 +1867,20 @@ def run(
         fmp_key = os.environ.get("FMP_API_KEY", "")
         eu_asia_fetchers = []
         if fmp_key and registry_tickers.get("EUROPE"):
-            eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key, market=MarketEnum.EUROPE))
+            eu_asia_fetchers.append(FMPFetcher(
+                api_key=fmp_key,
+                market=MarketEnum.EUROPE,
+                bulk_consensus_idx=_bulk_consensus_idx,
+            ))
             log.info("FMPFetcher added for EUROPE (%d tickers)", len(registry_tickers["EUROPE"]))
         elif not fmp_key:
             log.warning("FMP_API_KEY absent -- EUROPE section will be empty in Discord")
         if fmp_key and registry_tickers.get("ASIA"):
-            eu_asia_fetchers.append(FMPFetcher(api_key=fmp_key, market=MarketEnum.ASIA))
+            eu_asia_fetchers.append(FMPFetcher(
+                api_key=fmp_key,
+                market=MarketEnum.ASIA,
+                bulk_consensus_idx=_bulk_consensus_idx,
+            ))
             log.info("FMPFetcher added for ASIA (%d tickers)", len(registry_tickers["ASIA"]))
         elif registry_tickers.get("ASIA") and not fmp_key:
             log.warning("FMP_API_KEY absent -- ASIA section will be empty in Discord")

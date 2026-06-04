@@ -1,42 +1,33 @@
 # Path: regime_trader/config/weights.py
 #
 # WEIGHTS — canonical source for all scoring weight sets.
-# Version: v2.1-global (2026-06)
+# Version: v2.2-global (2026-06)
 #
-# Two weight sets:
-#   WEIGHTS_US     — full 9-factor set, US tickers only (EDGAR + S3 congress feeds)
-#   WEIGHTS_GLOBAL — 8-factor set, EU/Asia tickers (congress structurally absent)
+# PATCH v2.2 (2026-06):
+# WEIGHTS_GLOBAL updated now that FMP Ultimate covers insider/news/analyst
+# globally. The previous v2.1 redistribution was based on the assumption that
+# insider/news/analyst were absent for EU/Asia — that was wrong.
 #
-# Design rationale for WEIGHTS_GLOBAL
-# ─────────────────────────────────────
-# FMP Ultimate stable/ routes provide all factors globally EXCEPT congress:
-#   insider-trading/search  — MAR-compliant EU disclosures + EDINET (JP) partial
-#   upgrades-downgrades-consensus-bulk — global analyst coverage
-#   ratios-ttm-bulk         — global Piotroski components (accounting-identity based)
-#   news/stock              — global news corpus
-#   historical-price-eod/full — global price/volume history
+# Only TWO factors are absent vs US:
+#   congress (0.22)        — structurally absent (no STOCK Act equivalent)
+#   transcript_tone (0.00) — FMP earning-call-transcript-latest US-only
 #
-# congress (0.22 in WEIGHTS_US) has NO equivalent outside the US STOCK Act /
-# S3 Stock Watcher feeds. Setting it to 0.0 and renormalising is the only
-# academically honest approach — there is no proxy signal.
+# Total freed: 0.22, redistributed per academic evidence:
+#   analyst_consensus  +0.10 (Givoly & Lakonishok 1979; stronger outside US)
+#   news_sentiment     +0.03 (Tetlock 2007; global news corpus via FMP)
+#   momentum_long      +0.02 (Rouwenhorst 1998 EU momentum premium)
+#   volume_attention   +0.02
+#   quality_piotroski  +0.05 (Piotroski 2000; accounting-identity, universal)
 #
-# Redistribution of the freed 0.22:
-#   → insider_conviction  +0.08  (largest alpha source per Seyhun 1998;
-#                                  EU MAR Art.19 disclosures carry similar signal)
-#   → analyst_consensus   +0.07  (Givoly & Lakonishok 1979 estimate-revision
-#                                  signal is stronger outside the US where fewer
-#                                  retail investors process analyst upgrades)
-#   → momentum_long       +0.04  (Jegadeesh & Titman 1993; EU momentum premium
-#                                  documented by Rouwenhorst 1998)
-#   → quality_piotroski   +0.03  (Piotroski 2000 F-Score is accounting-identity
-#                                  based — universally applicable)
+# insider_conviction stays at 0.30 (same as US — MAR Art.19 = same quality
+# as SEC Form 4 per Seyhun 1998; no redistribution needed).
 #
-# Weights sum check is enforced by assert at module load time.
+# Weights sum check enforced at module load time via assert.
 # Any modification must maintain sum == 1.0.
 
-WEIGHTS_VERSION = "v2.1-global"
+WEIGHTS_VERSION = "v2.2-global"
 
-# ── US universe ───────────────────────────────────────────────────────────────
+# ── US universe (unchanged from v2.1) ─────────────────────────────────────────
 WEIGHTS_US: dict[str, float] = {
     "insider_conviction": 0.30,
     "insider_breadth":    0.15,
@@ -52,29 +43,35 @@ assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_US sums to {sum(WEIGHTS_US.values()):.8f}, not 1.0"
 )
 
-# ── Global universe — EU / Asia (congress absent, 0.22 redistributed) ─────────
+# ── Global universe — EU / Asia ────────────────────────────────────────────────
 #
-# congress = 0.0  (structural absence — NOT a soft zero / missing data)
-# The freed 0.22 is redistributed to the 4 factors with strongest
-# cross-market empirical support (citations above).
+# congress = 0.00  (structural absence — STOCK Act is US-only)
+# transcript_tone = 0.00 (FMP earning-call-transcript-latest US-only)
 #
 # Net changes vs WEIGHTS_US:
-#   insider_conviction  0.30 → 0.38  (+0.08)
-#   analyst_consensus   0.00 → 0.07  (+0.07)
-#   momentum_long       0.15 → 0.19  (+0.04)
-#   quality_piotroski   0.00 → 0.03  (+0.03)
+#   insider_conviction  0.30 → 0.30  (unchanged — MAR Art.19 parity with Form 4)
+#   analyst_consensus   0.00 → 0.10  (+0.10)
+#   news_sentiment      0.10 → 0.13  (+0.03)
+#   momentum_long       0.15 → 0.17  (+0.02)
+#   volume_attention    0.03 → 0.05  (+0.02)
+#   quality_piotroski   0.00 → 0.05  (+0.05)
 #   congress            0.22 → 0.00  (-0.22)
-#   all others          unchanged
+#   analyst_revision    0.00 → 0.00  (not wired yet)
+#   price_target_upside 0.00 → 0.00  (not wired yet)
+#   transcript_tone     —   → 0.00  (structurally absent)
 WEIGHTS_GLOBAL: dict[str, float] = {
-    "insider_conviction": 0.38,   # +0.08 — MAR Art.19 carries similar alpha
-    "insider_breadth":    0.15,   # unchanged
-    "congress":           0.00,   # structurally absent outside US
-    "news_sentiment":     0.10,   # unchanged
-    "news_buzz":          0.05,   # unchanged
-    "momentum_long":      0.19,   # +0.04 — Rouwenhorst 1998 EU momentum premium
-    "volume_attention":   0.03,   # unchanged
-    "analyst_consensus":  0.07,   # +0.07 — stronger signal in less-covered markets
-    "quality_piotroski":  0.03,   # +0.03 — accounting-identity, universal
+    "insider_conviction":  0.30,   # unchanged — MAR Art.19 parity with Form 4
+    "insider_breadth":     0.15,   # unchanged
+    "congress":            0.00,   # structurally absent outside US
+    "news_sentiment":      0.13,   # +0.03 — global news corpus via FMP
+    "news_buzz":           0.05,   # unchanged
+    "momentum_long":       0.17,   # +0.02 — Rouwenhorst 1998 EU premium
+    "volume_attention":    0.05,   # +0.02
+    "analyst_consensus":   0.10,   # +0.10 — stronger signal in less-covered markets
+    "quality_piotroski":   0.05,   # +0.05 — accounting-identity, universal
+    "analyst_revision":    0.00,   # not wired yet (sprint)
+    "price_target_upside": 0.00,   # not wired yet (sprint)
+    "transcript_tone":     0.00,   # structurally absent outside US
 }
 assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_GLOBAL sums to {sum(WEIGHTS_GLOBAL.values()):.8f}, not 1.0"
@@ -84,15 +81,6 @@ assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
 WEIGHTS = WEIGHTS_US
 
 # ── Region classifier ─────────────────────────────────────────────────────────
-# Determines which weight set applies to a given ticker.
-# Matching order: suffix check → exchange prefix → default US.
-#
-# EU suffixes  : .PA .DE .L .AS .MI .MC .BR .VX .LS .OL .ST .HE .CO .F .BE
-# Asia suffixes: .T .HK .KS .KQ .SS .SZ .NS .BO .SI .BK .JK
-#
-# Tickers without a recognised suffix are assumed US (NASDAQ/NYSE/OTC).
-# This is intentional — unknown = US is the conservative default.
-
 _EU_SUFFIXES: frozenset[str] = frozenset({
     ".PA", ".DE", ".L", ".AS", ".MI", ".MC", ".BR",
     ".VX", ".LS", ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
@@ -111,23 +99,12 @@ def get_region(ticker: str) -> str:
 
     Uses suffix matching only — no external lookup required.
     Unrecognised suffixes default to 'US' (conservative).
-
-    Examples
-    --------
-    >>> get_region("SAP.DE")
-    'EU'
-    >>> get_region("7203.T")
-    'ASIA'
-    >>> get_region("AAPL")
-    'US'
-    >>> get_region("005930.KS")
-    'ASIA'
     """
     upper = ticker.upper()
     dot_idx = upper.rfind(".")
     if dot_idx == -1:
         return "US"
-    suffix = upper[dot_idx:]   # e.g. ".DE", ".T"
+    suffix = upper[dot_idx:]
     if suffix in _EU_SUFFIXES:
         return "EU"
     if suffix in _ASIA_SUFFIXES:
@@ -136,13 +113,7 @@ def get_region(ticker: str) -> str:
 
 
 def get_weights(ticker: str) -> dict[str, float]:
-    """Return the correct weight set for *ticker*.
-
-    US tickers  → WEIGHTS_US   (full 9-factor, congress included)
-    EU/Asia     → WEIGHTS_GLOBAL (8-factor, congress = 0.0)
-
-    The returned dict is a copy — callers may not mutate the canonical sets.
-    """
+    """Return the correct weight set for ticker (copy — callers may not mutate)."""
     region = get_region(ticker)
     if region == "US":
         return dict(WEIGHTS_US)

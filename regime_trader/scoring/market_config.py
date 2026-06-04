@@ -1,41 +1,34 @@
-"""regime_trader.scoring.market_config — per-market factor availability and weight renormalization.
+# Path: regime_trader/scoring/market_config.py
+"""Per-market factor availability and weight renormalization.
 
-Diagnostic-driven configuration (updated 2026-05-30 Phase-0 smoke-test):
+PATCH v2.2-global (2026-06):
+Previous version marked insider/news/analyst as "STRUCTURALLY ABSENT" for
+EU/Asia based on Phase-0 smoke tests against retired /api/v3/ routes.
+FMP Ultimate stable/ routes confirmed globally available (2026-06-03):
 
-Phase-0 smoke-test results (FMP Ultimate, stable/ routes):
-  PASS:  EU:quote, EU:ratios-ttm, ASIA:quote, ASIA:ratios-ttm
-  EMPTY: EU/ASIA news/stock (returns 0 articles for non-US tickers)
-  N/A:   insider/congress — no EU MAR / EDINET / STOCK-Act equivalent via FMP
+  EU/Asia CONFIRMED LIVE (stable/):
+    insider-trading/search        — MAR Art.19 (EU) / EDINET partial (JP)
+    news/stock                    — global news corpus
+    upgrades-downgrades-consensus-bulk — global analyst coverage
+    analyst-estimates             — global (partial coverage mid/small)
+    ratios-ttm                    — global (accounting-identity based)
+    price-target-consensus        — global large-cap coverage
+    historical-price-eod/full     — all listed securities
 
-The earlier claim "all EU/Asia FMP endpoints return 403" was based on retired
-/api/v3/ routes. Under stable/, quote and ratios work for EU/Asia, but the
-factor-availability matrix is unchanged because the EMPTY news routes and the
-structurally-absent insider/congress sources are what drive factor counts.
-
-Therefore:
-  US     — 12 factors (full WEIGHTS)
-  EUROPE — 4 factors: momentum_long + volume_attention + quality_piotroski + price_target_upside
-  ASIA   — 4 factors: momentum_long + volume_attention + quality_piotroski + price_target_upside
-
-Structurally absent factors (no data source available) are excluded from
-renormalize_weights_for_market so their weight is redistributed proportionally
-among available factors. This preserves the relative ordering of available factors
-as validated on the US universe.
-
-Constants named here are the authoritative thresholds — do not hardcode elsewhere.
+  CONFIRMED ABSENT (structural — no global equivalent):
+    congress_score: US STOCK Act / S3 Stock Watcher only
+    transcript_tone_score: FMP earning-call-transcript-latest US-only
 """
 from __future__ import annotations
 
 from enum import Enum
 from typing import Dict, FrozenSet
 
-# Minimum tickers required for a cross-sectional bucket to apply z-score neutralization.
+# Minimum tickers required for cross-sectional z-score neutralization.
 MIN_BUCKET_SIZE: int = 5
 
-# If a ticker's final_score is computed from less than this fraction of the market's
-# total available weights, it is marked _low_coverage=True and excluded from Top-N.
-# Example: EU has 2 available factors summing to 0.18 weights. A ticker where even
-# momentum_long is None (recent IPO, no history) would have weight_coverage < 0.15.
+# If a ticker's final_score is computed from less than this fraction of the
+# market's total available weights, it is marked _low_coverage=True.
 LOW_COVERAGE_THRESHOLD: float = 0.50
 
 
@@ -45,7 +38,6 @@ class Market(str, Enum):
     ASIA = "ASIA"
 
 
-# Maps pipeline market strings (from ticker_registry.json and run_pipeline.py) to Market enum.
 PIPELINE_MARKET_MAP: Dict[str, Market] = {
     "USA":    Market.US,
     "US":     Market.US,
@@ -53,26 +45,21 @@ PIPELINE_MARKET_MAP: Dict[str, Market] = {
     "ASIA":   Market.ASIA,
 }
 
-
-# Factors POTENTIALLY available per market.
-# "Potentially" = a data source exists; absence for a specific ticker (insufficient
-# history, recent IPO) is still possible and handled downstream via None vs 0.0.
+# ── Factor availability per market ───────────────────────────────────────────
 #
-# EUROPE/ASIA rationale (updated 2026-05-30 Phase-0 smoke-test):
-#   FMP stable/ quote + ratios-ttm: PASS for EU/Asia — usable for market cap,
-#     P/E, quality factors in future phases.
-#   FMP stable/ news/stock: EMPTY for EU/Asia (0 articles for SAP.DE, 7203.T).
-#   Congress disclosures: no STOCK Act equivalent outside the US.
-#   Insider disclosures: EU MAR, Japan EDINET — no accessible API without
-#     institutional-grade subscription (Refinitiv, Bloomberg).
-#   Momentum + volume: yfinance provides universal coverage for all major
-#     exchange-listed EU/Asia symbols.
-#   Factor matrix unchanged — only documentation corrected.
+# CHANGE LOG vs previous version:
+#   EUROPE/ASIA: added insider_conviction_score, insider_breadth_score,
+#                news_sentiment_score, news_buzz_score,
+#                analyst_consensus_score, analyst_revision_score,
+#                price_target_upside_score
+#   EUROPE/ASIA: removed congress_score (US STOCK Act only)
+#   EUROPE/ASIA: removed transcript_tone_score (FMP earning-call US-only)
+
 MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
     Market.US: frozenset({
         "insider_conviction_score",
         "insider_breadth_score",
-        "congress_score",
+        "congress_score",            # US STOCK Act — US only
         "news_sentiment_score",
         "news_buzz_score",
         "momentum_long_score",
@@ -81,35 +68,39 @@ MARKET_FACTORS: Dict[Market, FrozenSet[str]] = {
         "analyst_revision_score",
         "price_target_upside_score",
         "quality_piotroski_score",
-        "transcript_tone_score",
+        "transcript_tone_score",     # FMP transcripts — US only
     }),
     Market.EUROPE: frozenset({
-        # congress_score: STRUCTURALLY ABSENT — no STOCK Act equivalent in EU
-        # insider_conviction_score: STRUCTURALLY ABSENT — no EU MAR API integrated
-        # insider_breadth_score: STRUCTURALLY ABSENT — same
-        # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for EU tickers
-        # news_buzz_score: STRUCTURALLY ABSENT — same
-        # analyst_consensus_score: STRUCTURALLY ABSENT — FMP grades-consensus US-only
-        # analyst_revision_score: STRUCTURALLY ABSENT — FMP analyst-estimates US-only
-        # transcript_tone_score: STRUCTURALLY ABSENT — FMP transcripts US-only
-        "momentum_long_score",       # FMP historical-price-eod/full ✅ (Phase-0 PASS)
-        "volume_attention_score",    # FMP historical-price-eod/full ✅
-        "quality_piotroski_score",   # FMP ratios-ttm ✅ (Phase-0 PASS for SAP.DE)
-        "price_target_upside_score", # FMP price-target-consensus — partial coverage
+        # ── Available via FMP Ultimate stable/ ───────────────────────────
+        "insider_conviction_score",   # MAR Art.19 mandatory disclosures
+        "insider_breadth_score",      # same source
+        "news_sentiment_score",       # news/stock confirmed live for EU
+        "news_buzz_score",            # same source
+        "momentum_long_score",        # historical-price-eod/full ✓
+        "volume_attention_score",     # same source
+        "analyst_consensus_score",    # upgrades-downgrades-consensus-bulk ✓
+        "analyst_revision_score",     # analyst-estimates ✓ (partial coverage)
+        "price_target_upside_score",  # price-target-consensus ✓
+        "quality_piotroski_score",    # ratios-ttm ✓
+        # ── Structurally absent ──────────────────────────────────────────
+        # congress_score:       no STOCK Act equivalent in EU
+        # transcript_tone_score: FMP earning-call-transcript-latest US-only
     }),
     Market.ASIA: frozenset({
-        # congress_score: STRUCTURALLY ABSENT
-        # insider_conviction_score: STRUCTURALLY ABSENT — EDINET not integrated
-        # insider_breadth_score: STRUCTURALLY ABSENT — same
-        # news_sentiment_score: STRUCTURALLY ABSENT — FMP news/stock EMPTY for Asia tickers
-        # news_buzz_score: STRUCTURALLY ABSENT — same
-        # analyst_consensus_score: STRUCTURALLY ABSENT — FMP grades-consensus US-only
-        # analyst_revision_score: STRUCTURALLY ABSENT — FMP analyst-estimates US-only
-        # transcript_tone_score: STRUCTURALLY ABSENT — FMP transcripts US-only
-        "momentum_long_score",       # FMP historical-price-eod/full ✅ (Phase-0 PASS for 7203.T)
-        "volume_attention_score",    # FMP historical-price-eod/full ✅
-        "quality_piotroski_score",   # FMP ratios-ttm ✅ (Phase-0 PASS for 7203.T)
-        "price_target_upside_score", # FMP price-target-consensus — partial coverage
+        # ── Available via FMP Ultimate stable/ ───────────────────────────
+        "insider_conviction_score",   # EDINET (JP) partial, KRX partial, HKEX partial
+        "insider_breadth_score",      # same source
+        "news_sentiment_score",       # news/stock confirmed live for Asia
+        "news_buzz_score",            # same source
+        "momentum_long_score",        # historical-price-eod/full ✓
+        "volume_attention_score",     # same source
+        "analyst_consensus_score",    # upgrades-downgrades-consensus-bulk ✓
+        "analyst_revision_score",     # analyst-estimates ✓ (partial coverage)
+        "price_target_upside_score",  # price-target-consensus ✓
+        "quality_piotroski_score",    # ratios-ttm ✓
+        # ── Structurally absent ──────────────────────────────────────────
+        # congress_score:       no STOCK Act equivalent in Asia
+        # transcript_tone_score: FMP earning-call-transcript-latest US-only
     }),
 }
 
@@ -118,45 +109,25 @@ def renormalize_weights_for_market(
     base_weights: Dict[str, float],
     market: Market,
 ) -> Dict[str, float]:
-    """Renormalize WEIGHTS for the factors available in this market.
+    """Renormalize base_weights for factors available in this market.
 
-    Factors unavailable for this market get weight 0.0. Available factors
-    keep their *relative proportions* from base_weights (scaled to sum to 1.0).
+    Unavailable factors get weight 0.0. Available factors keep their
+    relative proportions from base_weights, scaled to sum to 1.0.
 
-    This is a conservative renormalization: it does NOT re-weight according to
-    a new logic (e.g. "give more to momentum since it's the only factor").
-    It assumes the relative IC ratios validated on the US universe are a
-    reasonable baseline for the subset of available factors.
-
-    Example for EUROPE (momentum_long + volume_attention + quality_piotroski + price_target_upside):
-        base_weights["momentum_long"]       = 0.21
-        base_weights["volume_attention"]    = 0.03
-        base_weights["quality_piotroski"]   = 0.06
-        base_weights["price_target_upside"] = 0.03
-        Sum of available = 0.33
-        renormalized["momentum_long"] = 0.21 / 0.33 ≈ 0.636
-        renormalized["volume_attention"] = 0.03 / 0.33 ≈ 0.091
-        ...
-        Sum = 1.0 ✅
+    With WEIGHTS_GLOBAL (congress=0.0 already), EU/Asia renormalization
+    has near-100% coverage — only transcript_tone (weight 0.0) is absent.
 
     Args:
-        base_weights: The full WEIGHTS dict from run_pipeline.py (7 factors, sum=1.0).
-                      Keys are factor short names WITHOUT "_score" suffix (e.g. "momentum_long").
+        base_weights: WEIGHTS_US or WEIGHTS_GLOBAL dict (sum must be 1.0).
+                      Keys are factor short names WITHOUT "_score" suffix.
         market: Market enum value.
 
     Returns:
-        Dict with same keys as base_weights. Unavailable factors have value 0.0.
-        sum(values) == 1.0 (within float tolerance).
-
-    Raises:
-        ValueError: If no factors from base_weights are available for this market
-                    (would produce division by zero).
+        Dict with same keys as base_weights. Sum = 1.0 for available factors.
+        Unavailable factors have value 0.0.
     """
     available = MARKET_FACTORS[market]
 
-    # Map base_weights keys to factor score names (add _score suffix for lookup).
-    # base_weights keys: "momentum_long", "congress", etc.
-    # MARKET_FACTORS keys: "momentum_long_score", "congress_score", etc.
     available_weight_sum = sum(
         w for name, w in base_weights.items()
         if f"{name}_score" in available
@@ -164,9 +135,8 @@ def renormalize_weights_for_market(
 
     if available_weight_sum == 0.0:
         raise ValueError(
-            f"No factors from base_weights are available for market {market.value}. "
-            f"Available factors: {available}. "
-            f"base_weights keys: {list(base_weights.keys())}."
+            f"No factors from base_weights available for market {market.value}. "
+            f"Available: {available}. base_weights keys: {list(base_weights.keys())}."
         )
 
     result: Dict[str, float] = {}
@@ -180,12 +150,11 @@ def renormalize_weights_for_market(
 
 
 def market_weight_coverage(market: Market, base_weights: Dict[str, float]) -> float:
-    """Return the fraction of total base weight covered by this market's available factors.
+    """Return fraction of total base weight covered by this market's factors.
 
-    Used as metadata: EU/Asia tickers have weight_coverage < 1.0 by construction.
-    A ticker-level weight_coverage < LOW_COVERAGE_THRESHOLD triggers _low_coverage=True.
-
-    Example: EUROPE has momentum_long(0.21) + volume_attention(0.03) + quality_piotroski(0.06) + price_target_upside(0.03) = 0.33 / 1.0 = 33%.
+    With WEIGHTS_GLOBAL for EU/Asia:
+      congress=0.0, transcript_tone=0.0 absent → coverage ≈ 1.0
+    This is a dramatic improvement vs the old 0.33 coverage.
     """
     available = MARKET_FACTORS[market]
     return sum(

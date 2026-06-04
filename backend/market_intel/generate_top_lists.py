@@ -48,6 +48,7 @@ from regime_trader.config.weights import (
     get_region,
 )
 from backend.market_intel._score_compositor import compute_composite_score  # noqa: F401
+from backend.market_intel._generate_top_lists_intl_patch import _build_intl_entry
 
 log = logging.getLogger("generate_top_lists")
 
@@ -746,48 +747,13 @@ def generate(
             ns_scores[0], len(ns_scores),
         )
 
-    # Merge EU/Asia entries using their pre-scored final_score — bypass normalization.
-    # source_reliability dampening is already baked into final_score by _score_ticker_eu/asia,
-    # so we set source_reliability=1.0 here to prevent double-application in the dampening loop.
+    # Merge EU/Asia entries — reads all factor scores populated by FMPFetcher.
+    # source_reliability is pre-applied by _build_intl_entry (set to 1.0) to
+    # prevent double-application in the dampening loop below.
     for row in intl_results:
         if row.get("_validation_failed"):
             continue
-        entries.append({
-            "ticker":          row["ticker"],
-            "company_name":    row.get("company_name", ""),
-            "sector":          row.get("sector", "Unknown"),
-            "cap_tier":        row.get("cap_tier", "large"),
-            "market_cap":      float(row.get("market_cap", 0.0)),
-            "raw_score":       float(row.get("final_score", 0.0)),
-            "final_score":     float(row.get("final_score", 0.0)),
-            "badge":           _badge(float(row.get("final_score", 0.0))),
-            "ceo_buy":         False,
-            "form4_count":     0,
-            # EU/Asia rows carry only momentum_long + volume_attention (yfinance);
-            # insider/congress/news are structurally absent (FMP 403 for non-US).
-            # Read the 7-factor *_score keys the international scorer emits — the
-            # legacy insider_score / momentum_score keys no longer exist.
-            "factors":         {
-                "insider_conviction": 0.0,
-                "insider_breadth":    0.0,
-                "congress":           0.0,
-                "news_sentiment":     0.0,
-                "news_buzz":          0.0,
-                "momentum_long":      float(row.get("momentum_long_score") or 0.0),
-                "volume_attention":   float(row.get("volume_attention_score") or 0.0),
-            },
-            "validation_metadata": {"is_complete": False, "missing_sources": ["edgar", "congress", "news"]},
-            "quiver_evidence":         {},
-            "news_source":             "none",
-            "insider_usd":             0.0,
-            "momentum_spy_relative":   float(row.get("momentum_spy_relative", 0.0)),
-            "volume_spike":            float(row.get("volume_spike", 1.0)),
-            # dampening pre-applied by scorer; avoid double-penalty
-            "source_reliability":      1.0,
-            # audit field
-            "data_source_reliability": float(row.get("source_reliability", 1.0)),
-            "market":                  row.get("market", "USA"),
-        })
+        entries.append(_build_intl_entry(row))
     if intl_results:
         log.info(
             "Merged %d EU/Asia entries into ranked universe (pre-scored, bypass normalize)", len(intl_results))

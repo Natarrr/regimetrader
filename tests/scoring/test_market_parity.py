@@ -53,21 +53,23 @@ class TestWeightsRenormalize:
         result = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
         assert result["congress"] == 0.0
 
-    def test_europe_insider_conviction_is_zero(self):
+    def test_europe_insider_conviction_positive(self):
+        """v2.2-global: FMP insider-trading/search confirmed live for EU (MAR Art.19)."""
         result = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
-        assert result["insider_conviction"] == 0.0
+        assert result["insider_conviction"] > 0.0
 
-    def test_europe_insider_breadth_is_zero(self):
+    def test_europe_insider_breadth_positive(self):
         result = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
-        assert result["insider_breadth"] == 0.0
+        assert result["insider_breadth"] > 0.0
 
-    def test_europe_news_sentiment_is_zero(self):
+    def test_europe_news_sentiment_positive(self):
+        """v2.2-global: FMP news/stock confirmed live for EU."""
         result = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
-        assert result["news_sentiment"] == 0.0
+        assert result["news_sentiment"] > 0.0
 
-    def test_europe_news_buzz_is_zero(self):
+    def test_europe_news_buzz_positive(self):
         result = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
-        assert result["news_buzz"] == 0.0
+        assert result["news_buzz"] > 0.0
 
     def test_europe_sums_to_one(self):
         result = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
@@ -105,18 +107,18 @@ class TestWeightsRenormalize:
             )
 
     def test_market_weight_coverage_eu_below_one(self):
-        """EU covers only 2/7 factors — coverage fraction must be < 1.0."""
+        """EU covers all factors except congress — coverage ≈ 0.78 with _BASE_WEIGHTS."""
         cov = market_weight_coverage(Market.EUROPE, _BASE_WEIGHTS)
         assert cov < 1.0
-        assert cov > 0.0
+        assert cov > 0.5   # v2.2: EU now covers 6/7 factors (congress absent)
 
     def test_market_weight_coverage_us_is_one(self):
         cov = market_weight_coverage(Market.US, _BASE_WEIGHTS)
         assert cov == pytest.approx(1.0, abs=1e-6)
 
-    def test_eu_coverage_equals_momentum_plus_volume(self):
-        """EU coverage = weight(momentum_long) + weight(volume_attention)."""
-        expected = _BASE_WEIGHTS["momentum_long"] + _BASE_WEIGHTS["volume_attention"]
+    def test_eu_coverage_excludes_only_congress(self):
+        """v2.2: EU coverage = total weight minus congress weight."""
+        expected = sum(v for k, v in _BASE_WEIGHTS.items() if k != "congress")
         cov = market_weight_coverage(Market.EUROPE, _BASE_WEIGHTS)
         assert cov == pytest.approx(expected, abs=1e-6)
 
@@ -165,37 +167,37 @@ class TestInternationalScorer:
         result = _score_ticker_international(entry, spy_return_baseline=0.0)
         assert result["momentum_long_score"] == 0.0
 
-    def test_congress_score_is_none(self):
-        """congress_score must be None (structurally absent for EU)."""
+    def test_congress_score_is_zero(self):
+        """congress_score must be 0.0 — structurally absent outside US."""
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
         result = _score_ticker_international(entry)
-        assert result["congress_score"] is None
+        assert result["congress_score"] == 0.0
 
-    def test_insider_conviction_is_none(self):
-        """insider_conviction_score must be None (FMP 403 for EU — structurally absent)."""
+    def test_insider_conviction_is_zero_when_absent(self):
+        """insider_conviction_score = 0.0 when not populated in raw_factors."""
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
         result = _score_ticker_international(entry)
-        assert result["insider_conviction_score"] is None
+        assert result["insider_conviction_score"] == 0.0
 
-    def test_insider_breadth_is_none(self):
+    def test_insider_breadth_is_zero_when_absent(self):
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
         result = _score_ticker_international(entry)
-        assert result["insider_breadth_score"] is None
+        assert result["insider_breadth_score"] == 0.0
 
-    def test_news_sentiment_is_none(self):
+    def test_news_sentiment_is_zero_when_absent(self):
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
         result = _score_ticker_international(entry)
-        assert result["news_sentiment_score"] is None
+        assert result["news_sentiment_score"] == 0.0
 
-    def test_news_buzz_is_none(self):
+    def test_news_buzz_is_zero_when_absent(self):
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
         result = _score_ticker_international(entry)
-        assert result["news_buzz_score"] is None
+        assert result["news_buzz_score"] == 0.0
 
     def test_volume_attention_is_float(self):
         from scripts.run_pipeline import _score_ticker_international
@@ -238,8 +240,8 @@ class TestInternationalScorer:
         )
         result = _score_ticker_international(entry, spy_return_baseline=0.05)
         assert result["market"] == "ASIA"
-        assert result["congress_score"] is None
-        assert result["momentum_long_score"] is not None
+        assert result["congress_score"] == 0.0   # structurally absent outside US
+        assert isinstance(result["momentum_long_score"], float)
 
     def test_quality_piotroski_score_is_float_not_none(self):
         """PATCH 07: quality_piotroski_score must be a float (0.0 if FMP unavailable), not None."""
@@ -263,37 +265,38 @@ class TestInternationalScorer:
         assert result["price_target_upside_score"] is not None
         assert isinstance(result["price_target_upside_score"], float)
 
-    def test_quality_piotroski_populated_when_fmp_returns_value(self):
-        """PATCH 07: when FMP get_quality_score returns 0.625, scorer propagates it."""
+    def test_quality_piotroski_populated_from_raw_factors(self):
+        """v2.2-global: quality_piotroski comes from raw_factors (set by FMPFetcher)."""
         from scripts.run_pipeline import _score_ticker_international
-        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
-            instance = _MockFC.return_value
-            instance._api_key = "dummy_key"
-            instance.get_quality_score.return_value = 0.625
-            instance.get_upside_to_target.return_value = None
-            entry = _make_eu_entry(return_12_1m=0.15, volume_spike=2.0)
-            result = _score_ticker_international(entry, spy_return_baseline=0.05)
+        from regime_trader.fetchers.base import MarketEnum, TickerEntry
+        entry = TickerEntry(
+            ticker="SAP.DE",
+            market=MarketEnum.EUROPE,
+            sector="Information Technology",
+            cap_tier="large",
+            source_reliability=0.80,
+            raw_factors={
+                "return_12_1m": 0.15,
+                "volume_spike": 2.0,
+                "quality_piotroski_score": 0.625,  # pre-scored by FMPFetcher
+            },
+        )
+        result = _score_ticker_international(entry, spy_return_baseline=0.05)
         assert result["quality_piotroski_score"] == pytest.approx(0.625)
 
-    def test_analyst_consensus_score_is_none_for_eu(self):
-        """PATCH 07: analyst_consensus_score stays None (FMP grades-consensus US-only)."""
+    def test_analyst_consensus_score_is_zero_when_absent(self):
+        """v2.2-global: analyst_consensus_score = 0.0 when not in raw_factors."""
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
-        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
-            instance = _MockFC.return_value
-            instance._api_key = ""
-            result = _score_ticker_international(entry)
-        assert result.get("analyst_consensus_score") is None
+        result = _score_ticker_international(entry)
+        assert result.get("analyst_consensus_score") == 0.0
 
-    def test_transcript_tone_score_is_none_for_eu(self):
-        """PATCH 07: transcript_tone_score stays None (FMP transcripts US-only)."""
+    def test_transcript_tone_score_is_zero_for_eu(self):
+        """transcript_tone_score = 0.0 — FMP transcripts structurally US-only."""
         from scripts.run_pipeline import _score_ticker_international
         entry = _make_eu_entry()
-        with patch("regime_trader.services.fmp_client.FMPClient") as _MockFC:
-            instance = _MockFC.return_value
-            instance._api_key = ""
-            result = _score_ticker_international(entry)
-        assert result.get("transcript_tone_score") is None
+        result = _score_ticker_international(entry)
+        assert result.get("transcript_tone_score") == 0.0
 
     def test_returns_none_on_exception(self):
         """Entry with broken raw_factors must return None, not raise."""
@@ -338,13 +341,13 @@ class TestMarketFactors:
         assert "momentum_long_score" in MARKET_FACTORS[Market.ASIA]
         assert "volume_attention_score" in MARKET_FACTORS[Market.ASIA]
 
-    def test_europe_has_exactly_four_factors(self):
-        """PATCH 07: EU now has 4 factors (adds quality_piotroski + price_target_upside)."""
-        assert len(MARKET_FACTORS[Market.EUROPE]) == 4
+    def test_europe_has_ten_factors(self):
+        """v2.2-global: EU now has 10 factors (FMP Ultimate confirmed globally)."""
+        assert len(MARKET_FACTORS[Market.EUROPE]) == 10
 
-    def test_asia_has_exactly_four_factors(self):
-        """PATCH 07: Asia now has 4 factors (adds quality_piotroski + price_target_upside)."""
-        assert len(MARKET_FACTORS[Market.ASIA]) == 4
+    def test_asia_has_ten_factors(self):
+        """v2.2-global: Asia now has 10 factors (FMP Ultimate confirmed globally)."""
+        assert len(MARKET_FACTORS[Market.ASIA]) == 10
 
     def test_europe_has_quality_piotroski(self):
         """PATCH 07: FMP ratios-ttm confirmed PASS for SAP.DE (Phase-0 2026-05-30)."""
@@ -367,26 +370,13 @@ class TestMarketFactors:
         assert len(MARKET_FACTORS[Market.US]) == 12
 
     def test_low_coverage_threshold_is_sane(self):
-        """LOW_COVERAGE_THRESHOLD is applied in the RENORMALIZED weight space (sum=1.0).
-
-        A EU ticker with both momentum_long + volume_attention present will have
-        weight_coverage ≈ 1.0 in the renormalized space (all available factors computed).
-        The threshold 0.50 correctly marks a EU ticker where momentum_long is missing
-        (renormalized weight ~0.833) as _low_coverage.
-
-        This test checks that the threshold is below 1.0 (so some EU tickers pass)
-        and above 0.0 (so it filters something meaningful).
-        """
+        """LOW_COVERAGE_THRESHOLD must be in (0, 1) — boundary sanity check."""
         assert 0.0 < LOW_COVERAGE_THRESHOLD < 1.0, (
             f"LOW_COVERAGE_THRESHOLD must be in (0, 1), got {LOW_COVERAGE_THRESHOLD}"
         )
-        # Specifically: a EU ticker with both factors present gets weight_coverage ~1.0
-        # in the renormalized space, which must be >= threshold.
+        # v2.2: EU renormalized weight for volume_attention is small (~0.04)
+        # relative to threshold of 0.50 — correctly flagged as low_coverage
         eu_renorm = renormalize_weights_for_market(_BASE_WEIGHTS, Market.EUROPE)
-        # Weight of momentum_long in renormalized EU weights (~0.833)
-        eu_momentum_weight = eu_renorm["momentum_long"]
-        # If only volume_attention is present (momentum missing), weight_coverage = ~0.167
-        # That should be < LOW_COVERAGE_THRESHOLD (correctly flagged as low_coverage)
         eu_volume_only = eu_renorm["volume_attention"]
         assert eu_volume_only < LOW_COVERAGE_THRESHOLD, (
             f"A EU ticker with only volume_attention (weight={eu_volume_only:.3f}) "
