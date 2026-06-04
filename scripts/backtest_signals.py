@@ -186,7 +186,7 @@ def _parse_snapshot(path: Path) -> List[SignalRecord]:
     records: List[SignalRecord] = []
 
     try:
-        data: Dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        data: Dict[str, Any] = load_archive_snapshot(path)
     except Exception as exc:
         log.warning("Cannot parse %s: %s", path, exc)
         return records
