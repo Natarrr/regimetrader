@@ -126,7 +126,7 @@ def _compute_stress(results: list) -> _StressResult:
     return _StressResult(level, conditions_met, ceo_ratio, mean_form4, breadth_ratio, narrative)
 
 
-MAX_RHO_THRESHOLD = 0.35  # above this = double-counting risk
+MAX_RHO_THRESHOLD = 0.50  # aligned with CORRELATION_WARN_THRESHOLD in factor_orthogonality.py
 
 
 def check_orthogonality_alert(

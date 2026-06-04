@@ -1,5 +1,12 @@
 # Path: backend/market_intel/_score_compositor.py
 #
+# STATUS: REFERENCE ONLY — not called in live pipeline as of 2026-06.
+# Live scoring path:
+#   run_pipeline._score_ticker() → neutralize_factors() → renormalize_weights_for_market()
+# This module is kept for the Piotroski gate logic reference and test validation.
+# To wire into live pipeline: replace _to_entry()'s inline weight calculation
+# with a call to compute_composite_score() from this module.
+#
 # Drop-in replacement for the composite score computation block in
 # generate_top_lists.py (or wherever _compute_composite_score is defined).
 #

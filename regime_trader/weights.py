@@ -1,7 +1,12 @@
 # regime_trader/weights.py
+# DEPRECATED: use regime_trader.config.weights.
+# run_pipeline.py and generate_top_lists.py now both import from config/weights.py.
+# This file is kept for git history. PIOTROSKI_GATE and VIX_THRESHOLDS remain
+# importable here until callers are migrated.
 """
-Canonical WEIGHTS definition — single source of truth (12-factor schema).
+12-factor WEIGHTS schema — DEPRECATED as of v2.2-global (2026-06).
 
+SSOT is now regime_trader/config/weights.py (WEIGHTS_US / WEIGHTS_GLOBAL).
 Import this in generate_top_lists.py, run_pipeline.py, and any test that
 validates weight distribution.
 

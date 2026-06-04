@@ -73,50 +73,40 @@ class TestWeightsConsistency:
             f"Factors: {list(weights.keys())}"
         )
 
-    def test_weights_are_independent(self):
-        """Post-sprint: run_pipeline uses 12-factor WEIGHTS (regime_trader/weights.py);
-        generate_top_lists uses 9-factor WEIGHTS (regime_trader/config/weights.py).
-        Both must sum to 1.0 independently.  They are intentionally different schemas.
-
-        RT-QA-2026-REV6 step 7: generate_top_lists migrated to config/weights.py
-        (9-factor post-sprint canonical set).  run_pipeline retains the 12-factor
-        set for scoring breadth — Grinold & Kahn: BR benefit from more signals.
+    def test_weights_unified(self):
+        """v2.2-global: run_pipeline and generate_top_lists both use config/weights.py.
+        Both must use WEIGHTS_US (9-factor) — the dual 12-factor/9-factor schema is resolved.
         """
         rp_weights  = _load_run_pipeline_weights()
         gtl_weights = _load_generate_top_lists_weights()
 
-        # run_pipeline: 12-factor schema
-        assert len(rp_weights) == 12, (
-            f"run_pipeline.WEIGHTS expected 12 factors, got {len(rp_weights)}: "
+        # Both schemas are now 9-factor (WEIGHTS_US from config/weights.py)
+        assert len(rp_weights) == 9, (
+            f"run_pipeline.WEIGHTS expected 9 factors (WEIGHTS_US), got {len(rp_weights)}: "
             f"{list(rp_weights.keys())}"
         )
-        # generate_top_lists: 9-factor post-sprint schema
         assert len(gtl_weights) == 9, (
             f"generate_top_lists.WEIGHTS expected 9 factors, got {len(gtl_weights)}: "
             f"{list(gtl_weights.keys())}"
         )
 
-        # Both must independently sum to 1.0
+        # Both must sum to 1.0
         assert abs(sum(rp_weights.values()) - 1.0) < 1e-6
         assert abs(sum(gtl_weights.values()) - 1.0) < 1e-6
 
-        # The 9-factor keys must be a subset of the 12-factor run_pipeline keys
-        # (no orphan factors introduced in generate_top_lists)
-        rp_keys  = set(rp_weights.keys())
-        gtl_keys = set(gtl_weights.keys())
-        orphan_in_gtl = gtl_keys - rp_keys
-        assert not orphan_in_gtl, (
-            f"generate_top_lists has factors not in run_pipeline: {orphan_in_gtl}. "
-            "Add the factor to regime_trader/weights.py or remove it from config/weights.py."
+        # Keys must match — single source of truth
+        assert set(rp_weights.keys()) == set(gtl_weights.keys()), (
+            f"Weight key mismatch: run_pipeline={set(rp_weights.keys())}, "
+            f"generate_top_lists={set(gtl_weights.keys())}"
         )
 
-    def test_all_weights_positive(self):
-        """All weights must be strictly positive (no zero-weight factors in WEIGHTS)."""
+    def test_all_weights_non_negative(self):
+        """All weights must be >= 0. Factors at 0.0 are 'wired but not yet active' sprints."""
         weights = _load_run_pipeline_weights()
-        zero_weights = {k: v for k, v in weights.items() if v <= 0}
-        assert not zero_weights, (
-            f"Zero or negative weights found: {zero_weights}. "
-            "Remove zero-weight factors from WEIGHTS or set them to a small positive value."
+        negative = {k: v for k, v in weights.items() if v < 0}
+        assert not negative, (
+            f"Negative weights found: {negative}. "
+            "Weights must be in [0.0, 1.0]."
         )
 
     def test_factor_fields_covers_all_weights(self):
@@ -149,25 +139,25 @@ class TestWeightsConsistency:
 class TestWeightsValues:
     """Sanity checks on individual weight values."""
 
-    def test_momentum_long_is_largest_weight(self):
-        """momentum_long should have the highest weight (strongest IC empirically)."""
+    def test_insider_conviction_is_largest_weight(self):
+        """insider_conviction should have the highest weight in WEIGHTS_US.
+        v2.2-global: insider_conviction=0.30 is the dominant alpha source."""
         weights = _load_run_pipeline_weights()
-        if "momentum_long" not in weights:
-            pytest.skip("momentum_long not in WEIGHTS")
+        if "insider_conviction" not in weights:
+            pytest.skip("insider_conviction not in WEIGHTS")
         max_factor = max(weights, key=weights.get)
-        assert max_factor == "momentum_long", (
-            f"Expected momentum_long to have highest weight, got {max_factor}={weights[max_factor]}. "
+        assert max_factor == "insider_conviction", (
+            f"Expected insider_conviction to have highest weight, got {max_factor}={weights[max_factor]}. "
             f"Full WEIGHTS: {weights}"
         )
 
-    def test_congress_below_threshold(self):
-        """congress weight should be <= 0.10 (sparse US-only binary signal)."""
+    def test_congress_weight_is_22_percent(self):
+        """congress weight = 0.22 in WEIGHTS_US (redistributed to WEIGHTS_GLOBAL for EU/Asia)."""
         weights = _load_run_pipeline_weights()
         if "congress" not in weights:
             pytest.skip("congress not in WEIGHTS")
-        assert weights["congress"] <= 0.10, (
-            f"congress weight={weights['congress']} exceeds 0.10. "
-            "Congress is a sparse, US-only, binary signal with limited IC."
+        assert abs(weights["congress"] - 0.22) < 1e-6, (
+            f"congress weight={weights['congress']} — expected 0.22 per v2.2-global WEIGHTS_US spec."
         )
 
     def test_volume_attention_is_tilt_only(self):

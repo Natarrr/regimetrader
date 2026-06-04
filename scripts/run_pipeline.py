@@ -38,7 +38,9 @@ if str(ROOT) not in sys.path:
 from regime_trader.utils.io import save_json_atomic  # noqa: E402
 from regime_trader.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError  # noqa: E402
 from backend.market_intel.validator import validate_raw  # noqa: E402
-from regime_trader.weights import WEIGHTS  # noqa: E402  canonical 9-factor weights
+from regime_trader.config.weights import WEIGHTS_US as WEIGHTS  # noqa: E402
+# Aligned with generate_top_lists.py — both now use config/weights.py as SSOT.
+# regime_trader/weights.py (12-factor) is DEPRECATED; kept for git history only.
 
 log = logging.getLogger("run_pipeline")
 
@@ -1583,6 +1585,10 @@ def run(
 
             # ── Fix #3: orthogonal news signals ──────────────────────────
             news_sent_score, news_sent_source, _eps_pct, _eps_days = score_news_sentiment_combined(ticker)
+            if news_sent_score == 0.0 and news_sent_source == "none":
+                log.warning("NEWS DEAD %s: FMP news/stock returned no articles", ticker)
+            elif news_sent_score == 0.0 and news_sent_source != "none":
+                log.debug("NEWS NEUTRAL %s: articles found but no directional sentiment", ticker)
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
 
             # ── Analyst consensus — bulk index only (per-ticker FMP removed) ────
@@ -1977,6 +1983,19 @@ def run(
             "Momentum 12-1m missing for %d/%d US tickers (recent IPOs or insufficient history). "
             "These tickers get momentum_long_score=0.0 (dead signal, penalized in normalizer).",
             n_missing_momentum, len([r for r in results if r.get("market", "USA") == "USA"]),
+        )
+
+    # ── Piotroski flat-score sentinel detection ───────────────────────────────
+    # round(3/9, 4) = 0.3333 — the PIOTROSKI_GATE["missing_score"]/9 sentinel.
+    # If >50% of US tickers land on this value, ratios-ttm endpoint is broken.
+    _us_scored = [r for r in results if r.get("market", "USA") == "USA"]
+    _pio_sentinel = round(3 / 9, 4)
+    _flat_pio = [r for r in _us_scored if r.get("quality_piotroski_score") == _pio_sentinel]
+    if _us_scored and len(_flat_pio) > len(_us_scored) * 0.5:
+        log.error(
+            "PIOTROSKI FLAT: %d/%d US tickers at 3/9 sentinel (%.0f%%) — "
+            "ratios-ttm endpoint may be broken (confirm with FMP /stable/ratios-ttm)",
+            len(_flat_pio), len(_us_scored), 100 * len(_flat_pio) / len(_us_scored),
         )
 
     # ── Orthogonality diagnostics (Fix #2 + Fix #3) ──────────────────────────

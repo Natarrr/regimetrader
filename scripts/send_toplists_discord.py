@@ -257,9 +257,8 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
     ]
     parts: List[str] = []
     for key, label in labels:
-        if market_norm not in {"US", "USA"} and key not in {"momentum_long", "volume_attention", "price_target_upside"}:
-            parts.append(f"{label}:—")
-            continue
+        # v2.2-global: FMP Ultimate confirmed for EU/Asia — read factors dict as-is.
+        # congress (0.0) and transcript_tone (0.0) render as "—" via value <= 0 below.
         value = raw_values.get(key) if key in raw_values else float(
             factors.get(key, 0) or 0)
         parts.append(f"{label}:—" if value <= 0 else f"{label}:{value:.2f}")

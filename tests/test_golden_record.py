@@ -127,3 +127,22 @@ class TestGoldenRecord:
 
     def test_ticker_count(self, generated, golden_output):
         assert generated["ticker_count"] == golden_output["ticker_count"]
+
+    # ── Piotroski canary (Bug 3) ──────────────────────────────────────────────────
+
+    def test_piotroski_score_distribution(self, golden_input):
+        """Canary: at least 30% of US tickers should have quality_piotroski_score
+        != round(3/9, 4) sentinel. If this fails, ratios-ttm endpoint is broken."""
+        sentinel = round(3 / 9, 4)  # = 0.3333
+        us_results = [
+            r for r in golden_input.get("results", [])
+            if r.get("market", "USA") == "USA"
+        ]
+        if not us_results:
+            pytest.skip("No US results in golden fixture")
+
+        flat = [r for r in us_results if r.get("quality_piotroski_score") == sentinel]
+        assert len(flat) < len(us_results) * 0.70, (
+            f"PIOTROSKI FLAT: {len(flat)}/{len(us_results)} US tickers at sentinel "
+            f"{sentinel} — >70% at missing-score value; ratios-ttm may be broken"
+        )
