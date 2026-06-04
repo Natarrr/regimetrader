@@ -41,6 +41,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Ensure repo root is on path so `regime_trader` package is importable when
+# the script is run directly (e.g. by daily_toplists_discord.yml which only
+# installs requests, not the full package).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 try:
     import requests
     _HAS_REQUESTS = True
