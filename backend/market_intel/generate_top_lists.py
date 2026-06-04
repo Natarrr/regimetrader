@@ -47,22 +47,11 @@ log = logging.getLogger("generate_top_lists")
 
 # Canonical 9-factor weights — single source of truth in regime_trader/config/weights.py.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
-try:
-    from regime_trader.config.weights import WEIGHTS, WEIGHTS_VERSION  # noqa: F401
-except Exception as _e:
-    log.warning("Could not import WEIGHTS from regime_trader.config.weights: %s — using fallback", _e)
-    WEIGHTS_VERSION = "fallback"
-    WEIGHTS: Dict[str, float] = {
-        "insider_conviction":  0.25,
-        "insider_breadth":     0.12,
-        "congress":            0.12,
-        "news_sentiment":      0.10,
-        "news_buzz":           0.05,
-        "momentum_long":       0.15,
-        "volume_attention":    0.03,
-        "analyst_consensus":   0.10,
-        "quality_piotroski":   0.08,
-    }
+from regime_trader.config.weights import (  # noqa: F401
+    WEIGHTS, WEIGHTS_US, WEIGHTS_GLOBAL, WEIGHTS_VERSION,
+    get_region,
+)
+from backend.market_intel._score_compositor import compute_composite_score  # noqa: F401
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
@@ -360,7 +349,7 @@ def _to_entry(
 ) -> Dict[str, Any]:
     w = weights if weights is not None else WEIGHTS
     raw_score = round(
-        sum(w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in WEIGHTS),
+        sum(w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in w),
         4,
     )
     # Apply VIX macro overlay first (absolute regime risk)
@@ -401,6 +390,8 @@ def _to_entry(
         "raw_score":       raw_score,
         "final_score":     score,
         "badge":           _badge(score),
+        "region":          get_region(row.get("ticker", "")),
+        "weights_set":     "US" if get_region(row.get("ticker", "")) == "US" else "GLOBAL",
         "ceo_buy":         bool(row.get("ceo_buy", False)),
         "form4_count":     int(row.get("form4_count", 0)),
         "factors":         norm_factors,
@@ -929,6 +920,10 @@ def generate(
         "top_buys_usa":    top_buys_usa,
         "top_buys_europe": top_buys_europe,
         "top_buys_asia":   top_buys_asia,
+        # Regional keys using get_region() codes (US/EU/ASIA) — audit + Discord
+        "top_buys_us":     [e for e in top_buys if e.get("region") == "US"],
+        "top_buys_eu":     [e for e in top_buys if e.get("region") == "EU"],
+        "weights_global":  WEIGHTS_GLOBAL,
         "shadow_top_buys": shadow_top_buys,
         "mid_caps":        mid_caps,
         "small_caps":      small_caps,

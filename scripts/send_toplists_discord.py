@@ -859,6 +859,132 @@ def _badge_from_score(score: float) -> str:
     return "WATCHLIST"
 
 
+# ── Regional embed builder (v2.1-global) ──────────────────────────────────────
+# Lightweight alternative to build_payload for top_lists.json consumers.
+# Produces one Discord embed per non-empty region (US / EU / Asia).
+# Falls back to unified top_buys when regional keys are absent.
+
+_REGION_CONFIG: Dict[str, Dict[str, str]] = {
+    "US":   {"emoji": "🇺🇸", "label": "US",   "weight_note": "9-factor (congress included)"},
+    "EU":   {"emoji": "🇪🇺", "label": "EU",   "weight_note": "8-factor (congress absent — weight redistributed)"},
+    "ASIA": {"emoji": "🌏", "label": "Asia", "weight_note": "8-factor (congress absent — weight redistributed)"},
+}
+
+_FACTOR_SHORT_REGIONAL: Dict[str, str] = {
+    "insider_conviction": "IC",
+    "insider_breadth":    "IB",
+    "congress":           "CON",
+    "news_sentiment":     "NS",
+    "news_buzz":          "NB",
+    "momentum_long":      "MOM",
+    "volume_attention":   "VOL",
+    "analyst_consensus":  "AC",
+    "quality_piotroski":  "PIO",
+}
+
+
+def _fmt_factor_bar_regional(score: float, width: int = 8) -> str:
+    filled = min(width, max(0, round(score * width)))
+    return "▓" * filled + "░" * (width - filled)
+
+
+def _build_regional_ticker_line(entry: Dict[str, Any], show_congress: bool = True) -> str:
+    ticker  = entry.get("ticker", "?")
+    score   = entry.get("final_score", 0.0)
+    factors = entry.get("factors", {})
+    badge   = entry.get("badge", "")
+    region  = entry.get("region", "US")
+
+    core = ["insider_conviction", "news_sentiment", "momentum_long", "analyst_consensus"]
+    if show_congress and region == "US":
+        core.insert(2, "congress")
+
+    parts = [f"**{ticker}** `{score:.3f}`"]
+    if badge:
+        parts.append(f"_{badge}_")
+
+    factor_parts = []
+    for f in core:
+        s = factors.get(f, 0.0)
+        if s > 0.01:
+            factor_parts.append(f"{_FACTOR_SHORT_REGIONAL[f]}{_fmt_factor_bar_regional(s, 5)}")
+    if factor_parts:
+        parts.append("  ".join(factor_parts))
+
+    return "  ".join(parts)
+
+
+def _region_embed_color(region_code: str) -> int:
+    return {
+        "US":   0x2ECC71,
+        "EU":   0x3498DB,
+        "ASIA": 0x9B59B6,
+    }.get(region_code, 0x95A5A6)
+
+
+def build_regional_embeds(
+    top_lists: Dict[str, Any],
+    max_per_region: int = 5,
+    vix: float = 0.0,
+    kill_switch: bool = False,
+) -> List[Dict[str, Any]]:
+    """Build one Discord embed per non-empty region from top_lists.json.
+
+    Reads top_buys_us / top_buys_eu / top_buys_asia when present (post-v2.1
+    regional keys); falls back to splitting unified top_buys by region field.
+    Returns a list of embed dicts ready to POST as ``{"embeds": [...]}`` payload.
+    """
+    embeds: List[Dict[str, Any]] = []
+
+    has_regional = any(k in top_lists for k in ("top_buys_us", "top_buys_eu", "top_buys_asia"))
+
+    if has_regional:
+        region_keys = [
+            ("US",   top_lists.get("top_buys_us",   [])),
+            ("EU",   top_lists.get("top_buys_eu",   [])),
+            ("ASIA", top_lists.get("top_buys_asia", [])),
+        ]
+    else:
+        top_buys = top_lists.get("top_buys", [])
+        us   = [e for e in top_buys if e.get("region", "US") == "US"]
+        eu   = [e for e in top_buys if e.get("region") == "EU"]
+        asia = [e for e in top_buys if e.get("region") == "ASIA"]
+        if eu or asia:
+            region_keys = [("US", us), ("EU", eu), ("ASIA", asia)]
+        else:
+            region_keys = [("US", top_buys)]
+
+    for region_code, entries in region_keys:
+        if not entries:
+            continue
+
+        cfg   = _REGION_CONFIG[region_code]
+        top_n = entries[:max_per_region]
+
+        if kill_switch and region_code == "US":
+            description = (
+                "⚠️ **Kill-switch active** (VIX ≥ 30) — BUY signals suppressed.\n"
+                "SELL signals remain live. No new positions."
+            )
+        else:
+            lines = [_build_regional_ticker_line(e, show_congress=(region_code == "US")) for e in top_n]
+            description = "\n".join(lines) if lines else "_No tickers in this region today._"
+
+        embeds.append({
+            "title":       f"{cfg['emoji']} Top Buys — {cfg['label']}",
+            "description": description,
+            "color":       _region_embed_color(region_code),
+            "footer":      {
+                "text": (
+                    f"{cfg['weight_note']}  •  VIX {vix:.1f}"
+                    + ("  •  🔴 Kill-switch" if kill_switch else "")
+                )
+            },
+        })
+
+    return embeds
+
+
 # ── Payload builder ────────────────────────────────────────────────────────────
 
 def build_payload(
