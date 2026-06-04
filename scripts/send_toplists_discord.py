@@ -601,6 +601,49 @@ def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> O
     }
 
 
+def _dead_factor_lines(top_buys_data: list, weights: dict) -> list:
+    """Return signal-health warning lines for the Discord health section.
+
+    Detects dead (all 0.0) and flat (all identical non-boundary value) factors
+    from top_buys entries. Returns [] when everything looks healthy.
+    """
+    if not top_buys_data or not weights:
+        return []
+
+    factor_scores: dict = {}
+    for entry in top_buys_data:
+        for k, v in entry.get("factors", {}).items():
+            factor_scores.setdefault(k, []).append(float(v or 0.0))
+
+    dead: list = []
+    flat: list = []
+    for factor, scores in factor_scores.items():
+        if all(s == 0.0 for s in scores):
+            dead.append(factor)
+        elif len(set(round(s, 2) for s in scores)) == 1 and scores[0] not in (0.0, 1.0):
+            flat.append(f"{factor}={scores[0]:.2f}")
+
+    lines: list = []
+    if dead or flat:
+        lines.append("⚠️ **Signal health:**")
+        if dead:
+            lines.append(f"  Dead (0.0): `{'`, `'.join(dead)}`")
+        if flat:
+            lines.append(f"  Flat (no discrimination): `{'`, `'.join(flat)}`")
+
+    all_dead_flat = dead + [x.split("=")[0] for x in flat]
+    total_weight = sum(weights.values()) or 1.0
+    active_weight = sum(w for f, w in weights.items() if f not in all_dead_flat)
+    dead_weight = total_weight - active_weight
+    if all_dead_flat and dead_weight > 0.05 * total_weight:
+        lines.append(
+            f"  Effective weight: **{active_weight/total_weight*100:.0f}%** "
+            f"({dead_weight/total_weight*100:.0f}% in dead/flat factors)"
+        )
+
+    return lines
+
+
 def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
     """Pipeline health summary from intel_source_status.json top-level fields."""
     meta = status.get("_edgar_meta", {})
@@ -646,7 +689,31 @@ def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
     errors = meta.get("error_count", 0)
     quarantine = meta.get("quarantine_count", 0)
 
-    lines = [
+    # Dead/flat factor warnings — support both intel_source_status.json (results list,
+    # _score suffix) and top_lists.json (top_buys list, nested factors dict).
+    top_buys_data = status.get("top_buys")
+    if not top_buys_data:
+        # intel_source_status.json path: synthesise factor dicts from results rows
+        raw_results = status.get("results", [])[:50]
+        top_buys_data = [
+            {
+                "factors": {
+                    k.replace("_score", ""): float(v or 0.0)
+                    for k, v in r.items()
+                    if k.endswith("_score") and isinstance(v, (int, float, type(None)))
+                }
+            }
+            for r in raw_results
+        ]
+    weights_data = status.get("weights", {})
+    df_lines = _dead_factor_lines(top_buys_data, weights_data)
+
+    # Congress dead-days (from dead_factors_detail if present)
+    congress_detail = (status.get("dead_factors_detail") or {}).get("congress", {})
+    if congress_detail.get("dead") and congress_detail.get("dead_days", 0) > 0:
+        dead_str = f"congress (dead {congress_detail['dead_days']}d)"
+
+    lines = df_lines + [
         orth_line,
         f"Dead factors: {dead_str}",
         f"CEO tiers: {ceo_str}",

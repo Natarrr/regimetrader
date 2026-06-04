@@ -887,6 +887,27 @@ def generate(
 
     _log_promoted(top_buys, shadow_top_buys, log_dir, run_id)
 
+    # Congress dead-streak tracking (FIX 6b)
+    congress_dead_file = Path(".cache/congress_dead_since.txt")
+    congress_scores = [
+        float(r.get("congress_score") or 0.0)
+        for r in us_results
+    ]
+    congress_is_dead = bool(congress_scores) and all(s == 0.0 for s in congress_scores)
+    congress_dead_days = 0
+    if congress_is_dead:
+        if not congress_dead_file.exists():
+            congress_dead_file.parent.mkdir(parents=True, exist_ok=True)
+            congress_dead_file.write_text(datetime.now(timezone.utc).isoformat())
+        try:
+            dead_since = datetime.fromisoformat(congress_dead_file.read_text().strip())
+            congress_dead_days = (datetime.now(timezone.utc) - dead_since).days
+        except Exception:
+            congress_dead_days = 0
+    else:
+        if congress_dead_file.exists():
+            congress_dead_file.unlink()
+
     top_lists: Dict[str, Any] = {
         "generated_at":    datetime.now(timezone.utc).isoformat(),
         "source_run_id":   run_id,
@@ -909,6 +930,12 @@ def generate(
         "mid_caps":        mid_caps,
         "small_caps":      small_caps,
         "sector_picks":    _sector_picks(entries),
+        "dead_factors_detail": {
+            "congress": {
+                "dead":      congress_is_dead,
+                "dead_days": congress_dead_days,
+            }
+        },
     }
 
     out_json = log_dir / "top_lists.json"
