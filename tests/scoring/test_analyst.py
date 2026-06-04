@@ -10,7 +10,7 @@ import json
 import pytest
 from pathlib import Path
 
-from regime_trader.scoring.analyst import score_analyst_consensus
+from regime_trader.scoring.analyst import score_analyst_consensus, _score_record
 
 
 def test_cache_missing_returns_cache_missing_tag(tmp_path):
@@ -80,3 +80,19 @@ def test_symbol_case_insensitive(tmp_path):
     score, src = score_analyst_consensus("AAPL", bulk_cache_dir=tmp_path)
     assert score == 0.50
     assert "Hold" in src
+
+
+def test_score_record_strong_sell():
+    """Test _score_record directly with Strong Sell consensus."""
+    record = {"consensus": "Strong Sell", "analystRatingsCount": 5}
+    score, src = _score_record("AAPL", record)
+    assert score == 0.0
+    assert src == "consensus:Strong Sell:5"
+
+
+def test_score_record_num_analysts_fallback():
+    """Test _score_record with numAnalysts key fallback (from older FMP schema)."""
+    record = {"consensus": "Buy", "numAnalysts": 3}
+    score, src = _score_record("AAPL", record)
+    assert score == 0.75
+    assert src == "consensus:Buy:3"

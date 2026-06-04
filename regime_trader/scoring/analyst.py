@@ -1,3 +1,4 @@
+# Path: regime_trader/scoring/analyst.py
 """Analyst consensus scoring from bulk NDJSON snapshot.
 
 Reads upgrades-downgrades-consensus-bulk.ndjson pre-fetched by
@@ -22,6 +23,43 @@ _CONSENSUS_SCORE: dict[str, float] = {
     "Strong Sell": 0.00,
 }
 _MIN_ANALYSTS = 2
+
+
+def _score_record(symbol: str, record: dict) -> tuple[float, str]:
+    """Score a single pre-fetched consensus record. Used by both the file
+    reader (score_analyst_consensus) and direct index callers in run_pipeline.py.
+
+    Args:
+        symbol: Ticker symbol (for logging/debugging).
+        record: Dict with consensus string or raw rating counts.
+
+    Returns:
+        (score [0, 1], source_tag)
+    """
+    consensus = (record.get("consensus") or "").strip()
+
+    if consensus in _CONSENSUS_SCORE:
+        analyst_count = int(record.get("analystRatingsCount") or record.get("numAnalysts") or 0)
+        if analyst_count < _MIN_ANALYSTS:
+            return 0.0, f"insufficient_coverage:{analyst_count}"
+        return _CONSENSUS_SCORE[consensus], f"consensus:{consensus}:{analyst_count}"
+
+    # Fallback: compute from raw buy/hold/sell counts
+    strong_buy  = int(record.get("analystRatingsStrongBuy",  0) or 0)
+    buy         = int(record.get("analystRatingsBuy",         0) or 0)
+    hold        = int(record.get("analystRatingsHold",        0) or 0)
+    sell        = int(record.get("analystRatingsSell",        0) or 0)
+    strong_sell = int(record.get("analystRatingsStrongSell",  0) or 0)
+    total = strong_buy + buy + hold + sell + strong_sell
+
+    if total < _MIN_ANALYSTS:
+        return 0.0, f"insufficient_coverage:{total}"
+
+    weighted = (
+        strong_buy * 1.00 + buy * 0.75 + hold * 0.50 +
+        sell * 0.25 + strong_sell * 0.00
+    ) / total
+    return round(weighted, 4), f"consensus_computed:{total}"
 
 
 def score_analyst_consensus(
@@ -61,30 +99,7 @@ def score_analyst_consensus(
         if record is None:
             return 0.0, "no_coverage"
 
-        consensus = (record.get("consensus") or "").strip()
-
-        if consensus in _CONSENSUS_SCORE:
-            analyst_count = int(record.get("analystRatingsCount") or record.get("numAnalysts") or 0)
-            if analyst_count < _MIN_ANALYSTS:
-                return 0.0, f"insufficient_coverage:{analyst_count}"
-            return _CONSENSUS_SCORE[consensus], f"consensus:{consensus}:{analyst_count}"
-
-        # Fallback: compute from raw buy/hold/sell counts
-        strong_buy  = int(record.get("analystRatingsStrongBuy",  0) or 0)
-        buy         = int(record.get("analystRatingsBuy",         0) or 0)
-        hold        = int(record.get("analystRatingsHold",        0) or 0)
-        sell        = int(record.get("analystRatingsSell",        0) or 0)
-        strong_sell = int(record.get("analystRatingsStrongSell",  0) or 0)
-        total = strong_buy + buy + hold + sell + strong_sell
-
-        if total < _MIN_ANALYSTS:
-            return 0.0, f"insufficient_coverage:{total}"
-
-        weighted = (
-            strong_buy * 1.00 + buy * 0.75 + hold * 0.50 +
-            sell * 0.25 + strong_sell * 0.00
-        ) / total
-        return round(weighted, 4), f"consensus_computed:{total}"
+        return _score_record(symbol, record)
 
     except Exception as exc:
         log.warning("analyst_consensus soft failure for %s: %s", symbol, exc)
