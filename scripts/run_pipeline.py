@@ -714,60 +714,6 @@ def score_news_fmp(ticker: str) -> float:
     return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
 
 
-def score_analyst_consensus(ticker: str, client=None) -> tuple[float, str]:
-    """Sell-side analyst consensus score from FMP /stable/grades-consensus.
-
-    Womack (1996, JF): analyst upgrades/downgrades have significant post-event
-    drift — the direction of the consensus is a credible, widely-used signal.
-    This maps the ratings distribution to a continuous [0, 1] score weighted by
-    count, treating the distribution as a probability mass over the rating scale.
-
-    Args:
-        ticker: Ticker symbol.
-        client: Optional shared FMPClient instance. If None, creates a new one.
-                Pass the shared pipeline client so health_report() captures
-                all endpoint calls and failures in fmp_health.json.
-
-    Rating → score mapping (linear 5-point scale):
-        strongBuy  → 1.00
-        buy        → 0.75
-        hold       → 0.50
-        sell       → 0.25
-        strongSell → 0.00
-
-    Returns (0.0, "none")   — dead signal, no coverage (total == 0).
-    Returns (0.0, "sparse") — insufficient coverage (total < 3 analysts).
-    Returns (score, "fmp_consensus") — valid weighted average.
-    Never raises — returns (0.0, "error") on any exception.
-    """
-    _SCORE_MAP = {
-        "strongBuy":  1.00,
-        "buy":        0.75,
-        "hold":       0.50,
-        "sell":       0.25,
-        "strongSell": 0.00,
-    }
-    try:
-        _client = client if client is not None else _FMPClient()
-        data = _client.get_analyst_ratings(ticker)
-        if not data:
-            return 0.0, "none"
-
-        total = sum(int(data.get(k, 0) or 0) for k in _SCORE_MAP)
-        if total == 0:
-            return 0.0, "none"
-        if total < 3:
-            return 0.0, "sparse"
-
-        weighted = sum(
-            _SCORE_MAP[k] * int(data.get(k, 0) or 0)
-            for k in _SCORE_MAP
-        )
-        return round(weighted / total, 4), "fmp_consensus"
-    except Exception as exc:
-        log.debug("score_analyst_consensus %s failed: %s", ticker, exc)
-        return 0.0, "error"
-
 
 def score_analyst_revision(
     revision_pct: Optional[float],
