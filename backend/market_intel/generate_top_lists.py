@@ -89,12 +89,15 @@ FACTOR_FIELDS: Dict[str, str] = {
 # zero (i.e. missing / dead API).  Incomplete tickers are scored but flagged;
 # they are NOT excluded from ranking — exclusion would distort cross-sectional
 # normalization.  Instead, validation_metadata carries the signal to consumers.
-_SCHEMA_MISSING_THRESHOLD = 4   # >4 zero factors → is_complete = False
-# Rationale: on the S&P 500 large-cap universe, congress (0 trades), insider_conviction
-# (sparse ~11%), and volume_attention are structurally 0.0 for most tickers.
-# A threshold of 2 would flag 80%+ of the universe as "incomplete" even when the
-# pipeline is healthy — that defeats the purpose of the circuit breaker.
-# 4 allows up to 4 structurally-zero factors before flagging a ticker as incomplete.
+_SCHEMA_MISSING_THRESHOLD = 6   # >6 zero factors → is_complete = False
+# Rationale: after RT-QA-2026-REV6 (FIX 1+2), analyst_consensus and news_sentiment
+# now correctly return 0.0 when absent (instead of the phantom 0.5 they returned
+# before). The structurally-zero factor set for a healthy large-cap ticker is now:
+#   congress (sparse trades), news_sentiment (no/neutral FMP news), news_buzz (same),
+#   analyst_consensus (no bulk coverage), analyst_revision (sparse), transcript_tone
+# = up to 6 legitimate zeros. Threshold raised from 4 → 6 so the gate fires only
+# when the always-populated factors (momentum_long, insider_conviction, volume_attention)
+# are also dead — which indicates a genuine price/EDGAR feed failure.
 
 # Circuit breaker: if fewer than this fraction of the universe pass the schema
 # gate, PipelineIntegrityError is raised and top_lists.json is NOT written.
