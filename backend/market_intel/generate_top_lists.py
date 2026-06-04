@@ -744,6 +744,18 @@ def generate(
         if row.get("_validation_failed"):
             entry["_validation_failed"] = True
 
+    # Flat-signal detection: identical scores for all US tickers = silent fallback
+    ns_scores = [
+        float(r.get("news_sentiment_score", 0.0) or 0.0)
+        for r in us_results
+    ]
+    if len(ns_scores) > 5 and len(set(round(s, 2) for s in ns_scores)) == 1:
+        log.error(
+            "FLAT SIGNAL DETECTED: news_sentiment identical (%.2f) for all %d US tickers. "
+            "Check FMP news/stock endpoint and NLP scorer.",
+            ns_scores[0], len(ns_scores),
+        )
+
     # Merge EU/Asia entries using their pre-scored final_score — bypass normalization.
     # source_reliability dampening is already baked into final_score by _score_ticker_eu/asia,
     # so we set source_reliability=1.0 here to prevent double-application in the dampening loop.
