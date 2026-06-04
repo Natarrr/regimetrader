@@ -181,12 +181,11 @@ class TestWeightsValues:
         )
 
     def test_config_congress_weight_is_intentional(self):
-        """config/weights.py congress=0.12 is intentionally above the run_pipeline 0.10 ceiling.
-        The 9-factor set redistributes budget from dropped factors (analyst_revision,
-        price_target_upside, transcript_tone) into remaining signals per sprint spec.
+        """config/weights.py congress=0.22 per v2.1-global (WEIGHTS_US).
+        The 0.22 is redistributed to WEIGHTS_GLOBAL for EU/Asia where congress is absent.
         """
         from regime_trader.config.weights import WEIGHTS as CONFIG_WEIGHTS
-        assert CONFIG_WEIGHTS["congress"] == 0.12, (
-            "9-factor congress weight must be 0.12 per RT-QA-2026-REV6 sprint spec. "
+        assert CONFIG_WEIGHTS["congress"] == 0.22, (
+            "9-factor US congress weight must be 0.22 per v2.1-global spec (WEIGHTS_US). "
             "Change only by updating the canonical source in regime_trader/config/weights.py."
         )

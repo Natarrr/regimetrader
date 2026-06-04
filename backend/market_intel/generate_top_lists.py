@@ -41,17 +41,15 @@ import numpy as np
 from regime_trader.scoring.normalize import normalize_score
 from regime_trader.utils.io import save_json_atomic
 from backend.market_intel.validator import detect_anomalies, PipelineIntegrityError  # noqa: F401 (re-exported)
-
-log = logging.getLogger("generate_top_lists")
-
-
-# Canonical 9-factor weights — single source of truth in regime_trader/config/weights.py.
+# Canonical 9-factor weights — v2.1-global, single source of truth.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
-from regime_trader.config.weights import (  # noqa: F401
-    WEIGHTS, WEIGHTS_US, WEIGHTS_GLOBAL, WEIGHTS_VERSION,
+from regime_trader.config.weights import (
+    WEIGHTS, WEIGHTS_US, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
     get_region,
 )
 from backend.market_intel._score_compositor import compute_composite_score  # noqa: F401
+
+log = logging.getLogger("generate_top_lists")
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
