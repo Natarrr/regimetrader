@@ -894,6 +894,8 @@ def generate(
         # actual weights used (may differ from WEIGHTS if dead factors)
         "weights":         eff_weights,
         "weights_version": WEIGHTS_VERSION,
+        "schema_version":           "9f-piog-eu",
+        "piotroski_eu_gate_active": True,
         "vix":             current_vix,
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
