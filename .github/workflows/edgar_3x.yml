@@ -231,13 +231,23 @@ jobs:
             --log-dir logs \
             --verbose
 
-      # ── 9. Check Minsky insider stress ──────────────────────────────────────
+      # ── 9. Check Minsky insider stress + orthogonality ──────────────────────
       - name: Check Minsky insider stress
         if: always()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
         run: |
           python -m monitoring.minsky_alert --log-dir logs
+          python - <<'EOF'
+          import sys, os
+          sys.path.insert(0, '.')
+          from pathlib import Path
+          from monitoring.minsky_alert import check_orthogonality_alert
+          check_orthogonality_alert(
+              Path('logs'),
+              webhook_url=os.environ.get('DISCORD_WEBHOOK_URL'),
+          )
+          EOF
 
       # ── 10. Run execution summary ────────────────────────────────────────────
       - name: Generate Run Execution Summary

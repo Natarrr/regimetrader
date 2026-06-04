@@ -126,6 +126,71 @@ def _compute_stress(results: list) -> _StressResult:
     return _StressResult(level, conditions_met, ceo_ratio, mean_form4, breadth_ratio, narrative)
 
 
+MAX_RHO_THRESHOLD = 0.35  # above this = double-counting risk
+
+
+def check_orthogonality_alert(
+    log_dir: Path,
+    webhook_url: str | None = None,
+) -> bool:
+    """Alert if max pairwise factor correlation exceeds MAX_RHO_THRESHOLD.
+
+    Reads intel_source_status.json → factor_orthogonality.max_abs_correlation.
+    Returns True if alert fired (rho > threshold).
+    Always exits cleanly — never raises.
+    """
+    import re as _re
+
+    status_path = log_dir / "intel_source_status.json"
+    if not status_path.exists():
+        return False
+
+    try:
+        d = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("check_orthogonality_alert: cannot parse intel_source_status.json: %s", exc)
+        return False
+
+    ortho = d.get("factor_orthogonality") or d.get("pipeline_health", {}).get("orthogonality") or {}
+    max_rho: Optional[float] = None
+    pair_str = "unknown"
+
+    if isinstance(ortho, dict):
+        max_rho = ortho.get("max_abs_correlation")
+        pair = ortho.get("max_pair", [])
+        if isinstance(pair, list) and len(pair) == 2:
+            pair_str = f"{pair[0]}<->{pair[1]}"
+    else:
+        raw = str(ortho)
+        m = _re.search(r"max rho=([\d.]+)", raw)
+        if m:
+            max_rho = float(m.group(1))
+            mp = _re.search(r"\(([^)]+)\)", raw)
+            pair_str = mp.group(1) if mp else "unknown"
+
+    if max_rho is None or max_rho <= MAX_RHO_THRESHOLD:
+        return False
+
+    msg = (
+        f"⚠️ **ORTHOGONALITY ALERT** — max rho={max_rho:.3f} > {MAX_RHO_THRESHOLD} "
+        f"on pair `{pair_str}`. Factor double-counting risk. "
+        f"Check news_sentiment and volume_attention scoring functions."
+    )
+    log.warning(msg)
+
+    if webhook_url:
+        try:
+            send_discord_alert(
+                webhook=webhook_url,
+                title="Orthogonality Spike",
+                body=msg,
+                escalate=False,
+            )
+        except Exception as exc:
+            log.warning("check_orthogonality_alert: discord send failed: %s", exc)
+    return True
+
+
 def _format_discord_body(stress: _StressResult, ticker_count: int) -> str:
     icons = {"CRITICAL": "🚨", "WARNING": "⚠️", "WATCH": "👁️", "CLEAR": "✅"}
     icon  = icons.get(stress.level, "ℹ️")
