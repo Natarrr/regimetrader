@@ -179,3 +179,14 @@ class TestWeightsValues:
             f"volume_attention weight={weights['volume_attention']} is too high. "
             "Volume attention is a short-term attention tilt, not an alpha factor."
         )
+
+    def test_config_congress_weight_is_intentional(self):
+        """config/weights.py congress=0.12 is intentionally above the run_pipeline 0.10 ceiling.
+        The 9-factor set redistributes budget from dropped factors (analyst_revision,
+        price_target_upside, transcript_tone) into remaining signals per sprint spec.
+        """
+        from regime_trader.config.weights import WEIGHTS as CONFIG_WEIGHTS
+        assert CONFIG_WEIGHTS["congress"] == 0.12, (
+            "9-factor congress weight must be 0.12 per RT-QA-2026-REV6 sprint spec. "
+            "Change only by updating the canonical source in regime_trader/config/weights.py."
+        )
