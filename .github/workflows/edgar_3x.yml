@@ -162,16 +162,12 @@ jobs:
 
       # ── 7. Generate top_lists.json ───────────────────────────────────────────
       #
-      # Nine-factor scoring (weights enforced: sum = 1.0):
-      #   insider_conviction(0.25) insider_breadth(0.12) congress(0.12)
-      #   news_sentiment(0.10) news_buzz(0.05) momentum_long(0.15)
-      #   volume_attention(0.03) analyst_consensus(0.10) quality_piotroski(0.08)
-      #
+      # Weights: see regime_trader/config/weights.py (canonical source, v2.0-post-sprint)
       # quality_piotroski applied as multiplicative gate:
       #   piotroskiScore < 3 → BUY score multiplied by 0.0 (suppressed)
       #   piotroskiScore 3-5 → multiplied by 0.6 (discounted)
       #   piotroskiScore 6+  → multiplied by 1.0 (full weight)
-      #   EU/Asia: gate applies. congress: 0.0 for non-US tickers.
+      #   EU/Asia: congress = 0.0 (structurally absent signal)
       - name: Generate top lists
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}

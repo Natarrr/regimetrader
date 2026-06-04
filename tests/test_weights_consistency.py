@@ -73,34 +73,41 @@ class TestWeightsConsistency:
             f"Factors: {list(weights.keys())}"
         )
 
-    def test_weights_are_identical(self):
-        """Both modules must use the same WEIGHTS dict (Patch 02 enforces this)."""
+    def test_weights_are_independent(self):
+        """Post-sprint: run_pipeline uses 12-factor WEIGHTS (regime_trader/weights.py);
+        generate_top_lists uses 9-factor WEIGHTS (regime_trader/config/weights.py).
+        Both must sum to 1.0 independently.  They are intentionally different schemas.
+
+        RT-QA-2026-REV6 step 7: generate_top_lists migrated to config/weights.py
+        (9-factor post-sprint canonical set).  run_pipeline retains the 12-factor
+        set for scoring breadth — Grinold & Kahn: BR benefit from more signals.
+        """
         rp_weights  = _load_run_pipeline_weights()
         gtl_weights = _load_generate_top_lists_weights()
 
+        # run_pipeline: 12-factor schema
+        assert len(rp_weights) == 12, (
+            f"run_pipeline.WEIGHTS expected 12 factors, got {len(rp_weights)}: "
+            f"{list(rp_weights.keys())}"
+        )
+        # generate_top_lists: 9-factor post-sprint schema
+        assert len(gtl_weights) == 9, (
+            f"generate_top_lists.WEIGHTS expected 9 factors, got {len(gtl_weights)}: "
+            f"{list(gtl_weights.keys())}"
+        )
+
+        # Both must independently sum to 1.0
+        assert abs(sum(rp_weights.values()) - 1.0) < 1e-6
+        assert abs(sum(gtl_weights.values()) - 1.0) < 1e-6
+
+        # The 9-factor keys must be a subset of the 12-factor run_pipeline keys
+        # (no orphan factors introduced in generate_top_lists)
         rp_keys  = set(rp_weights.keys())
         gtl_keys = set(gtl_weights.keys())
-
-        missing_in_gtl = rp_keys - gtl_keys
-        extra_in_gtl   = gtl_keys - rp_keys
-
-        assert not missing_in_gtl, (
-            f"Factors in run_pipeline but NOT in generate_top_lists: {missing_in_gtl}. "
-            "Apply Patch 02 to sync FACTOR_FIELDS."
-        )
-        assert not extra_in_gtl, (
-            f"Factors in generate_top_lists but NOT in run_pipeline: {extra_in_gtl}. "
-            "Check for stale FACTOR_FIELDS entries."
-        )
-
-        mismatched = {
-            k: (rp_weights[k], gtl_weights[k])
-            for k in rp_keys
-            if abs(rp_weights[k] - gtl_weights[k]) > 1e-8
-        }
-        assert not mismatched, (
-            f"Weight values differ between modules: {mismatched}. "
-            "run_pipeline.WEIGHTS is the source of truth — apply Patch 02."
+        orphan_in_gtl = gtl_keys - rp_keys
+        assert not orphan_in_gtl, (
+            f"generate_top_lists has factors not in run_pipeline: {orphan_in_gtl}. "
+            "Add the factor to regime_trader/weights.py or remove it from config/weights.py."
         )
 
     def test_all_weights_positive(self):

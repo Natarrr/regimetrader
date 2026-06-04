@@ -45,30 +45,28 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 log = logging.getLogger("generate_top_lists")
 
 
-# Canonical 9-factor weights — single source of truth in regime_trader/weights.py.
+# Canonical 9-factor weights — single source of truth in regime_trader/config/weights.py.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
 try:
-    from regime_trader.weights import WEIGHTS  # noqa: F401
+    from regime_trader.config.weights import WEIGHTS, WEIGHTS_VERSION  # noqa: F401
 except Exception as _e:
-    log.warning("Could not import WEIGHTS from regime_trader.weights: %s — using hardcoded fallback", _e)
+    log.warning("Could not import WEIGHTS from regime_trader.config.weights: %s — using fallback", _e)
+    WEIGHTS_VERSION = "fallback"
     WEIGHTS: Dict[str, float] = {
-        "insider_conviction":  0.20,
-        "insider_breadth":     0.10,
-        "congress":            0.08,
+        "insider_conviction":  0.25,
+        "insider_breadth":     0.12,
+        "congress":            0.12,
         "news_sentiment":      0.10,
         "news_buzz":           0.05,
-        "momentum_long":       0.21,
+        "momentum_long":       0.15,
         "volume_attention":    0.03,
-        "analyst_consensus":   0.08,
-        "analyst_revision":    0.04,
-        "price_target_upside": 0.03,
-        "quality_piotroski":   0.06,
-        "transcript_tone":     0.02,
+        "analyst_consensus":   0.10,
+        "quality_piotroski":   0.08,
     }
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
-    "Check regime_trader/weights.py."
+    "Check regime_trader/config/weights.py."
 )
 
 # Maps factor key → field name in intel_source_status.json results (12-factor schema).
@@ -895,6 +893,7 @@ def generate(
         "ticker_count":    len(entries),
         # actual weights used (may differ from WEIGHTS if dead factors)
         "weights":         eff_weights,
+        "weights_version": WEIGHTS_VERSION,
         "vix":             current_vix,
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
