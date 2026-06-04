@@ -145,12 +145,17 @@ jobs:
           import sys, json, logging
           sys.path.insert(0, '.')
           logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-          from monitoring.check_metrics import check_score_distribution
+          from monitoring.check_metrics import check_score_distribution, check_per_factor_distribution
           from pathlib import Path
 
           ok = check_score_distribution(Path('logs'))
           if not ok:
               print('::error::Score distribution degenerate — insider/news/congress feeds may be dead')
+              sys.exit(1)
+
+          ok2 = check_per_factor_distribution(Path('logs'))
+          if not ok2:
+              print('::error::Per-factor dead signal detected — check bulk cache or price feed')
               sys.exit(1)
 
           # Additional 9-factor checks

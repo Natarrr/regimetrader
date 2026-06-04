@@ -714,60 +714,6 @@ def score_news_fmp(ticker: str) -> float:
     return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
 
 
-def score_analyst_consensus(ticker: str, client=None) -> tuple[float, str]:
-    """Sell-side analyst consensus score from FMP /stable/grades-consensus.
-
-    Womack (1996, JF): analyst upgrades/downgrades have significant post-event
-    drift — the direction of the consensus is a credible, widely-used signal.
-    This maps the ratings distribution to a continuous [0, 1] score weighted by
-    count, treating the distribution as a probability mass over the rating scale.
-
-    Args:
-        ticker: Ticker symbol.
-        client: Optional shared FMPClient instance. If None, creates a new one.
-                Pass the shared pipeline client so health_report() captures
-                all endpoint calls and failures in fmp_health.json.
-
-    Rating → score mapping (linear 5-point scale):
-        strongBuy  → 1.00
-        buy        → 0.75
-        hold       → 0.50
-        sell       → 0.25
-        strongSell → 0.00
-
-    Returns (0.0, "none")   — dead signal, no coverage (total == 0).
-    Returns (0.0, "sparse") — insufficient coverage (total < 3 analysts).
-    Returns (score, "fmp_consensus") — valid weighted average.
-    Never raises — returns (0.0, "error") on any exception.
-    """
-    _SCORE_MAP = {
-        "strongBuy":  1.00,
-        "buy":        0.75,
-        "hold":       0.50,
-        "sell":       0.25,
-        "strongSell": 0.00,
-    }
-    try:
-        _client = client if client is not None else _FMPClient()
-        data = _client.get_analyst_ratings(ticker)
-        if not data:
-            return 0.0, "none"
-
-        total = sum(int(data.get(k, 0) or 0) for k in _SCORE_MAP)
-        if total == 0:
-            return 0.0, "none"
-        if total < 3:
-            return 0.0, "sparse"
-
-        weighted = sum(
-            _SCORE_MAP[k] * int(data.get(k, 0) or 0)
-            for k in _SCORE_MAP
-        )
-        return round(weighted / total, 4), "fmp_consensus"
-    except Exception as exc:
-        log.debug("score_analyst_consensus %s failed: %s", ticker, exc)
-        return 0.0, "error"
-
 
 def score_analyst_revision(
     revision_pct: Optional[float],
@@ -1640,25 +1586,19 @@ def run(
             news_sent_score, news_sent_source, _eps_pct, _eps_days = score_news_sentiment_combined(ticker)
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
 
-            # ── Analyst consensus — bulk index first, per-ticker FMP fallback ──
-            # Bulk source: upgrades-downgrades-consensus-bulk (consensusRating field)
-            # Mapping: Strong Buy=1.0, Buy=0.75, Hold=0.5, Sell=0.25, Strong Sell=0.0
-            _CONSENSUS_MAP = {
-                "Strong Buy":  1.00, "strongBuy":  1.00,
-                "Buy":         0.75, "buy":         0.75,
-                "Hold":        0.50, "hold":        0.50,
-                "Sell":        0.25, "sell":        0.25,
-                "Strong Sell": 0.00, "strongSell":  0.00,
-            }
-            _bulk_cons_rec = _bulk_consensus_idx.get(ticker.upper(), {})
+            # ── Analyst consensus — bulk index only (per-ticker FMP removed) ────
+            # _bulk_consensus_idx is built once at pipeline start from
+            # upgrades-downgrades-consensus-bulk.ndjson (O(1) lookup, no file I/O).
+            # _score_record handles the consensusRating/consensus field name
+            # differences and returns 0.0 for absent/insufficient data.
+            from regime_trader.scoring.analyst import _score_record as _ac_score_record  # noqa: PLC0415
+            _bulk_cons_rec = _bulk_consensus_idx.get(ticker.upper())
             if _bulk_cons_rec:
-                _cons_rating = _bulk_cons_rec.get("consensusRating") or ""
-                analyst_consensus_score = _CONSENSUS_MAP.get(_cons_rating, 0.50)
-                analyst_consensus_source = "bulk_consensus"
-            else:
-                analyst_consensus_score, analyst_consensus_source = score_analyst_consensus(
-                    ticker, client=_fmp_client
+                analyst_consensus_score, analyst_consensus_source = _ac_score_record(
+                    ticker, _bulk_cons_rec
                 )
+            else:
+                analyst_consensus_score, analyst_consensus_source = 0.0, "no_coverage"
 
             # Recent upgrade/downgrade (FMP) — useful catalyst signal
             recent_upg = _fmp_client.get_recent_upgrades_downgrades(ticker)

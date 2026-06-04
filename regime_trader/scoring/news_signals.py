@@ -55,15 +55,18 @@ def score_news_sentiment(
     half_life = max(0.1, float(decay_half_life_days))
     decay_rate = _LN2 / half_life
 
-    weighted_sum = 0.0
-    weight_sum   = 0.0
+    weighted_sum    = 0.0
+    weight_sum      = 0.0
+    has_directional = False  # track whether any Positive/Negative article exists
 
     for article in articles:
         sentiment = article.get("sentiment") or ""
         if sentiment == "Positive":
             val = 1.0
+            has_directional = True
         elif sentiment == "Negative":
             val = -1.0
+            has_directional = True
         else:
             val = 0.0
 
@@ -83,6 +86,11 @@ def score_news_sentiment(
         weight_sum   += weight
 
     if weight_sum == 0.0:
+        return 0.0
+
+    # No positive or negative articles → absent signal, not neutral.
+    # Prevents all-"Neutral" FMP responses from producing 0.5 (looks like a signal).
+    if not has_directional:
         return 0.0
 
     raw = weighted_sum / weight_sum   # ∈ [-1, 1]

@@ -8,7 +8,7 @@ with a configurable TTL.  Scoring functions read from cache to avoid per-ticker
 FMP round-trips.
 
 Confirmed working stable/ routes (verified 2026-06-03):
-  upgrades-downgrades-consensus-bulk → consensusRating field; analyst_consensus score
+  upgrades-downgrades-consensus-bulk → consensus field; analyst_consensus score
   ratios-ttm-bulk                    → returnOnAssets, currentRatio, debtRatio, etc.
   key-metrics-ttm-bulk               → peRatioTTM, revenuePerShareTTM, etc.
 

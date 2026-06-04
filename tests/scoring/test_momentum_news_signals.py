@@ -124,10 +124,11 @@ class TestNewsSentimentRecency:
     def test_empty_returns_dead_signal(self):
         assert score_news_sentiment([]) == 0.0
 
-    def test_neutral_articles_near_half(self):
+    def test_neutral_articles_are_absent_signal(self):
+        """All-Neutral articles have no directional content → return 0.0 (absent), not 0.5."""
         articles = [_article("Neutral", d) for d in (1, 2, 3)]
         score = score_news_sentiment(articles)
-        assert abs(score - 0.50) < 0.01, f"All-Neutral should be 0.50, got {score}"
+        assert score == 0.0, f"All-Neutral should be 0.0 (absent signal), got {score}"
 
     def test_bounded(self):
         articles = [_article("Positive", 1) for _ in range(100)]

@@ -45,30 +45,28 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 log = logging.getLogger("generate_top_lists")
 
 
-# Canonical 9-factor weights — single source of truth in regime_trader/weights.py.
+# Canonical 9-factor weights — single source of truth in regime_trader/config/weights.py.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
 try:
-    from regime_trader.weights import WEIGHTS  # noqa: F401
+    from regime_trader.config.weights import WEIGHTS, WEIGHTS_VERSION  # noqa: F401
 except Exception as _e:
-    log.warning("Could not import WEIGHTS from regime_trader.weights: %s — using hardcoded fallback", _e)
+    log.warning("Could not import WEIGHTS from regime_trader.config.weights: %s — using fallback", _e)
+    WEIGHTS_VERSION = "fallback"
     WEIGHTS: Dict[str, float] = {
-        "insider_conviction":  0.20,
-        "insider_breadth":     0.10,
-        "congress":            0.08,
+        "insider_conviction":  0.25,
+        "insider_breadth":     0.12,
+        "congress":            0.12,
         "news_sentiment":      0.10,
         "news_buzz":           0.05,
-        "momentum_long":       0.21,
+        "momentum_long":       0.15,
         "volume_attention":    0.03,
-        "analyst_consensus":   0.08,
-        "analyst_revision":    0.04,
-        "price_target_upside": 0.03,
-        "quality_piotroski":   0.06,
-        "transcript_tone":     0.02,
+        "analyst_consensus":   0.10,
+        "quality_piotroski":   0.08,
     }
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
-    "Check regime_trader/weights.py."
+    "Check regime_trader/config/weights.py."
 )
 
 # Maps factor key → field name in intel_source_status.json results (12-factor schema).
@@ -91,12 +89,15 @@ FACTOR_FIELDS: Dict[str, str] = {
 # zero (i.e. missing / dead API).  Incomplete tickers are scored but flagged;
 # they are NOT excluded from ranking — exclusion would distort cross-sectional
 # normalization.  Instead, validation_metadata carries the signal to consumers.
-_SCHEMA_MISSING_THRESHOLD = 4   # >4 zero factors → is_complete = False
-# Rationale: on the S&P 500 large-cap universe, congress (0 trades), insider_conviction
-# (sparse ~11%), and volume_attention are structurally 0.0 for most tickers.
-# A threshold of 2 would flag 80%+ of the universe as "incomplete" even when the
-# pipeline is healthy — that defeats the purpose of the circuit breaker.
-# 4 allows up to 4 structurally-zero factors before flagging a ticker as incomplete.
+_SCHEMA_MISSING_THRESHOLD = 6   # >6 zero factors → is_complete = False
+# Rationale: after RT-QA-2026-REV6 (FIX 1+2), analyst_consensus and news_sentiment
+# now correctly return 0.0 when absent (instead of the phantom 0.5 they returned
+# before). The structurally-zero factor set for a healthy large-cap ticker is now:
+#   congress (sparse trades), news_sentiment (no/neutral FMP news), news_buzz (same),
+#   analyst_consensus (no bulk coverage), analyst_revision (sparse), transcript_tone
+# = up to 6 legitimate zeros. Threshold raised from 4 → 6 so the gate fires only
+# when the always-populated factors (momentum_long, insider_conviction, volume_attention)
+# are also dead — which indicates a genuine price/EDGAR feed failure.
 
 # Circuit breaker: if fewer than this fraction of the universe pass the schema
 # gate, PipelineIntegrityError is raised and top_lists.json is NOT written.
@@ -744,6 +745,18 @@ def generate(
         if row.get("_validation_failed"):
             entry["_validation_failed"] = True
 
+    # Flat-signal detection: identical scores for all US tickers = silent fallback
+    ns_scores = [
+        float(r.get("news_sentiment_score", 0.0) or 0.0)
+        for r in us_results
+    ]
+    if len(ns_scores) > 5 and len(set(round(s, 2) for s in ns_scores)) == 1:
+        log.error(
+            "FLAT SIGNAL DETECTED: news_sentiment identical (%.2f) for all %d US tickers. "
+            "Check FMP news/stock endpoint and NLP scorer.",
+            ns_scores[0], len(ns_scores),
+        )
+
     # Merge EU/Asia entries using their pre-scored final_score — bypass normalization.
     # source_reliability dampening is already baked into final_score by _score_ticker_eu/asia,
     # so we set source_reliability=1.0 here to prevent double-application in the dampening loop.
@@ -877,12 +890,36 @@ def generate(
 
     _log_promoted(top_buys, shadow_top_buys, log_dir, run_id)
 
+    # Congress dead-streak tracking (FIX 6b)
+    congress_dead_file = Path(".cache/congress_dead_since.txt")
+    congress_scores = [
+        float(r.get("congress_score") or 0.0)
+        for r in us_results
+    ]
+    congress_is_dead = bool(congress_scores) and all(s == 0.0 for s in congress_scores)
+    congress_dead_days = 0
+    if congress_is_dead:
+        if not congress_dead_file.exists():
+            congress_dead_file.parent.mkdir(parents=True, exist_ok=True)
+            congress_dead_file.write_text(datetime.now(timezone.utc).isoformat())
+        try:
+            dead_since = datetime.fromisoformat(congress_dead_file.read_text().strip())
+            congress_dead_days = (datetime.now(timezone.utc) - dead_since).days
+        except Exception:
+            congress_dead_days = 0
+    else:
+        if congress_dead_file.exists():
+            congress_dead_file.unlink()
+
     top_lists: Dict[str, Any] = {
         "generated_at":    datetime.now(timezone.utc).isoformat(),
         "source_run_id":   run_id,
         "ticker_count":    len(entries),
         # actual weights used (may differ from WEIGHTS if dead factors)
         "weights":         eff_weights,
+        "weights_version": WEIGHTS_VERSION,
+        "schema_version":           "9f-piog-eu",
+        "piotroski_eu_gate_active": True,
         "vix":             current_vix,
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
@@ -896,6 +933,12 @@ def generate(
         "mid_caps":        mid_caps,
         "small_caps":      small_caps,
         "sector_picks":    _sector_picks(entries),
+        "dead_factors_detail": {
+            "congress": {
+                "dead":      congress_is_dead,
+                "dead_days": congress_dead_days,
+            }
+        },
     }
 
     out_json = log_dir / "top_lists.json"

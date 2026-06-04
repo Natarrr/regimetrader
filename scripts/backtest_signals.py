@@ -90,6 +90,33 @@ def _era_label(weights: Dict[str, float]) -> str:
     return f"custom ({fingerprint})"
 
 
+def load_archive_snapshot(path: Path) -> dict:
+    """Load archive snapshot with schema version awareness.
+
+    Applies a retroactive 0.6x score discount to pre-EU-Piotroski-gate EU/Asia
+    entries so the backtest IC is comparable across the schema regime boundary
+    (introduced Jun 03 2026).
+    """
+    d = json.loads(path.read_text(encoding="utf-8"))
+    schema = d.get("schema_version", "legacy")
+    piog_eu = d.get("piotroski_eu_gate_active", False)
+
+    if not piog_eu:
+        for entry in d.get("top_buys", []):
+            region = entry.get("region") or entry.get("market", "")
+            if region in ("EU", "Asia", "EUROPE", "ASIA"):
+                if entry.get("factors", {}).get("quality_piotroski") is None:
+                    entry["_retroactive_piotroski_discount"] = True
+                    entry["final_score_adjusted"] = round(
+                        float(entry.get("final_score", 0.0)) * 0.6, 4
+                    )
+        log.info(
+            "Snapshot %s (schema=%s): pre-EU-gate, retroactive 0.6x applied to EU/Asia scores",
+            path.name, schema,
+        )
+    return d
+
+
 # ── Data classes ───────────────────────────────────────────────────────────────
 
 @dataclass
@@ -159,7 +186,7 @@ def _parse_snapshot(path: Path) -> List[SignalRecord]:
     records: List[SignalRecord] = []
 
     try:
-        data: Dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        data: Dict[str, Any] = load_archive_snapshot(path)
     except Exception as exc:
         log.warning("Cannot parse %s: %s", path, exc)
         return records

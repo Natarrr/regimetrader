@@ -264,8 +264,9 @@ def _check_insider_feed_density(results: list, log) -> bool:
 # which is always available for any listed security — an all-zero result is a
 # definitive dead-feed indicator, not sparsity.
 _ALWAYS_NONZERO_FACTORS: dict[str, str] = {
-    "momentum_long_score":    "momentum_long",
-    "volume_attention_score": "volume_attention",
+    "momentum_long_score":      "momentum_long",
+    "volume_attention_score":   "volume_attention",
+    "analyst_consensus_score":  "analyst_consensus",  # bulk snapshot always fetched
 }
 
 
