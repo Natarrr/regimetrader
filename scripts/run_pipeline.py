@@ -38,7 +38,7 @@ if str(ROOT) not in sys.path:
 from regime_trader.utils.io import save_json_atomic  # noqa: E402
 from regime_trader.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError  # noqa: E402
 from backend.market_intel.validator import validate_raw  # noqa: E402
-from regime_trader.config.weights import WEIGHTS_US as WEIGHTS  # noqa: E402
+from regime_trader.config.weights import WEIGHTS_US as WEIGHTS, get_weights  # noqa: E402
 # Aligned with generate_top_lists.py — both now use config/weights.py as SSOT.
 # regime_trader/weights.py (12-factor) is DEPRECATED; kept for git history only.
 
@@ -552,22 +552,6 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
         return _default
 
 
-def score_momentum(
-    ticker_return_20d: float,
-    spy_return_20d: float = 0.0,
-    volume_spike: float = 1.0,
-) -> float:
-    """DEPRECATED (Fix #3): 20-day SPY-relative momentum was short-term reversal,
-    not Jegadeesh momentum. Replaced by score_momentum_long() in
-    regime_trader/scoring/momentum_signals.py. Kept for git blame and legacy
-    score computation; remove in Fix #5+.
-    """
-    r = max(-0.30, min(0.30, ticker_return_20d - spy_return_20d))
-    return_score = round((r + 0.30) / 0.60, 4)
-    vol_score    = round(min(1.0, max(0.0, (volume_spike - 1.0) / 4.0)), 4)
-    return round(0.65 * return_score + 0.35 * vol_score, 4)
-
-
 # ── SEC helpers ────────────────────────────────────────────────────────────────
 
 def _sec_get(url: str, timeout: int = 20):
@@ -688,33 +672,6 @@ def _score_news_buzz_yfinance(ticker: str) -> float:
         return round(min(1.0, math.log1p(n) / math.log1p(50)), 4)
     except Exception:
         return 0.0
-
-
-def _score_news_yfinance(ticker: str) -> float:
-    """DEPRECATED (Fix #3): combined sentiment+buzz. Replaced by
-    _score_news_sentiment_yfinance / _score_news_buzz_yfinance.
-    Kept for git blame; remove in Fix #5+.
-    """
-    return _score_news_sentiment_yfinance(ticker)
-
-
-def score_news_fmp(ticker: str) -> float:
-    """DEPRECATED (Fix #3): combined FMP sentiment+buzz (0.60/0.40 formula).
-    Replaced by score_news_sentiment_combined / score_news_buzz_combined in
-    regime_trader/scoring/news_signals.py. Kept for legacy score computation;
-    remove in Fix #5+.
-    """
-    client = _FMPClient()
-    articles = client.get_news_raw_articles(ticker)
-    if not articles:
-        return _score_news_sentiment_yfinance(ticker)
-    positive = sum(1 for a in articles if a.get("sentiment") == "Positive")
-    total = len(articles)
-    if total == 0:
-        return _score_news_sentiment_yfinance(ticker)
-    buzz_norm = min(1.0, total / 50.0)
-    return round(0.60 * (positive / total) + 0.40 * buzz_norm, 4)
-
 
 
 def score_analyst_revision(
@@ -1371,20 +1328,6 @@ def _score_ticker_international(
         return None
 
 
-# Deprecated aliases — kept so any external code referencing them by name gets a
-# clear log message instead of an AttributeError.
-def _score_ticker_eu(entry: Any) -> Optional[Dict[str, Any]]:
-    """DEPRECATED — use _score_ticker_international (Fix #5)."""
-    log.warning("_score_ticker_eu is deprecated; routing to _score_ticker_international")
-    return _score_ticker_international(entry)
-
-
-def _score_ticker_asia(entry: Any) -> Optional[Dict[str, Any]]:
-    """DEPRECATED — use _score_ticker_international (Fix #5)."""
-    log.warning("_score_ticker_asia is deprecated; routing to _score_ticker_international")
-    return _score_ticker_international(entry)
-
-
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def run(
@@ -1616,7 +1559,7 @@ def run(
                 if _pio_raw is not None:
                     try:
                         _pio_int = int(_pio_raw)
-                        from regime_trader.weights import PIOTROSKI_GATE  # noqa: PLC0415
+                        from regime_trader.config.weights import PIOTROSKI_GATE  # noqa: PLC0415
                         _missing = PIOTROSKI_GATE["missing_score"]
                         _supp    = PIOTROSKI_GATE["suppress_below"]
                         _disc    = PIOTROSKI_GATE["discount_below"]
@@ -1652,21 +1595,6 @@ def run(
             # ── Congress ─────────────────────────────────────────────────
             c_score = score_congress(congress_raw)
 
-            # ── Legacy scalars (diagnostic, 30-day comparison window) ────
-            e_score_legacy = score_edgar(form4_count)
-            i_score_legacy = score_insider_value(total_purchases_usd, mktcap, days_since_most_recent)
-            n_score_legacy = score_news_fmp(ticker)
-            # momentum_score_legacy: need 20d return; fetch_price_data no longer returns it.
-            # Approximate with return_12_1m mapped through the old 30% clip formula as a
-            # directional proxy — only used for ρ diagnostics, not in WEIGHTS.
-            _r12 = price_data.get("return_12_1m")
-            _spy12 = float(price_data.get("spy_return_12_1m") or 0.0)
-            if _r12 is not None:
-                _rel = max(-0.30, min(0.30, float(_r12) - _spy12))
-                m_score_legacy = round((_rel + 0.30) / 0.60, 4)
-            else:
-                m_score_legacy = 0.0
-
             quiver_evidence = {
                 "congress": {
                     "purchases":       int(congress_raw.get("purchases", 0)) if congress_raw else 0,
@@ -1685,6 +1613,7 @@ def run(
             }
 
             ret_12_1m = price_data.get("return_12_1m")
+            _spy12 = float(price_data.get("spy_return_12_1m") or 0.0)
 
             # Fix #7: relative CEO purchase significance (bps of market cap).
             _ceo_bps = (ceo_purchase_usd / mktcap * 10_000) if mktcap > 0 and ceo_purchase_usd > 0 else None
@@ -1721,11 +1650,6 @@ def run(
                 "recent_upgrade_downgrade":  recent_upg,
                 "target_price":              _raw_target_price,
                 "current_price":             _raw_current_price,
-                # ── Legacy scalars (diagnostic only — not in WEIGHTS) ─────
-                "edgar_score_legacy":       e_score_legacy,
-                "insider_score_legacy":     i_score_legacy,
-                "news_score_legacy":        n_score_legacy,
-                "momentum_score_legacy":    m_score_legacy,
                 # ── Metadata ─────────────────────────────────────────────
                 # Fix #7: relative CEO conviction replaces absolute $25k threshold.
                 "ceo_purchase_bps":        round(_ceo_bps, 4) if _ceo_bps is not None else None,
@@ -1790,10 +1714,6 @@ def run(
                 "quality_piotroski_score":  0.0,
                 "congress_score":           0.0,
                 "recent_upgrade_downgrade": {},
-                "edgar_score_legacy":       0.0,
-                "insider_score_legacy":     0.0,
-                "news_score_legacy":        0.0,
-                "momentum_score_legacy":    0.0,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
                 "form4_purchase_count":    0,
@@ -1828,10 +1748,6 @@ def run(
                 "quality_piotroski_score":  0.0,
                 "congress_score":           0.0,
                 "recent_upgrade_downgrade": {},
-                "edgar_score_legacy":       0.0,
-                "insider_score_legacy":     0.0,
-                "news_score_legacy":        0.0,
-                "momentum_score_legacy":    0.0,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
                 "form4_purchase_count":    0,
@@ -1955,6 +1871,17 @@ def run(
                         elif scored.get("market") == "ASIA":
                             asia_scored += 1
             log.info("Scored: %d EU entries, %d Asia entries added to results", eu_scored, asia_scored)
+
+            # Regression guard: EU/Asia tickers must never carry a non-zero congress_score.
+            # congress is structurally absent outside the US (no STOCK Act equivalent).
+            _intl_markets = frozenset({"EUROPE", "ASIA"})
+            for _r in results:
+                if _r.get("market") in _intl_markets and float(_r.get("congress_score", 0.0)) != 0.0:
+                    log.error(
+                        "BUG: %s (market=%s) has congress_score=%.4f — should be 0.0. "
+                        "Weight routing is broken; check get_weights() / _renorm_cache.",
+                        _r.get("ticker"), _r.get("market"), _r["congress_score"],
+                    )
         else:
             log.warning("No EU/Asia fetchers active — both sections will be empty in Discord")
 
@@ -2036,12 +1963,6 @@ def run(
         [r.get("volume_attention_score", 0.0) for r in _us_results],
         "momentum_long,volume_attention", 0.3,
     )
-    _pearson(
-        [r.get("momentum_long_score", 0.0) for r in _us_results],
-        [r.get("momentum_score_legacy", 0.0) for r in _us_results],
-        "momentum_long,momentum_legacy", 0.2,
-    )
-
     # analyst_consensus vs momentum (check for sell-side momentum chasing)
     _pearson(
         [r.get("analyst_consensus_score", 0.0) for r in _us_results],
@@ -2117,13 +2038,27 @@ def run(
     clean_for_norm  = [r for r in results if not r.get("_validation_failed")]
     quarantined_out = [r for r in results if r.get("_validation_failed")]
 
-    clean_for_norm = neutralize_factors(
-        clean_for_norm,
+    us_clean   = [r for r in clean_for_norm if r.get("market", "USA") in ("USA", "US")]
+    intl_clean = [r for r in clean_for_norm if r.get("market", "USA") not in ("USA", "US")]
+
+    us_clean = neutralize_factors(
+        us_clean,
         factors=_v2_factors,
-        group_by=("market", "sector", "cap_tier"),
+        group_by=("sector", "cap_tier"),
         min_bucket_size=5,
-        fallback_group_by=("market", "cap_tier"),
+        fallback_group_by=("cap_tier",),
     )
+
+    if intl_clean:
+        intl_clean = neutralize_factors(
+            intl_clean,
+            factors=_v2_factors,
+            group_by=("market", "sector", "cap_tier"),
+            min_bucket_size=1,
+            fallback_group_by=("market",),
+        )
+
+    clean_for_norm = us_clean + intl_clean
 
     # Quarantined tickers: zero out scores, mark low coverage
     for r in quarantined_out:
@@ -2147,7 +2082,8 @@ def run(
         market = PIPELINE_MARKET_MAP.get(market_raw, Market.US)
 
         if market not in _renorm_cache:
-            _renorm_cache[market] = renormalize_weights_for_market(WEIGHTS, market)
+            ticker_weights = get_weights(r.get("ticker", ""))
+            _renorm_cache[market] = renormalize_weights_for_market(ticker_weights, market)
         market_weights = _renorm_cache[market]
 
         final_score = 0.0

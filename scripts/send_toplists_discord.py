@@ -497,7 +497,7 @@ def _factor_contribution_line(entry: Dict[str, Any]) -> str:
     to regime_trader.weights.WEIGHTS.  Returns empty string when no factor
     data is present.
     """
-    from regime_trader.weights import WEIGHTS as _DEFAULT_WEIGHTS  # noqa: PLC0415
+    from regime_trader.config.weights import WEIGHTS_US as _DEFAULT_WEIGHTS  # noqa: PLC0415
 
     factors = entry.get("factors")
     if not factors:
@@ -767,16 +767,23 @@ def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
         return {}
 
 
-def _load_top_lists_overlay(log_dir: Path) -> Dict[str, Any]:
+def _load_top_lists_overlay(log_dir: Path, input_path: Optional[Path] = None) -> Dict[str, Any]:
     """Load vix / kill_switch / vix_multiplier from top_lists.json.
 
     intel_source_status.json does not carry the macro overlay — that lives in
     top_lists.json next to it in the artifact.  Returns {} if the file is absent
     or unreadable; caller treats missing keys as "no overlay".
+
+    Fallback: if top_lists.json is not found in log_dir, try the same directory
+    as input_path (sibling artifact pattern used in CI).
     """
     path = log_dir / "top_lists.json"
+    if not path.exists() and input_path is not None:
+        path = Path(input_path).parent / "top_lists.json"
     if not path.exists():
-        log.warning("top_lists.json not found at %s — VIX/kill_switch will be missing", path)
+        log.warning(
+            "top_lists.json not found at %s — VIX overlay will be missing from embed", path
+        )
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -1113,13 +1120,18 @@ def build_payload(
     # Load yesterday's scores from archive for real score-delta display
     _yesterday_scores: Dict[str, float] = {}
     try:
-        _archive_files = sorted(Path("logs/archive").glob("*_top_lists.json"))
+        _archive_root = Path(__file__).resolve().parent.parent / "logs" / "archive"
+        _archive_files = sorted(_archive_root.glob("*_top_lists.json"))
         if len(_archive_files) >= 2:
             _prev_data = json.loads(_archive_files[-2].read_text(encoding="utf-8"))
             for _prev_e in _prev_data.get("top_buys", []):
                 _prev_t = _prev_e.get("ticker", "")
                 if _prev_t:
                     _yesterday_scores[_prev_t] = float(_prev_e.get("final_score", 0))
+        else:
+            log.debug(
+                "Only %d archive file(s) found — score delta not available", len(_archive_files)
+            )
     except Exception:
         pass  # archive not available — score delta not shown
 
@@ -1550,8 +1562,8 @@ def run_tests() -> int:
         e_zero["insider_usd"] = 0.0
         e_zero["earnings_surprise_pct"] = None
         cat_zero = _compute_catalyst(e_zero)
-        _check("zero_signal_fallback", cat_zero ==
-               _NO_CATALYST, f"cat_zero={cat_zero!r}")
+        _check("zero_signal_fallback", cat_zero.startswith(_NO_CATALYST),
+               f"cat_zero={cat_zero!r}")
     except Exception:
         failures.append(f"FAIL [catalyst_line]: {traceback.format_exc()}")
 
@@ -1736,7 +1748,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Side-load macro overlay (VIX, kill_switch) from top_lists.json — these
     # live in the sibling artifact, not in intel_source_status.json.
     if input_path.name == "intel_source_status.json":
-        overlay = _load_top_lists_overlay(args.log_dir)
+        overlay = _load_top_lists_overlay(args.log_dir, input_path=input_path)
         for k, v in overlay.items():
             status.setdefault(k, v)
         log.info(

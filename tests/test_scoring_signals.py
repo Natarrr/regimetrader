@@ -12,18 +12,12 @@ import pytest
 def _import():
     from scripts.run_pipeline import (
         score_insider_value,
-        score_news_fmp,
-        _score_news_yfinance,
-        score_momentum,
         fetch_price_data,
         score_edgar,
         score_congress,
     )
     return (
         score_insider_value,
-        score_news_fmp,
-        _score_news_yfinance,
-        score_momentum,
         fetch_price_data,
         score_edgar,
         score_congress,
@@ -71,133 +65,6 @@ class TestScoreInsiderValue:
         ]:
             score = score_insider_value(usd, cap)
             assert 0.0 <= score <= 1.0, f"Out of bounds for usd={usd}, cap={cap}"
-
-
-class TestScoreNewsFMP:
-    """Tests for score_news_fmp() — FMP-based news sentiment scoring."""
-
-    def test_all_positive_returns_above_neutral(self, monkeypatch):
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        _, score_news_fmp, *_ = _import()
-        from regime_trader.services.fmp_client import FMPClient
-        articles = [{"sentiment": "Positive"}] * 45 + [{"sentiment": "Negative"}] * 5
-        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
-            score = score_news_fmp("AAPL")
-        assert score > 0.5
-
-    def test_all_negative_returns_below_neutral(self, monkeypatch):
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        _, score_news_fmp, *_ = _import()
-        from regime_trader.services.fmp_client import FMPClient
-        articles = [{"sentiment": "Negative"}] * 45 + [{"sentiment": "Positive"}] * 5
-        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
-            score = score_news_fmp("TSLA")
-        assert score < 0.5
-
-    def test_empty_articles_falls_back_to_yfinance(self, monkeypatch):
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        _, score_news_fmp, *_ = _import()
-        from regime_trader.services.fmp_client import FMPClient
-        with patch.object(FMPClient, "get_news_raw_articles", return_value=[]), \
-             patch("scripts.run_pipeline._score_news_sentiment_yfinance", return_value=0.55) as mock_yf:
-            score = score_news_fmp("MSFT")
-        mock_yf.assert_called_once_with("MSFT")
-        assert score == pytest.approx(0.55)
-
-    def test_score_bounded_0_to_1(self, monkeypatch):
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        _, score_news_fmp, *_ = _import()
-        from regime_trader.services.fmp_client import FMPClient
-        articles = [{"sentiment": "Positive"}] * 50
-        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
-            score = score_news_fmp("GOOG")
-        assert 0.0 <= score <= 1.0
-
-    def test_score_formula(self, monkeypatch):
-        # 30 positive / 50 total → 0.60 * (30/50) + 0.40 * min(1.0, 50/50)
-        #                        = 0.60 * 0.60 + 0.40 * 1.0 = 0.36 + 0.40 = 0.76
-        monkeypatch.setenv("FMP_API_KEY", "k")
-        monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        _, score_news_fmp, *_ = _import()
-        from regime_trader.services.fmp_client import FMPClient
-        articles = [{"sentiment": "Positive"}] * 30 + [{"sentiment": "Negative"}] * 20
-        with patch.object(FMPClient, "get_news_raw_articles", return_value=articles):
-            score = score_news_fmp("AMZN")
-        assert score == pytest.approx(0.76, abs=0.01)
-
-
-class TestScoreNewsYFinanceFallback:
-    def test_yfinance_failure_returns_zero(self):
-        *_, _score_news_yfinance, score_momentum, _, _, _ = _import()
-        with patch("yfinance.Ticker", side_effect=Exception("network error")):
-            score = _score_news_yfinance("AAPL")
-        assert score == pytest.approx(0.0)
-
-
-class TestScoreMomentumEnhanced:
-    def test_ticker_beats_spy_with_volume_scores_above_neutral(self):
-        *_, score_momentum, _, _, _ = _import()
-        # ticker +10%, SPY +5%, volume 3x spike → combined should score > 0.5
-        score = score_momentum(
-            ticker_return_20d=0.10,
-            spy_return_20d=0.05,
-            volume_spike=3.0,
-        )
-        assert score > 0.5
-
-    def test_ticker_lags_spy_scores_below_neutral(self):
-        *_, score_momentum, _, _, _ = _import()
-        # ticker lags SPY regardless of volume → below neutral
-        score = score_momentum(
-            ticker_return_20d=0.02,
-            spy_return_20d=0.08,
-            volume_spike=1.0,
-        )
-        assert score < 0.5
-
-    def test_high_volume_spike_boosts_score(self):
-        *_, score_momentum, _, _, _ = _import()
-        low_vol  = score_momentum(ticker_return_20d=0.05, spy_return_20d=0.05, volume_spike=1.0)
-        high_vol = score_momentum(ticker_return_20d=0.05, spy_return_20d=0.05, volume_spike=5.0)
-        assert high_vol > low_vol
-
-    def test_missing_data_returns_zero(self):
-        *_, score_momentum, _, _, _ = _import()
-        score = score_momentum(
-            ticker_return_20d=0.0,
-            spy_return_20d=0.0,
-            volume_spike=0.0,
-        )
-        # 0 spike → vol_score = max(0, (0-1)/4) = 0; equal returns → return_score = 0.5
-        # Combined = 0.65*0.5 + 0.35*0 = 0.325 — not a hard 0 here; just bounded
-        assert 0.0 <= score <= 1.0
-
-    def test_score_formula(self):
-        *_, score_momentum, _, _, _ = _import()
-        # relative = 0.10 − 0.05 = 0.05 → clipped to 0.05
-        # return_score = (0.05 + 0.30) / 0.60 = 0.583...
-        # vol_score = min(1, (3.0 - 1) / 4) = 0.50
-        # combined = 0.65*0.5833 + 0.35*0.50 = 0.3791 + 0.175 = 0.5541
-        score = score_momentum(
-            ticker_return_20d=0.10,
-            spy_return_20d=0.05,
-            volume_spike=3.0,
-        )
-        assert score == pytest.approx(0.5541, abs=0.01)
-
-    def test_score_bounded_0_to_1(self):
-        *_, score_momentum, _, _, _ = _import()
-        for t, s, v in [
-            (0.50, -0.50, 10.0),   # extreme outperformance + huge spike
-            (-0.50, 0.50, 0.0),    # extreme underperformance + no volume
-            (0.0, 0.0, 1.0),       # neutral
-        ]:
-            score = score_momentum(ticker_return_20d=t, spy_return_20d=s, volume_spike=v)
-            assert 0.0 <= score <= 1.0, f"Out of bounds: t={t}, s={s}, v={v}"
 
 
 def _fmp_rows(closes: list, volumes: list) -> list:

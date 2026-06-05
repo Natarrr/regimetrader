@@ -25,7 +25,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .claude_client import ClaudeClient, CostTracker, validate_analysis_schema
 from regime_trader.services.fmp_client import FMPClient

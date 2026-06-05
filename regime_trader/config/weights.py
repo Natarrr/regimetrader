@@ -80,6 +80,19 @@ assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
 # ── Convenience alias (legacy callers expecting WEIGHTS get US set) ────────────
 WEIGHTS = WEIGHTS_US
 
+# ── Piotroski F-Score gate (Piotroski 2000, JAR) ─────────────────────────────
+# Applied as a multiplicative gate on the final BUY score after weighted sum.
+#   F-Score < suppress_below → multiplier 0.0  (BUY suppressed)
+#   F-Score < discount_below → multiplier discount_factor
+#   F-Score ≥ discount_below → multiplier 1.0  (full weight)
+# missing_score is used when the endpoint returns no data (conservative default).
+PIOTROSKI_GATE: dict[str, float] = {
+    "suppress_below":  3,
+    "discount_below":  6,
+    "discount_factor": 0.6,
+    "missing_score":   3,
+}
+
 # ── Region classifier ─────────────────────────────────────────────────────────
 _EU_SUFFIXES: frozenset[str] = frozenset({
     ".PA", ".DE", ".L", ".AS", ".MI", ".MC", ".BR",

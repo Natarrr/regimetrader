@@ -44,10 +44,9 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 # Canonical 9-factor weights — v2.1-global, single source of truth.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
 from regime_trader.config.weights import (
-    WEIGHTS, WEIGHTS_US, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
+    WEIGHTS, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
     get_region,
 )
-from backend.market_intel._score_compositor import compute_composite_score  # noqa: F401
 from backend.market_intel._generate_top_lists_intl_patch import _build_intl_entry
 
 log = logging.getLogger("generate_top_lists")

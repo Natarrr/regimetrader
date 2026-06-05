@@ -96,7 +96,7 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
           BULK_CACHE_DIR: ".cache/bulk_snapshots"
-          BULK_CACHE_TTL_HOURS: "23"
+          BULK_CACHE_TTL_HOURS: "7"
         run: |
           set -euo pipefail
           python scripts/fmp_bulk_prefetch.py \

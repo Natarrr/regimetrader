@@ -1,51 +1,20 @@
 """tests/test_pipeline_momentum.py
-Unit tests for momentum factor and pipeline wiring changes.
+Unit tests for fetch_price_data and fetch_fmp_profiles pipeline functions.
 
 Thaler (2017 Nobel) — behavioral momentum: prices continue trending
-in the direction of institutional conviction. Tests use injected DataFrames;
+in the direction of institutional conviction. Tests use injected rows;
 no live yfinance calls in CI.
 """
 from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
-import numpy as np
-import pandas as pd
 import pytest
 
 from scripts.run_pipeline import (
     fetch_price_data,
-    score_momentum,
     fetch_fmp_profiles,
 )
-
-
-class TestScoreMomentum:
-    def test_positive_return_above_neutral(self):
-        # volume_spike=3.0 gives vol_score=0.5; combined with +10% relative return → > 0.5
-        assert score_momentum(0.10, spy_return_20d=0.0, volume_spike=3.0) > 0.5
-
-    def test_negative_return_below_neutral(self):
-        assert score_momentum(-0.10, spy_return_20d=0.0, volume_spike=1.0) < 0.5
-
-    def test_zero_return_near_neutral(self):
-        # Equal returns, moderate volume → combined ≈ 0.5*0.65 + 0.25*0.35 = 0.4125; test range
-        assert 0.3 < score_momentum(0.0, spy_return_20d=0.0, volume_spike=2.0) < 0.7
-
-    def test_large_positive_capped(self):
-        """Returns > 30% are clamped — score should equal score at +30%."""
-        assert score_momentum(0.99, spy_return_20d=0.0, volume_spike=1.0) == pytest.approx(
-            score_momentum(0.30, spy_return_20d=0.0, volume_spike=1.0), abs=1e-6
-        )
-
-    def test_large_negative_capped(self):
-        assert score_momentum(-0.99, spy_return_20d=0.0, volume_spike=1.0) == pytest.approx(
-            score_momentum(-0.30, spy_return_20d=0.0, volume_spike=1.0), abs=1e-6
-        )
-
-    def test_output_bounded_0_to_1(self):
-        for r in [-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0]:
-            assert 0.0 <= score_momentum(r, spy_return_20d=0.0, volume_spike=1.0) <= 1.0
 
 
 class TestFetchPriceData:

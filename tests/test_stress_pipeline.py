@@ -36,11 +36,7 @@ def _toxic_patches():
         stack.enter_context(patch("scripts.run_pipeline.fetch_fmp_insider_all",
                                   return_value={}))
         stack.enter_context(patch("scripts.run_pipeline.fetch_price_data",
-                                  return_value={"return_20d": 0.0, "spy_return_20d": 0.0, "volume_spike": 1.0}))
-        stack.enter_context(patch("scripts.run_pipeline.score_news_fmp",
-                                  return_value=0.0))
-        stack.enter_context(patch("scripts.run_pipeline._score_news_yfinance",
-                                  return_value=0.0))
+                                  return_value={"return_12_1m": None, "spy_return_12_1m": 0.0, "volume_spike": 1.0}))
         stack.enter_context(patch("scripts.run_pipeline.fetch_edgar_data",
                                   return_value=(0, 0.0, False, 0)))
         stack.enter_context(patch("scripts.run_pipeline._load_cik_map",
