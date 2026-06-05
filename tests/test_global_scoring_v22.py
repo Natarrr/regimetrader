@@ -331,3 +331,60 @@ def test_eu_score_not_capped_at_point_eight():
 
     score, _ = compute_composite_score("ASML.AS", high_factors)
     assert score > 0.80, f"Strong EU ticker must exceed old 0.80 ceiling, got {score:.4f}"
+
+
+def test_engine_dynamic_denominator_normalises_correctly():
+    """score_ticker_pool must divide by sum(active_factor_weights), not hardcode 1.0.
+
+    Given a profile whose weights happen to sum slightly below 1.0 due to
+    float arithmetic, the output composite_score should equal
+    weighted_sum / actual_weight_sum, not weighted_sum / 1.0.
+    """
+    import json, tempfile, os
+    from backend.market_intel.engine import StrategyEngine
+
+    profile = {
+        "region": "TEST",
+        "active_factors": {"alpha": 0.6, "beta": 0.4},
+        "output_filename": "test.json",
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(profile, f)
+        path = f.name
+
+    try:
+        engine = StrategyEngine(path)
+        data = [{"ticker": "X", "metrics": {"alpha_score": 1.0, "beta_score": 1.0}}]
+        results = engine.score_ticker_pool(data)
+        assert results[0]["composite_score"] == pytest.approx(1.0, abs=1e-4)
+    finally:
+        os.unlink(path)
+
+
+def test_engine_dynamic_denominator_with_partial_availability():
+    """If one factor has no data (score 0.0), the denominator stays at sum(all active weights).
+
+    The dynamic denominator is sum(active_factors.values()), NOT sum(factors with score > 0).
+    A factor being 0 is not the same as being absent from the profile.
+    composite = (1.0*0.70 + 0.0*0.30) / (0.70 + 0.30) = 0.70
+    """
+    import json, tempfile, os
+    from backend.market_intel.engine import StrategyEngine
+
+    profile = {
+        "region": "INTL_TEST",
+        "active_factors": {"momentum": 0.70, "volume": 0.30},
+        "output_filename": "test.json",
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(profile, f)
+        path = f.name
+
+    try:
+        engine = StrategyEngine(path)
+        data = [{"ticker": "SAP.DE", "metrics": {"momentum_score": 1.0, "volume_score": 0.0}}]
+        results = engine.score_ticker_pool(data)
+        # composite = (1.0*0.70 + 0.0*0.30) / (0.70 + 0.30) = 0.70
+        assert results[0]["composite_score"] == pytest.approx(0.70, abs=1e-4)
+    finally:
+        os.unlink(path)
