@@ -42,10 +42,6 @@ class VIXCoherenceError(PipelineAuditError):
     """VIX value is implausible (negative or absurdly large)."""
 
 
-class InternationalScoreOverflowError(PipelineAuditError):
-    """EU/Asia ticker final_score exceeds what its available factors can produce."""
-
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -184,19 +180,25 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
                 )
 
     # ------------------------------------------------------------------
-    # E2. International score ceiling — EU/Asia scores must not exceed
-    #     what their limited factor set can produce.
-    #     Available factors for EUROPE/ASIA: momentum_long + volume_attention
-    #     Their renormalized weights sum to ~0.35 of full WEIGHTS.
-    #     A EU/Asia ticker scoring > 0.90 has almost certainly had US factor
-    #     scores injected via a stale cache or merge bug.
-    #     Tolerance: 0.10 headroom above theoretical max to allow for
-    #     _effective_weights redistribution effects.
+    # E2. Dynamic range validation — international score ceiling
+    #     Ceiling = sum of available factor weights for the region.
+    #     WEIGHTS_GLOBAL zeroes congress and transcript_tone, so the
+    #     available weight sum = 1.0, meaning a flawless international
+    #     ticker can legitimately score 1.0 after v2.2-global.
+    #     Score > ceiling + tolerance signals US-factor injection or
+    #     arithmetic error (also caught by check A above for > 1.0).
     # ------------------------------------------------------------------
-    # Renormalized: momentum_long=0.25, volume_attention=0.03 (from PATCH-08)
-    # sum of available intl factors = 0.28; renorm to 1.0 => theoretical max = 1.0
-    # but realistically scores cap out near 0.80 due to sparse volume signal.
-    _INTL_SCORE_CEILING = 0.90
+    try:
+        from regime_trader.config.weights import WEIGHTS_GLOBAL
+        _intl_available_weight = sum(
+            w for f, w in WEIGHTS_GLOBAL.items()
+            if f not in {"congress", "transcript_tone"}
+        )
+    except ImportError:
+        _intl_available_weight = 1.0
+
+    _DYNAMIC_INTL_CEILING = round(_intl_available_weight, 6)
+    _CEILING_TOLERANCE = 1e-4
 
     for entry in _iter_all_entries(data):
         ticker = entry.get("ticker", "?")
@@ -207,12 +209,12 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
         score = float(entry.get("final_score", 0.0))
         factors = entry.get("factors", {})
 
-        if score > _INTL_SCORE_CEILING:
-            raise InternationalScoreOverflowError(
+        if score > _DYNAMIC_INTL_CEILING + _CEILING_TOLERANCE:
+            raise ScoreDivergenceError(
                 f"Ticker {ticker!r} ({market}): final_score={score:.4f} exceeds "
-                f"theoretical ceiling {_INTL_SCORE_CEILING:.2f}. "
-                f"US factor scores may have been injected. "
-                f"factors={factors}"
+                f"dynamic available-factor ceiling {_DYNAMIC_INTL_CEILING:.4f}. "
+                f"Available weights sum: {_intl_available_weight:.4f}. "
+                f"Possible US-factor injection. factors={factors}"
             )
 
     # ------------------------------------------------------------------
