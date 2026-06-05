@@ -263,8 +263,17 @@ def map_bulk_data_to_universe(
 
         # Fallback to stripped base symbol matching.
         base_symbol = normalize_ticker_key(raw_symbol)
-        for target in base_to_universe_map.get(base_symbol, []):
-            if not mapped_results[target]:
+        raw_suffix = raw_symbol.split(".", 1)[1].upper() if "." in raw_symbol else ""
+        candidates = base_to_universe_map.get(base_symbol, [])
+        for target in candidates:
+            if mapped_results[target]:
+                continue  # already matched exactly — skip
+            target_suffix = target.split(".", 1)[1].upper() if "." in target else ""
+            # Only accept the base-symbol match when:
+            #   (a) exchange suffixes match exactly, OR
+            #   (b) the bulk row carries no suffix AND this base resolves to exactly one
+            #       universe ticker (unambiguous mapping).
+            if raw_suffix == target_suffix or (not raw_suffix and len(candidates) == 1):
                 mapped_results[target] = row
 
     return mapped_results
@@ -287,8 +296,13 @@ def build_ticker_index(
         sym = sym.upper().strip()
         index[sym] = rec
         base_sym = normalize_ticker_key(sym)
-        if base_sym and base_sym not in index:
-            index[base_sym] = rec
+        if base_sym and base_sym != sym:
+            if base_sym not in index:
+                index[base_sym] = rec
+            elif index[base_sym] is not rec:
+                # Two distinct records share the same base symbol.
+                # Delete the ambiguous alias to prevent cross-contamination.
+                del index[base_sym]
     return index
 
 
