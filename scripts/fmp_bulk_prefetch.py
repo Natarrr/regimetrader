@@ -289,6 +289,7 @@ def build_ticker_index(
     """
     records = load_bulk(cache_dir, endpoint)
     index: dict[str, dict[str, Any]] = {}
+    ambiguous_bases: set[str] = set()
     for rec in records:
         sym = rec.get(key_field) or rec.get("symbol") or rec.get("ticker") or ""
         if not sym:
@@ -297,12 +298,14 @@ def build_ticker_index(
         index[sym] = rec
         base_sym = normalize_ticker_key(sym)
         if base_sym and base_sym != sym:
-            if base_sym not in index:
+            if base_sym in ambiguous_bases:
+                pass  # already known ambiguous — never re-insert
+            elif base_sym not in index:
                 index[base_sym] = rec
-            elif index[base_sym] is not rec:
-                # Two distinct records share the same base symbol.
-                # Delete the ambiguous alias to prevent cross-contamination.
+            else:
+                # Second record for this base: mark ambiguous, remove alias.
                 del index[base_sym]
+                ambiguous_bases.add(base_sym)
     return index
 
 
