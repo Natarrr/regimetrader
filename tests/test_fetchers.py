@@ -85,9 +85,9 @@ def _fmp_price_rows(n: int, start: float = 100.0, end: float = 115.0,
 
 
 def test_fmp_fetcher_source_reliability():
-    # v2.2-global: reliability raised to 0.80 for EU (MAR Art.19 + FMP confirmed)
+    # v2.2-global: dampening removed — source_reliability returns 1.0 for all markets
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    assert f.source_reliability("SAP.DE") == 0.80
+    assert f.source_reliability("SAP.DE") == pytest.approx(1.0)
 
 
 def test_fmp_fetcher_prepare_empty_on_fmp_error():
@@ -115,7 +115,7 @@ def test_fmp_fetcher_prepare_returns_entry_with_fmp_data():
     assert len(result) == 1
     assert result[0].ticker == "SAP.DE"
     assert result[0].market == MarketEnum.EUROPE
-    assert result[0].source_reliability == 0.80   # v2.2: raised from 0.60
+    assert result[0].source_reliability == pytest.approx(1.0)   # v2.2-global: dampening removed
     assert result[0].raw_factors["return_12_1m"] is not None
     assert result[0].raw_factors["volume_spike"] > 0
 
@@ -128,7 +128,7 @@ def test_fmp_fetcher_prepare_asia_market():
         result = f.prepare(["7203.T"])
     assert len(result) == 1
     assert result[0].market == MarketEnum.ASIA
-    assert result[0].source_reliability == 0.70   # v2.2: raised from 0.60
+    assert result[0].source_reliability == pytest.approx(1.0)   # v2.2-global: dampening removed
 
 
 def test_fmp_fetcher_no_quota_logic():
