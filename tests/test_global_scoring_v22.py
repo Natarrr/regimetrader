@@ -388,3 +388,37 @@ def test_engine_dynamic_denominator_with_partial_availability():
         assert results[0]["composite_score"] == pytest.approx(0.70, abs=1e-4)
     finally:
         os.unlink(path)
+
+
+def test_engine_dynamic_denominator_catches_sub_one_sum():
+    """Verify the explicit denominator division actually fires for sub-1.0 weight sums.
+
+    Bypasses the constructor validation to simulate a future profile where
+    one factor drops out. Without the explicit division, composite would be
+    0.8 * 0.6 = 0.48; with it, 0.8 * 0.6 / 0.6 = 0.8.
+    """
+    import json, tempfile, os
+    from backend.market_intel.engine import StrategyEngine
+
+    profile = {
+        "region": "TEST",
+        "active_factors": {"alpha": 0.6, "beta": 0.4},
+        "output_filename": "test.json",
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(profile, f)
+        path = f.name
+
+    try:
+        engine = StrategyEngine(path)
+        # Simulate a factor that has dropped out by mutating active_factors directly
+        engine.active_factors = {"alpha": 0.6}  # sum = 0.6, not 1.0
+        data = [{"ticker": "X", "metrics": {"alpha_score": 0.8}}]
+        results = engine.score_ticker_pool(data)
+        # Correct (with explicit denominator): 0.8 * 0.6 / 0.6 = 0.8
+        # Old bug (implicit 1.0 denominator):  0.8 * 0.6       = 0.48
+        assert results[0]["composite_score"] == pytest.approx(0.8, abs=1e-4), (
+            f"Expected 0.8000 (dynamic denominator = 0.6), got {results[0]['composite_score']:.4f}"
+        )
+    finally:
+        os.unlink(path)
