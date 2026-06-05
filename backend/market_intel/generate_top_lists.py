@@ -311,6 +311,13 @@ def _effective_weights(
     for k in live:
         live[k] = round(live[k] + dead_total * (live[k] / live_total), 6)
 
+    # Per-weight round(6) accumulates rounding error — correct on the largest weight
+    # so the output always sums to exactly 1.0 (required by CI weight assertion).
+    _live_sum = sum(live.values())
+    if _live_sum != 1.0:
+        _max_k = max(live, key=live.__getitem__)
+        live[_max_k] = round(live[_max_k] + (1.0 - _live_sum), 6)
+
     return live
 
 
