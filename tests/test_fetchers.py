@@ -242,3 +242,81 @@ def test_orchestrator_empty_when_all_fail():
     orch = Orchestrator([f])
     results = orch.run({"USA": ["AAPL"]})
     assert results == []
+
+
+class TestMapBulkDataCollisionIsolation:
+    def test_same_base_different_suffix_each_gets_own_record(self):
+        """ASML.AS and ASML.PA must not share the same bulk record."""
+        bulk = [
+            {"symbol": "ASML.AS", "price": 800.0},
+            {"symbol": "ASML.PA", "price": 801.0},
+        ]
+        result = map_bulk_data_to_universe(["ASML.AS", "ASML.PA"], bulk)
+        assert result["ASML.AS"]["price"] == 800.0
+        assert result["ASML.PA"]["price"] == 801.0
+
+    def test_same_base_different_suffix_no_cross_contamination(self):
+        """A bulk record for ASML.AS must not bleed into ASML.PA."""
+        bulk = [{"symbol": "ASML.AS", "pe": 35}]
+        result = map_bulk_data_to_universe(["ASML.AS", "ASML.PA"], bulk)
+        assert result["ASML.AS"]["pe"] == 35
+        assert result["ASML.PA"] == {}   # no data — not contaminated
+
+    def test_no_suffix_bulk_maps_to_unique_universe_ticker(self):
+        """FMP sometimes returns 'ASML' (no suffix) — map it only when unambiguous."""
+        bulk = [{"symbol": "ASML", "pe": 35}]
+        result = map_bulk_data_to_universe(["ASML.AS"], bulk)
+        assert result["ASML.AS"]["pe"] == 35
+
+    def test_no_suffix_bulk_ambiguous_maps_to_nothing(self):
+        """If two tickers share a base, a suffix-free bulk row must not be mapped."""
+        bulk = [{"symbol": "ASML", "pe": 35}]
+        result = map_bulk_data_to_universe(["ASML.AS", "ASML.PA"], bulk)
+        assert result["ASML.AS"] == {}
+        assert result["ASML.PA"] == {}
+
+    def test_exact_match_always_wins(self):
+        """Exact match takes precedence over all base-symbol logic."""
+        bulk = [
+            {"symbol": "SAP.DE", "eps": 5.0},
+            {"symbol": "SAP", "eps": 9.9},
+        ]
+        result = map_bulk_data_to_universe(["SAP.DE"], bulk)
+        assert result["SAP.DE"]["eps"] == 5.0
+
+
+def _build_index_from_records(records: list[dict], key_field: str = "symbol") -> dict:
+    """Helper: exercise build_ticker_index without needing a real cache directory."""
+    from pathlib import Path
+    from unittest.mock import patch
+    from scripts.fmp_bulk_prefetch import build_ticker_index
+    with patch("scripts.fmp_bulk_prefetch.load_bulk", return_value=records):
+        return build_ticker_index(Path(".cache"), "test-endpoint", key_field)
+
+
+class TestBuildTickerIndexCollisionIsolation:
+    def test_two_records_same_base_removes_ambiguous_alias(self):
+        """If ASML.AS and ASML.PA both exist, 'ASML' must NOT be in the index."""
+        records = [
+            {"symbol": "ASML.AS", "price": 800.0},
+            {"symbol": "ASML.PA", "price": 801.0},
+        ]
+        index = _build_index_from_records(records)
+        assert "ASML" not in index, "Ambiguous base alias must be removed"
+
+    def test_single_record_base_alias_present(self):
+        """If only one record resolves to 'ASML', the alias must be kept."""
+        records = [{"symbol": "ASML.AS", "price": 800.0}]
+        index = _build_index_from_records(records)
+        assert "ASML" in index
+        assert index["ASML"]["price"] == 800.0
+
+    def test_collision_detection_preserves_full_symbols(self):
+        """Full symbols (ASML.AS, ASML.PA) must always be in the index."""
+        records = [
+            {"symbol": "ASML.AS", "price": 800.0},
+            {"symbol": "ASML.PA", "price": 801.0},
+        ]
+        index = _build_index_from_records(records)
+        assert index["ASML.AS"]["price"] == 800.0
+        assert index["ASML.PA"]["price"] == 801.0
