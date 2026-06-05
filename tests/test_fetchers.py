@@ -320,3 +320,19 @@ class TestBuildTickerIndexCollisionIsolation:
         index = _build_index_from_records(records)
         assert index["ASML.AS"]["price"] == 800.0
         assert index["ASML.PA"]["price"] == 801.0
+
+    def test_three_records_same_base_alias_stays_removed(self):
+        """N≥3 records with the same base must not re-insert the ambiguous alias."""
+        records = [
+            {"symbol": "ASML.AS", "price": 800.0},
+            {"symbol": "ASML.PA", "price": 801.0},
+            {"symbol": "ASML.NL", "price": 802.0},
+        ]
+        index = _build_index_from_records(records)
+        assert "ASML" not in index, (
+            "Ambiguous base alias must stay removed even after a 3rd record arrives"
+        )
+        # Full-suffix keys must all be present
+        assert index["ASML.AS"]["price"] == 800.0
+        assert index["ASML.PA"]["price"] == 801.0
+        assert index["ASML.NL"]["price"] == 802.0
