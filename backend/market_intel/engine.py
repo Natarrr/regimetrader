@@ -40,7 +40,21 @@ class StrategyEngine:
             for factor, weight in self.active_factors.items():
                 raw_key = f"{factor}_score" if not factor.endswith("_score") else factor
                 try:
-                    metric_value = float(raw_metrics.get(raw_key, 0.0) or 0.0)
+                    raw_val = raw_metrics.get(raw_key, 0.0)
+                    if isinstance(raw_val, str):
+                        stripped = raw_val.strip()
+                        if (stripped.startswith("[") and stripped.endswith("]")) or \
+                                (stripped.startswith("{") and stripped.endswith("}")):
+                            try:
+                                raw_val = json.loads(stripped)
+                            except Exception:
+                                pass
+                    if isinstance(raw_val, dict):
+                        metric_value = float(raw_val.get("score", 0.0) or 0.0)
+                    elif isinstance(raw_val, list):
+                        metric_value = float(raw_val[0]) if raw_val else 0.0
+                    else:
+                        metric_value = float(raw_val or 0.0)
                 except Exception:
                     metric_value = 0.0
 

@@ -171,10 +171,17 @@ def check_orthogonality_alert(
     if max_rho is None or max_rho <= MAX_RHO_THRESHOLD:
         return False
 
+    if isinstance(ortho, dict) and isinstance(ortho.get("max_pair"), list) and len(ortho["max_pair"]) == 2:
+        f1, f2 = ortho["max_pair"][0], ortho["max_pair"][1]
+    elif "<->" in pair_str:
+        f1, f2 = pair_str.split("<->", 1)
+    else:
+        f1, f2 = "news_sentiment", "volume_attention"
+
     msg = (
         f"⚠️ **ORTHOGONALITY ALERT** — max rho={max_rho:.3f} > {MAX_RHO_THRESHOLD} "
         f"on pair `{pair_str}`. Factor double-counting risk. "
-        f"Check news_sentiment and volume_attention scoring functions."
+        f"Check {f1} and {f2} scoring functions."
     )
     log.warning(msg)
 
