@@ -32,3 +32,31 @@ def test_entry_with_source_reliability_one_unchanged():
     rel = float(entry.get("source_reliability", 1.0))
     result = round(entry["final_score"] * rel, 4)
     assert result == pytest.approx(0.82, abs=1e-4)
+
+
+# ── Ticker format regex ────────────────────────────────────────────────────────
+
+import re
+
+_TICKER_RE = re.compile(r"^([A-Z]{1,5}|[A-Z0-9]{1,6}\.[A-Z]{1,2})$")
+
+
+def test_regex_accepts_us_ticker():
+    assert _TICKER_RE.match("AAPL")
+    assert _TICKER_RE.match("PLTR")
+
+
+def test_regex_accepts_eu_ticker():
+    assert _TICKER_RE.match("SAP.DE")
+    assert _TICKER_RE.match("ASML.AS")
+
+
+def test_regex_accepts_asia_ticker():
+    assert _TICKER_RE.match("7203.T")
+    assert _TICKER_RE.match("9984.T")
+
+
+def test_regex_rejects_invalid():
+    assert not _TICKER_RE.match("TOOLONG7")
+    assert not _TICKER_RE.match("SAP.DEU")
+    assert not _TICKER_RE.match("sa.de")
