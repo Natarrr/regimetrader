@@ -1247,7 +1247,11 @@ def _score_ticker_international(
 
         # Bulk index fallback for piotroski when raw_factors value absent
         if quality_piotroski_score == 0.0 and bulk_piotroski_idx:
-            bulk_pio = bulk_piotroski_idx.get(entry.ticker.upper(), {})
+            _base_pio = entry.ticker.split(".")[0].upper()
+            bulk_pio = (
+                bulk_piotroski_idx.get(entry.ticker.upper())
+                or bulk_piotroski_idx.get(_base_pio, {})
+            )
             pio_raw = bulk_pio.get("piotroskiScore")
             if pio_raw is not None:
                 try:
@@ -1257,7 +1261,11 @@ def _score_ticker_international(
 
         # Bulk consensus fallback when raw_factors value absent
         if analyst_consensus_score == 0.0 and bulk_consensus_idx:
-            bulk_rec = bulk_consensus_idx.get(entry.ticker.upper())
+            _base_con = entry.ticker.split(".")[0].upper()
+            bulk_rec = (
+                bulk_consensus_idx.get(entry.ticker.upper())
+                or bulk_consensus_idx.get(_base_con)
+            )
             if bulk_rec:
                 try:
                     from regime_trader.scoring.analyst import _score_record as _ac  # noqa: PLC0415

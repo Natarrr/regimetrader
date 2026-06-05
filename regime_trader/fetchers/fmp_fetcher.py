@@ -185,6 +185,9 @@ class FMPFetcher(BaseMarketFetcher):
         news_buzz_score      = 0.0
         try:
             articles = client.get_news_raw_articles(ticker)
+            if not articles and "." in ticker:
+                # FMP news/stock indexes by base symbol (e.g. ASML not ASML.AS)
+                articles = client.get_news_raw_articles(ticker.split(".")[0])
             if articles:
                 s = score_news_sentiment(articles)
                 if s > 0.0:
@@ -217,7 +220,11 @@ class FMPFetcher(BaseMarketFetcher):
         # ── 4. Analyst consensus — bulk index lookup ──────────────────────────
         analyst_consensus_score = 0.0
         try:
-            bulk_rec = self._bulk_consensus_idx.get(ticker.upper())
+            _base_sym = ticker.split(".")[0].upper()
+            bulk_rec = (
+                self._bulk_consensus_idx.get(ticker.upper())
+                or self._bulk_consensus_idx.get(_base_sym)
+            )
             if bulk_rec:
                 analyst_consensus_score, _ = ac_score_record(ticker, bulk_rec)
             else:
@@ -240,6 +247,9 @@ class FMPFetcher(BaseMarketFetcher):
         quality_piotroski_score = 0.0
         try:
             ratios = client.get_ratios_ttm(ticker)
+            if not ratios and "." in ticker:
+                # ratios-ttm-bulk indexes by base symbol (e.g. ASML not ASML.AS)
+                ratios = client.get_ratios_ttm(ticker.split(".")[0])
             if ratios:
                 quality_piotroski_score = score_quality_piotroski(ratios)
         except Exception as exc:

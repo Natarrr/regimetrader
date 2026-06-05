@@ -1117,16 +1117,24 @@ def build_payload(
         f"{alert_block}"
     )
 
-    # Load yesterday's scores from archive for real score-delta display
+    # Load yesterday's scores from archive for real score-delta display.
+    # Reads all regional lists so EU/Asia tickers (never in unified top_buys)
+    # get a prior-day score and show ▲/▼ instead of always showing [NEW].
     _yesterday_scores: Dict[str, float] = {}
     try:
         _archive_root = Path(__file__).resolve().parent.parent / "logs" / "archive"
         _archive_files = sorted(_archive_root.glob("*_top_lists.json"))
         if len(_archive_files) >= 2:
             _prev_data = json.loads(_archive_files[-2].read_text(encoding="utf-8"))
-            for _prev_e in _prev_data.get("top_buys", []):
+            _all_prev = (
+                _prev_data.get("top_buys", [])
+                + _prev_data.get("top_buys_europe", [])
+                + _prev_data.get("top_buys_asia", [])
+                + _prev_data.get("mid_caps", [])
+            )
+            for _prev_e in _all_prev:
                 _prev_t = _prev_e.get("ticker", "")
-                if _prev_t:
+                if _prev_t and _prev_t not in _yesterday_scores:
                     _yesterday_scores[_prev_t] = float(_prev_e.get("final_score", 0))
         else:
             log.debug(
