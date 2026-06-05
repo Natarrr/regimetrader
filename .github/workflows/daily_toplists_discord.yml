@@ -4,23 +4,23 @@ name: daily_toplists_discord
 # Daily market checkup delivered to Discord.
 #
 # Schedule: 13:00 UTC = 14:00 BST (UK summer) / 13:00 GMT (UK winter).
-# Fires ~4 h after edgar_3x's 08:00 UTC run, guaranteeing fresh morning data.
 #
-# workflow_run trigger: also fires automatically whenever edgar_3x completes
-# (scheduled or manual dispatch), so a manual edgar_3x run chains through.
-# The job-level condition filters to successful edgar_3x runs only.
+# workflow_run trigger: chains off pipeline_us (the slower bottleneck pipeline).
+# Because pipeline_intl has no EDGAR overhead, its intl-top-lists artifact is
+# always published before pipeline_us completes — no race condition.
 #
-# Artifact download: uses dawidd6/action-download-artifact@v8 to fetch the
-# "top-lists" artifact from the most recent successful edgar_3x run.
-# @v8 supports the artifact API used by actions/upload-artifact@v4 in edgar_3x.yml.
-# If no artifact is found (edgar_3x never ran), sends an alert embed instead.
+# Artifact staging:
+#   us-top-lists   (from pipeline_us.yml)   → downloaded to logs/us/
+#   intl-top-lists (from pipeline_intl.yml) → downloaded to logs/intl/
+#   Both are then flattened into logs/ so send_toplists_discord.py can read
+#   intel_source_status.json and top_lists_intl.json at the paths it expects.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
   schedule:
-    - cron: "0 13 * * *" # 13:00 UTC = 14:00 BST / 13:00 GMT
+    - cron: "0 13 * * *" # 13:00 UTC = 14:00 BST / 13:00 GMT (fallback daily delivery)
   workflow_run:
-    workflows: ["edgar_3x"]
+    workflows: ["pipeline_us"]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -48,14 +48,14 @@ jobs:
   send-discord:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # For workflow_run trigger: only send when edgar_3x succeeded.
+    # For workflow_run trigger: only send when pipeline_us succeeded.
     # For schedule and workflow_dispatch triggers the condition is always true.
     if: >
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
 
     steps:
-      # ── 1. Checkout (needed for scripts/) ─────────────────────────────────────
+      # ── 1. Checkout (needed for scripts/) ────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -75,10 +75,6 @@ jobs:
           pip install requests>=2.31.0
 
       # ── 4. Verify London local timing ────────────────────────────────────────
-      #
-      # Diagnostic only — prints current London time so run logs show whether
-      # the GCF scheduler fired at the correct local hour (14:00 BST / 13:00 GMT).
-      # No exit-code gate here; the GCF scheduler is the authoritative clock.
       - name: Verify London Local Timing Gate
         run: |
           python3 -c "
@@ -89,27 +85,57 @@ jobs:
           print(f'UTC offset: {london_time.strftime(\"%z\")}')
           "
 
-      # ── 5. Download latest top-lists artifact from edgar_3x ─────────────────
+      # ── 5. Create workspace directories ──────────────────────────────────────
+      - name: Create workspace directories
+        run: mkdir -p logs/us logs/intl logs
+
+      # ── 6. Download US top-lists (from pipeline_us.yml) ──────────────────────
       #
-      # dawidd6/action-download-artifact@v8 supports the v4 artifact API used
-      # by actions/upload-artifact@v4 in edgar_3x.yml. Prior v3 was incompatible.
-      # "if_no_artifact_found: warn" prevents the step from failing — instead,
-      # the send step detects the missing file and sends an alert.
-      - name: Download top-lists artifact
+      # dawidd6/action-download-artifact@v8 supports the v4 artifact API.
+      # "if_no_artifact_found: warn" prevents step failure — the send step
+      # detects the missing file and sends an alert embed instead.
+      - name: Download US top-lists
         uses: dawidd6/action-download-artifact@v8
         with:
-          workflow: edgar_3x.yml
-          name: top-lists
-          path: logs/
-          if_no_artifact_found: warn
-          # Allow artifacts up to 2 days old (3 runs/day → always fresh)
+          workflow: pipeline_us.yml
+          name: us-top-lists
+          path: logs/us/
+          search_artifacts: true
           workflow_conclusion: success
+          if_no_artifact_found: warn
 
-      # ── 5b. Freshness gate — trigger-aware threshold ───────────────────────────
+      # ── 7. Download International top-lists (from pipeline_intl.yml) ─────────
+      # pipeline_intl always completes before pipeline_us due to the absence
+      # of EDGAR parsing overhead, so this artifact is always fresh.
+      - name: Download International top-lists
+        uses: dawidd6/action-download-artifact@v8
+        with:
+          workflow: pipeline_intl.yml
+          name: intl-top-lists
+          path: logs/intl/
+          search_artifacts: true
+          workflow_conclusion: success
+          if_no_artifact_found: warn
+
+      # ── 8. Stage artifacts for dispatch script ───────────────────────────────
+      # Flattens logs/us/* and logs/intl/* into logs/ so send_toplists_discord.py
+      # finds intel_source_status.json and top_lists_intl.json at their expected
+      # paths without requiring changes to the core dispatch logic.
+      - name: Stage artifacts for dispatch script
+        run: |
+          if [ -d logs/us ] && [ "$(ls -A logs/us 2>/dev/null)" ]; then
+            cp -r logs/us/. logs/
+          fi
+          if [ -d logs/intl ] && [ "$(ls -A logs/intl 2>/dev/null)" ]; then
+            cp -r logs/intl/. logs/
+          fi
+          echo "=== logs/ contents after staging ==="
+          ls -la logs/
+
+      # ── 9. Freshness gate — trigger-aware threshold ───────────────────────────
       #
-      # workflow_run (chained from edgar_3x): artifact should be <30 min old.
-      # Threshold 6h prevents a previous run's artifact from being re-sent.
-      # schedule (13:00 UTC): allows up to 25h for a missed edgar_3x run.
+      # workflow_run (chained from pipeline_us): artifact should be <6h old.
+      # schedule (13:00 UTC fallback):          allows up to 25h for a missed run.
       - name: Verify intel_source_status.json freshness
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -157,7 +183,7 @@ jobs:
               print(f"::warning::Freshness check failed ({e}) — proceeding anyway")
           EOF
 
-      # ── 6. Send to Discord (3 retries, 30s/60s backoff) ──────────────────────
+      # ── 10. Send to Discord (3 retries, 30s/60s backoff) ─────────────────────
       - name: Send daily market checkup
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
@@ -171,7 +197,7 @@ jobs:
             --log-dir logs \
             $DRY_RUN_FLAG
 
-      # ── 7. Upload send log on failure (always, for debugging) ────────────────
+      # ── 11. Upload send log on failure ───────────────────────────────────────
       - name: Upload Discord send log
         if: always()
         uses: actions/upload-artifact@v4

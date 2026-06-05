@@ -53,6 +53,7 @@ def test_registry_ticker_format():
 
 from unittest.mock import patch, MagicMock
 from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+from scripts.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
 
 
 def test_fmp_fetcher_market():
@@ -139,6 +140,23 @@ def test_fmp_fetcher_no_quota_logic():
     assert result == []
 
 
+def test_fmp_fetcher_historical_price_falls_back_to_base_symbol():
+    f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
+    rows = _fmp_price_rows(275)
+
+    call_args: list[str] = []
+    def fake_history(ticker, limit=280):
+        call_args.append(ticker)
+        return [] if ticker == "ASML.AS" else rows
+
+    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+               side_effect=fake_history):
+        result = f.prepare(["ASML.AS"])
+
+    assert len(result) == 1
+    assert call_args == ["ASML.AS", "ASML"]
+
+
 def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
     """Each ticker with valid FMP data produces one TickerEntry."""
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
@@ -154,6 +172,32 @@ def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
         result = f.prepare(["SAP.DE", "SIE.DE"])
     assert len(result) == 2
     assert call_count[0] == 2
+
+
+def test_build_ticker_index_supports_base_symbol_lookup():
+    rows = [
+        {"symbol": "ASML", "score": 1.0},
+        {"symbol": "SAP.DE", "score": 0.8},
+    ]
+    with patch("scripts.fmp_bulk_prefetch.load_bulk", return_value=rows):
+        index = build_ticker_index(Path("/tmp"), endpoint="dummy")
+
+    assert index["ASML"]["score"] == 1.0
+    assert index["SAP.DE"]["score"] == 0.8
+    assert index["SAP"]["score"] == 0.8
+    assert normalize_ticker_key("ASML.AS") == "ASML"
+    assert normalize_ticker_key("SAP.DE") == "SAP"
+
+
+def test_map_bulk_data_to_universe_matches_base_symbol():
+    universe = ["ASML.AS", "SAP.DE"]
+    rows = [
+        {"symbol": "ASML", "score": 1.0},
+        {"symbol": "SAP.DE", "score": 0.8},
+    ]
+    mapped = map_bulk_data_to_universe(universe, rows)
+    assert mapped["ASML.AS"]["score"] == 1.0
+    assert mapped["SAP.DE"]["score"] == 0.8
 
 
 from regime_trader.fetchers.orchestrator import Orchestrator

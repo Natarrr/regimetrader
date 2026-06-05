@@ -222,6 +222,54 @@ def load_bulk(cache_dir: Path, endpoint: str) -> list[dict[str, Any]]:
         return []
 
 
+def normalize_ticker_key(ticker: str) -> str:
+    """Normalize a ticker to its base symbol for bulk lookup.
+
+    Examples:
+      ASML.AS -> ASML
+      005930.KS -> 005930
+    """
+    if not ticker:
+        return ""
+    return ticker.split(".")[0].upper().strip()
+
+
+def map_bulk_data_to_universe(
+    universe_tickers: list[str],
+    bulk_rows: list[dict[str, Any]],
+    ticker_column_name: str = "symbol",
+) -> dict[str, dict[str, Any]]:
+    """Map bulk rows to universe tickers using exact and base-symbol matching.
+
+    This is useful when FMP bulk snapshots index international assets using
+    the base company label (ASML) instead of the exchange suffix variant
+    (ASML.AS).
+    """
+    base_to_universe_map: dict[str, list[str]] = {}
+    for ticker in universe_tickers:
+        base_key = normalize_ticker_key(ticker)
+        base_to_universe_map.setdefault(base_key, []).append(ticker)
+
+    mapped_results: dict[str, dict[str, Any]] = {t: {} for t in universe_tickers}
+    for row in bulk_rows:
+        raw_symbol = (row.get(ticker_column_name) or row.get("symbol") or row.get("ticker") or "").upper().strip()
+        if not raw_symbol:
+            continue
+
+        # Exact match first.
+        if raw_symbol in mapped_results:
+            mapped_results[raw_symbol] = row
+            continue
+
+        # Fallback to stripped base symbol matching.
+        base_symbol = normalize_ticker_key(raw_symbol)
+        for target in base_to_universe_map.get(base_symbol, []):
+            if not mapped_results[target]:
+                mapped_results[target] = row
+
+    return mapped_results
+
+
 def build_ticker_index(
     cache_dir: Path,
     endpoint: str,
@@ -234,8 +282,13 @@ def build_ticker_index(
     index: dict[str, dict[str, Any]] = {}
     for rec in records:
         sym = rec.get(key_field) or rec.get("symbol") or rec.get("ticker") or ""
-        if sym:
-            index[sym.upper()] = rec
+        if not sym:
+            continue
+        sym = sym.upper().strip()
+        index[sym] = rec
+        base_sym = normalize_ticker_key(sym)
+        if base_sym and base_sym not in index:
+            index[base_sym] = rec
     return index
 
 

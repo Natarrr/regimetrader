@@ -1,0 +1,242 @@
+name: pipeline_intl
+
+# ─────────────────────────────────────────────────────────────────────────────
+# International Markets Pipeline — 6-factor FMP-only scoring.
+#
+# Runs concurrently with pipeline_us.yml. No EDGAR dependency means this
+# pipeline completes well before the US pipeline, so its intl-top-lists
+# artifact is always available when daily_toplists_discord.yml fires.
+#
+# Tickers: config/ticker_registry.json (europe[] + asia[])
+# Factors (intl_strategy.json):
+#   news_sentiment    0.20  — FMP stable/news/stock + PEAD decay
+#   momentum_long     0.20  — FMP historical-price-eod/full (Jegadeesh-Titman)
+#   quality_piotroski 0.20  — FMP ratios-ttm (per-ticker)
+#   volume_attention  0.15  — FMP historical-price-eod/full
+#   analyst_consensus 0.15  — FMP upgrades-downgrades-consensus-bulk
+#   news_buzz         0.10  — FMP stable/news/stock article count
+#
+# Structurally absent (always 0.0):
+#   congress_score       — STOCK Act / S3 Stock Watcher are US-only feeds
+#   transcript_tone_score — FMP earning-call-transcript-latest is US-only
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 0 * * 1-5"  # 00:00 UTC Mon-Fri
+    - cron: "0 8 * * 1-5"  # 08:00 UTC Mon-Fri
+    - cron: "0 16 * * 1-5" # 16:00 UTC Mon-Fri
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-and-rank-intl:
+    name: INTL — FMP 6-Factor Scoring (EU + Asia)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    concurrency:
+      group: intl_pipeline
+      cancel-in-progress: false
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Restore daily pipeline cache ─────────────────────────────────────
+      # Bulk snapshots are region-agnostic (global FMP data). Falls back to the
+      # us-pipeline or legacy edgar_3x cache when the intl key is cold.
+      - name: Get cache date
+        id: cache_date
+        run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore pipeline data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/
+          key: intl-pipeline-cache-${{ runner.os }}-${{ steps.cache_date.outputs.date }}
+          restore-keys: |
+            intl-pipeline-cache-${{ runner.os }}-
+            us-pipeline-cache-${{ runner.os }}-
+            pipeline-cache-${{ runner.os }}-
+
+      # ── 4. Install dependencies ──────────────────────────────────────────────
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Install full pipeline deps
+        run: pip install -r requirements.txt
+
+      # ── 5. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
+      # upgrades-downgrades-consensus-bulk is global — covers EU/Asia symbols.
+      # ratios-ttm-bulk provides quality_piotroski inputs for non-US tickers.
+      - name: FMP bulk pre-fetch (Ultimate)
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+          BULK_CACHE_TTL_HOURS: "7"
+        run: |
+          set -euo pipefail
+          python scripts/fmp_bulk_prefetch.py \
+            --cache-dir  "$BULK_CACHE_DIR" \
+            --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
+            --endpoints  upgrades-downgrades-consensus-bulk \
+                         ratios-ttm-bulk \
+                         key-metrics-ttm-bulk \
+            --verbose
+
+      # ── 6. Fetch INTL raw factor metrics (FMP Ultimate — EU + Asia) ──────────
+      # FMPFetcher.prepare() calls per-ticker FMP stable/ endpoints for every
+      # available factor. Outputs [{"ticker": ..., "metrics": raw_factors}]
+      # consumed by run_pipeline_profile.py in the next step.
+      - name: Fetch INTL raw metrics
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+        run: |
+          mkdir -p logs
+          python3 - <<'EOF'
+          import json, os, sys, logging
+          from pathlib import Path
+
+          logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+          log = logging.getLogger("intl_fetch")
+          sys.path.insert(0, ".")
+
+          from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+          from regime_trader.fetchers.base import MarketEnum
+
+          api_key = os.environ["FMP_API_KEY"]
+          bulk_cache_dir = Path(os.environ.get("BULK_CACHE_DIR", ".cache/bulk_snapshots"))
+
+          # Inject bulk consensus index to avoid per-ticker analyst_consensus calls
+          bulk_idx: dict = {}
+          try:
+              from scripts.fmp_bulk_prefetch import build_ticker_index
+              bulk_idx = build_ticker_index(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
+              log.info("Bulk consensus index: %d symbols loaded", len(bulk_idx))
+          except Exception as exc:
+              log.warning("Bulk index load failed: %s — falling back to per-ticker FMP", exc)
+
+          reg_path = Path("config/ticker_registry.json")
+          if not reg_path.exists():
+              log.error("ticker_registry.json not found — aborting")
+              sys.exit(1)
+          registry = json.loads(reg_path.read_text(encoding="utf-8"))
+          eu_tickers   = [e["ticker"] for e in registry.get("europe", [])]
+          asia_tickers = [e["ticker"] for e in registry.get("asia", [])]
+          log.info("Registry: %d EU + %d Asia tickers", len(eu_tickers), len(asia_tickers))
+
+          payload: list[dict] = []
+          for market_enum, tickers in [
+              (MarketEnum.EUROPE, eu_tickers),
+              (MarketEnum.ASIA,   asia_tickers),
+          ]:
+              if not tickers:
+                  continue
+              fetcher = FMPFetcher(
+                  api_key=api_key,
+                  market=market_enum,
+                  bulk_consensus_idx=bulk_idx,
+              )
+              entries = fetcher.prepare(tickers)
+              for entry in entries:
+                  # raw_factors keys use _score suffix — compatible with StrategyEngine
+                  payload.append({"ticker": entry.ticker, "metrics": entry.raw_factors})
+              log.info("%s: fetched %d entries", market_enum.value, len(entries))
+
+          out_path = Path("logs/raw_intl_fetcher_output.json")
+          out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+          log.info("Wrote %d INTL entries → %s", len(payload), out_path)
+          EOF
+
+      # ── 7. Score INTL universe (StrategyEngine 6-factor) ────────────────────
+      # assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6  (enforced in StrategyEngine)
+      - name: Score INTL universe
+        run: |
+          python scripts/run_pipeline_profile.py \
+            --config   backend/market_intel/profiles/intl_strategy.json \
+            --raw-data logs/raw_intl_fetcher_output.json \
+            --out-dir  logs/
+
+      # ── 8. Validate output ───────────────────────────────────────────────────
+      - name: Validate top_lists_intl.json
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+          p = Path("logs/top_lists_intl.json")
+          if not p.exists():
+              print("::error::top_lists_intl.json was not written — intl pipeline failed silently")
+              sys.exit(1)
+          d = json.loads(p.read_text())
+          if not isinstance(d, list) or len(d) == 0:
+              print("::error::top_lists_intl.json is empty — no INTL tickers scored")
+              sys.exit(1)
+          sample = d[0]
+          required_keys = {"ticker", "composite_score", "region_applied", "factor_snapshots"}
+          missing = required_keys - set(sample.keys())
+          if missing:
+              print(f"::error::Missing schema keys in top_lists_intl.json[0]: {missing}")
+              sys.exit(1)
+          nonzero = sum(1 for t in d if t.get("composite_score", 0) > 0)
+          print(f"Validated: {len(d)} INTL tickers, {nonzero} with non-zero composite score, schema OK")
+          EOF
+
+      # ── 9. Run summary ───────────────────────────────────────────────────────
+      - name: Generate INTL run summary
+        if: always()
+        run: |
+          echo "## INTL Pipeline — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f logs/top_lists_intl.json ]; then
+            echo "### Top 5 International Buys" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | Region | NS | Mom | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          try:
+              with open("logs/top_lists_intl.json") as f:
+                  d = json.load(f)
+              for i, t in enumerate(d[:5], 1):
+                  fac = t.get("factor_snapshots", {})
+                  print(f"| {i} | **{t['ticker']}** | {t['composite_score']:.4f} | "
+                        f"{t.get('region_applied', '—')} | "
+                        f"{fac.get('news_sentiment', 0):.2f} | "
+                        f"{fac.get('momentum_long', 0):.2f} | "
+                        f"{fac.get('analyst_consensus', 0):.2f} | "
+                        f"{fac.get('quality_piotroski', 0):.2f} |")
+          except Exception as e:
+              print(f"| — | _summary unavailable: {e}_ | | | | | | |")
+          EOF
+          else
+            echo "⚠️ _top_lists_intl.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 10. Upload artifacts ─────────────────────────────────────────────────
+      - name: Upload intl-top-lists artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intl-top-lists
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            logs/top_lists_intl.json
+            logs/raw_intl_fetcher_output.json

@@ -154,6 +154,8 @@ class FMPFetcher(BaseMarketFetcher):
         """
         # ── 1. Prices — momentum + volume ────────────────────────────────────
         rows = client.get_historical_prices(ticker, limit=_PRICE_LIMIT)
+        if not rows and "." in ticker:
+            rows = client.get_historical_prices(ticker.split(".")[0], limit=_PRICE_LIMIT)
         closes, volumes, _ = fmp_prices_to_arrays(rows)
 
         if len(closes) < 5:
@@ -261,11 +263,15 @@ class FMPFetcher(BaseMarketFetcher):
         raw_current_price = None
         try:
             pt_data = client.get_price_target_consensus(ticker)
+            if not pt_data and "." in ticker:
+                pt_data = client.get_price_target_consensus(ticker.split(".")[0])
             if not locals().get("quote"):
                 quote = client.get_quote(ticker)
             raw_target_price  = pt_data.get("targetConsensus") if pt_data else None
             raw_current_price = quote.get("price") if quote else None
             upside = client.get_upside_to_target(ticker)
+            if upside is None and "." in ticker:
+                upside = client.get_upside_to_target(ticker.split(".")[0])
             if upside is not None:
                 price_target_upside_score = upside
         except Exception as exc:
