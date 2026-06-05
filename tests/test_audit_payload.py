@@ -221,3 +221,49 @@ def test_ticker_invalid_raises():
     ])
     with pytest.raises(StructuralIntegrityError):
         audit(payload)
+
+
+# ---------------------------------------------------------------------------
+# E2. Dynamic range validation — replaces static InternationalScoreOverflowError
+# ---------------------------------------------------------------------------
+
+def test_intl_score_of_0_95_passes_eu():
+    """EU score of 0.95 must pass now that the 0.90 ceiling is removed."""
+    payload = _make_payload(top_buys=[
+        _entry(ticker="ASML.AS", score=0.95, badge="HIGH BUY", market="EUROPE")
+    ])
+    assert audit(payload) is True
+
+
+def test_intl_score_of_1_0_passes_eu():
+    """EU score of exactly 1.0 is now valid — perfect factors, no dampening."""
+    payload = _make_payload(top_buys=[
+        _entry(ticker="SAP.DE", score=1.0, badge="HIGH BUY", market="EUROPE")
+    ])
+    assert audit(payload) is True
+
+
+def test_intl_score_of_1_0_passes_asia():
+    """Asia score of exactly 1.0 is now valid."""
+    payload = _make_payload(top_buys=[
+        _entry(ticker="7203.T", score=1.0, badge="HIGH BUY", market="ASIA")
+    ])
+    assert audit(payload) is True
+
+
+def test_intl_score_above_1_still_raises():
+    """Score > 1.0 must still raise ScoreDivergenceError regardless of market."""
+    payload = _make_payload(top_buys=[
+        _entry(ticker="SAP.DE", score=1.01, badge="HIGH BUY", market="EUROPE")
+    ])
+    with pytest.raises(ScoreDivergenceError):
+        audit(payload)
+
+
+def test_international_score_overflow_error_not_exported():
+    """InternationalScoreOverflowError must no longer exist in audit_payload."""
+    import importlib
+    import scripts.audit_payload as ap_module
+    assert not hasattr(ap_module, "InternationalScoreOverflowError"), (
+        "InternationalScoreOverflowError was removed in v2.2-global"
+    )
