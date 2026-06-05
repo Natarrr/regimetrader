@@ -754,8 +754,9 @@ def generate(
         )
 
     # Merge EU/Asia entries — reads all factor scores populated by FMPFetcher.
-    # source_reliability is pre-applied by _build_intl_entry (set to 1.0) to
-    # prevent double-application in the dampening loop below.
+    # source_reliability is stored as diagnostic metadata in each entry dict.
+    # It no longer multiplies final_score — the dampening loop was removed in
+    # v2.2-global. See FMPFetcher.source_reliability() and _build_intl_entry().
     for row in intl_results:
         if row.get("_validation_failed"):
             continue

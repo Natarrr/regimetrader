@@ -288,8 +288,8 @@ def test_fmp_fetcher_source_reliability():
     eu = FMPFetcher(api_key="k", market=MarketEnum.EUROPE)
     asia = FMPFetcher(api_key="k", market=MarketEnum.ASIA)
 
-    assert eu.source_reliability("SAP.DE") >= 0.75
-    assert asia.source_reliability("7203.T") >= 0.65
+    assert eu.source_reliability("SAP.DE") == pytest.approx(1.0)
+    assert asia.source_reliability("7203.T") == pytest.approx(1.0)
 
 
 def test_eu_perfect_factors_reaches_score_one():
