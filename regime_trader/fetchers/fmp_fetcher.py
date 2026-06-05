@@ -71,17 +71,12 @@ class FMPFetcher(BaseMarketFetcher):
         return self._market
 
     def source_reliability(self, ticker: str) -> float:
-        """FMP Ultimate reliability for non-US markets.
+        """Returns 1.0 for all markets.
 
-        Insider data coverage: EU ~70% (MAR Art.19 mandatory disclosure),
-        Asia ~50% (EDINET JP partial, KRX partial, HKEX partial).
-        News/analyst coverage: ~85% for large/mid caps globally.
+        Regional dampening was removed in v2.2-global. Score compression is
+        replaced by the available-factor dynamic denominator in StrategyEngine.
         """
-        if self._market == MarketEnum.EUROPE:
-            return 0.80   # raised from 0.60 — MAR Art.19 + FMP EU coverage confirmed
-        if self._market == MarketEnum.ASIA:
-            return 0.70   # raised from 0.60 — FMP Asia coverage confirmed for large caps
-        return 0.95
+        return 1.0
 
     def prepare(self, tickers: list[str]) -> list[TickerEntry]:
         """Fetch ALL available factors for EU/Asia tickers via FMP Ultimate.

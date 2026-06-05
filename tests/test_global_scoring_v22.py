@@ -290,3 +290,44 @@ def test_fmp_fetcher_source_reliability():
 
     assert eu.source_reliability("SAP.DE") >= 0.75
     assert asia.source_reliability("7203.T") >= 0.65
+
+
+def test_eu_perfect_factors_reaches_score_one():
+    """After removing dampening, a flawless EU ticker must be able to reach 1.0."""
+    from backend.market_intel._score_compositor import compute_composite_score
+
+    perfect = {
+        "insider_conviction": 1.0,
+        "insider_breadth":    1.0,
+        "congress":           0.0,
+        "news_sentiment":     1.0,
+        "news_buzz":          1.0,
+        "momentum_long":      1.0,
+        "volume_attention":   1.0,
+        "analyst_consensus":  1.0,
+        "analyst_revision":   1.0,
+        "quality_piotroski":  1.0,
+        "price_target_upside": 1.0,
+        "transcript_tone":    0.0,
+    }
+    score, meta = compute_composite_score("ASML.AS", perfect)
+    assert score == pytest.approx(1.0, abs=1e-4), (
+        f"Perfect EU ticker should score 1.0 without dampening, got {score:.4f}"
+    )
+    assert meta["weights_set"] == "GLOBAL"
+
+
+def test_eu_score_not_capped_at_point_eight():
+    """Ensure no 0.80 ceiling remains in the scoring path."""
+    from backend.market_intel._score_compositor import compute_composite_score
+
+    high_factors = {k: 0.95 for k in [
+        "insider_conviction", "insider_breadth", "news_sentiment", "news_buzz",
+        "momentum_long", "volume_attention", "analyst_consensus", "analyst_revision",
+        "quality_piotroski", "price_target_upside",
+    ]}
+    high_factors["congress"] = 0.0
+    high_factors["transcript_tone"] = 0.0
+
+    score, _ = compute_composite_score("ASML.AS", high_factors)
+    assert score > 0.80, f"Strong EU ticker must exceed old 0.80 ceiling, got {score:.4f}"
