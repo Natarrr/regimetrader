@@ -98,7 +98,7 @@ def fetch_prices(ticker: str, from_date: date, to_date: date) -> list[dict]:
 
 def compute_momentum_at(
     prices: list[dict], snapshot_date: date
-) -> tuple[float, float]:
+) -> tuple[Optional[float], Optional[float]]:
     """Return (return_12_1m, spy_relative_vol_ratio) at snapshot_date.
 
     prices: list of {date: str, close: float, volume: float}, newest-first.
@@ -109,10 +109,9 @@ def compute_momentum_at(
     if len(eligible) < 252:
         return (None, None)
 
-    # Price at t (snapshot), t-21 (skip), t-252 (12m ago)
-    p_t = float(eligible[0]["close"])
-    p_skip = float(eligible[min(21, len(eligible) - 1)]["close"])
-    p_12m = float(eligible[min(252, len(eligible) - 1)]["close"])
+    # Skip-month return: price at t-21 (numerator) vs t-252/12m ago (denominator)
+    p_skip = float(eligible[21]["close"])
+    p_12m = float(eligible[252]["close"])
 
     if p_skip <= 0 or p_12m <= 0:
         return (None, None)
@@ -157,4 +156,6 @@ def compute_forward_return(
         return None
     p0 = float(at_snapshot[0]["close"])
     p1 = float(after_snapshot[-1]["close"])  # closest date after horizon
-    return (p1 - p0) / p0 if p0 > 0 else None
+    if p0 <= 0 or p1 <= 0:
+        return None
+    return (p1 - p0) / p0
