@@ -1,6 +1,0 @@
-[theme]
-primaryColor             = "#5158F6"   # Revolut blue-purple — primary action
-backgroundColor          = "#0c0c0f"   # deep dark with blue tint
-secondaryBackgroundColor = "#1a1a2a"   # dark card surface
-textColor                = "#f0f0f5"   # near-white body text
-font                     = "sans serif" # clean fintech look
