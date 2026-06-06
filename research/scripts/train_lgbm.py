@@ -147,26 +147,44 @@ def _blend_and_constrain(
 
     # Iterative floor projection: normalize, then clamp below-floor weights and
     # redistribute the deficit among unclamped weights until stable.  This
-    # guarantees WEIGHT_FLOOR holds after normalization.
+    # guarantees WEIGHT_FLOOR holds after normalization. Investigate factors are
+    # frozen at their academic weight and excluded from floor enforcement.
     total = sum(final.values())
     weights = {k: v / total for k, v in final.items()}
 
-    for _ in range(len(FACTORS) + 1):
-        floored = {k: v for k, v in weights.items() if v < WEIGHT_FLOOR}
+    for _ in range(50):
+        # Only apply floor to non-investigate factors
+        floored = {k: v for k, v in weights.items()
+                   if v < WEIGHT_FLOOR and k not in investigate_factors}
         if not floored:
             break
         clamped = {k: WEIGHT_FLOOR for k in floored}
-        remaining_budget = 1.0 - sum(clamped.values())
-        free = {k: v for k, v in weights.items() if k not in floored}
+        # Calculate remaining budget, accounting for investigate factors staying fixed
+        investigate_total = sum(v for k, v in weights.items() if k in investigate_factors)
+        remaining_budget = 1.0 - investigate_total - sum(clamped.values())
+        # Free weights are non-investigate factors that are above floor
+        free = {k: v for k, v in weights.items()
+                if k not in floored and k not in investigate_factors}
         free_total = sum(free.values())
         if free_total <= 0:
-            # Degenerate: all factors are at floor, spread evenly
-            n = len(weights)
-            weights = {k: 1.0 / n for k in weights}
+            # Degenerate: all non-investigate factors are at floor, spread evenly
+            # among non-investigate factors, keep investigate factors fixed
+            non_investigate = {k: v for k, v in weights.items() if k not in investigate_factors}
+            investigate_total = sum(v for k, v in weights.items() if k in investigate_factors)
+            remaining_budget = 1.0 - investigate_total
+            n = len(non_investigate)
+            if n > 0:
+                weights = {k: remaining_budget / n if k in non_investigate else v
+                           for k, v in weights.items()}
             break
         scale = remaining_budget / free_total
-        weights = {k: WEIGHT_FLOOR if k in floored else v * scale
+        weights = {k: WEIGHT_FLOOR if k in floored else (v * scale if k not in investigate_factors else v)
                    for k, v in weights.items()}
+
+    # Verify floor constraint holds for non-investigate factors
+    for f in FACTORS:
+        if f not in investigate_factors:
+            assert weights[f] >= WEIGHT_FLOOR - 1e-7, f"Floor violated for {f}: {weights[f]}"
 
     final = {k: round(v, 8) for k, v in weights.items()}
     assert abs(sum(final.values()) - 1.0) < 1e-5, f"Weights sum to {sum(final.values())}"
