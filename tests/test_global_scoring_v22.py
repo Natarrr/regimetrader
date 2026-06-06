@@ -36,10 +36,10 @@ def test_weights_global_transcript_zero():
     assert WEIGHTS_GLOBAL.get("transcript_tone", 0.0) == 0.0
 
 
-def test_weights_global_insider_unchanged():
-    """EU/Asia insider signal has same weight as US — FMP MAR Art.19 parity."""
-    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_GLOBAL
-    assert WEIGHTS_GLOBAL["insider_conviction"] == WEIGHTS_US["insider_conviction"]
+def test_weights_global_insider_conviction_correct():
+    """insider_conviction reduced 0.30→0.28 in v2.3 to fund analyst_revision + price_target_upside."""
+    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    assert WEIGHTS_GLOBAL["insider_conviction"] == 0.28
 
 
 def test_weights_global_analyst_consensus_positive():
