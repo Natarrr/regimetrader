@@ -130,6 +130,28 @@ def _ic_estimate() -> float:
         return 0.03  # conservative default
 
 
+def _clip_sector_weights(
+    weights: np.ndarray,
+    sector_ids: list[int],
+    n_sectors: int,
+) -> np.ndarray:
+    """Iteratively scale down over-weight sectors until all sectors ≤ _MAX_SECTOR_WEIGHT.
+
+    Excess weight within a sector is removed proportionally from that sector's
+    positions. The total portfolio weight may decrease below 1.0 (cash buffer).
+    """
+    w = weights.copy()
+    for s in range(n_sectors):
+        mask = np.array([i for i, sid in enumerate(sector_ids) if sid == s])
+        if mask.size == 0:
+            continue
+        sector_total = w[mask].sum()
+        if sector_total > _MAX_SECTOR_WEIGHT + 1e-8:
+            scale = _MAX_SECTOR_WEIGHT / sector_total
+            w[mask] *= scale
+    return w
+
+
 def run_optimizer(
     tickers: list[str],
     scores: list[float],
@@ -182,6 +204,10 @@ def run_optimizer(
             log.warning("Risk parity failed (%s), using score-proportional", exc2)
             method = "score_proportional"
             weights = _score_proportional(scores_arr)
+
+    # Sector cap enforcement — applied to all methods (MVO enforces via constraint,
+    # but risk_parity and score_proportional have no built-in sector limit).
+    weights = _clip_sector_weights(weights, sector_ids, len(unique_sectors))
 
     # VIX vol-targeting — scale down only, never up
     regime = _vix_regime(vix)
