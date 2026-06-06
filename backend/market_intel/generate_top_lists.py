@@ -48,6 +48,7 @@ from regime_trader.config.weights import (
     get_region,
 )
 from backend.market_intel._generate_top_lists_intl_patch import _build_intl_entry
+from backend.market_intel.portfolio_optimizer import run_optimizer
 
 log = logging.getLogger("generate_top_lists")
 
@@ -791,6 +792,59 @@ def generate(
     # applies conviction multiplier to final_score in-place.  Must run AFTER
     # detect_anomalies so the report is fresh.  No-op when feed is dead.
     _apply_congress_boost(valid_entries, log_dir)
+
+    # Portfolio construction: MVO weights for top-20 by composite_score.
+    # Ties at position 20 broken alphabetically by ticker.
+    _TOP_N_PORTFOLIO = 20
+    _sorted_for_portfolio = sorted(
+        valid_entries, key=lambda e: (-e["final_score"], e["ticker"])
+    )
+    _portfolio_candidates = _sorted_for_portfolio[:_TOP_N_PORTFOLIO]
+
+    _prev_weights: dict = {}
+    _prev_path = log_dir / "top_lists.json"
+    if _prev_path.exists():
+        try:
+            _prev_data = json.loads(_prev_path.read_text(encoding="utf-8"))
+            _prev_weights = {
+                e["ticker"]: e.get("portfolio_weight", 0.0)
+                for section in _prev_data.get("top_lists", {}).values()
+                for e in (section if isinstance(section, list) else [])
+                if e.get("portfolio_weight", 0.0) > 0
+            }
+        except Exception:
+            pass
+
+    _portfolio_tickers = [e["ticker"] for e in _portfolio_candidates]
+    _portfolio_scores = [e["final_score"] for e in _portfolio_candidates]
+    _portfolio_sectors = [e.get("sector", "Unknown") for e in _portfolio_candidates]
+    _vix = current_vix if current_vix is not None else 20.0
+
+    try:
+        _opt_weights, _opt_method = run_optimizer(
+            _portfolio_tickers, _portfolio_scores, _portfolio_sectors,
+            vix=_vix, prev_weights=_prev_weights,
+        )
+    except Exception as _exc:
+        log.warning("Portfolio optimizer raised: %s — using zeros", _exc)
+        _opt_weights = {t: 0.0 for t in _portfolio_tickers}
+        _opt_method = "failed"
+
+    # Attach portfolio_weight to every entry (0.0 for non-top-20).
+    _weight_set = set(_portfolio_tickers)
+    for _entry in entries:
+        _entry["portfolio_weight"] = round(_opt_weights.get(_entry["ticker"], 0.0), 6)
+        _entry["portfolio_weight_method"] = _opt_method if _entry["ticker"] in _weight_set else "n/a"
+        if _entry["ticker"] in _weight_set:
+            _entry_sector = _entry.get("sector", "Unknown")
+            _entry["sector_weight_contribution"] = round(
+                sum(
+                    _opt_weights.get(t, 0.0)
+                    for t, s in zip(_portfolio_tickers, _portfolio_sectors)
+                    if s == _entry_sector
+                ),
+                6,
+            )
 
     def score_desc(e): return e["final_score"]  # noqa: E731
 
