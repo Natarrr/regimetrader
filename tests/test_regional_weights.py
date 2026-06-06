@@ -47,18 +47,20 @@ def test_weights_us_unchanged():
     assert WEIGHTS_US == expected
 
 def test_weights_global_redistribution_correct():
-    """The 0.22 freed from congress must be redistributed correctly (v2.2-global)."""
+    """The 0.22 freed from congress must be redistributed correctly (v2.3-global)."""
     delta = {k: WEIGHTS_GLOBAL[k] - WEIGHTS_US[k] for k in WEIGHTS_US}
     assert delta["congress"]           == pytest.approx(-0.22)
-    assert delta["insider_conviction"] == pytest.approx(0.0)    # unchanged — MAR parity
+    assert delta["insider_conviction"] == pytest.approx(-0.02)   # −0.02 — MAR parity maintained
+    assert delta["insider_breadth"]    == pytest.approx(-0.01)   # −0.01 donor
+    assert delta["news_buzz"]          == pytest.approx(-0.01)   # −0.01 donor
+    assert delta["volume_attention"]   == pytest.approx(+0.01)   # −0.01 donor + net redistrib
     assert delta["analyst_consensus"]  == pytest.approx(+0.10)
     assert delta["momentum_long"]      == pytest.approx(+0.02)
     assert delta["quality_piotroski"]  == pytest.approx(+0.05)
     assert delta["news_sentiment"]     == pytest.approx(+0.03)
-    assert delta["volume_attention"]   == pytest.approx(+0.02)
-    # Truly unchanged
-    for factor in ("insider_breadth", "news_buzz"):
-        assert delta[factor] == pytest.approx(0.0)
+    # New factors activated
+    assert WEIGHTS_GLOBAL["analyst_revision"]    == pytest.approx(0.02)
+    assert WEIGHTS_GLOBAL["price_target_upside"] == pytest.approx(0.03)
 
 
 # ── Region classifier ────────────────────────────────────────────────────────
@@ -99,7 +101,7 @@ def test_get_weights_us_returns_copy():
 def test_get_weights_global_returns_copy():
     w = get_weights("SAP.DE")
     w["insider_conviction"] = 999.0
-    assert WEIGHTS_GLOBAL["insider_conviction"] == 0.30   # original not mutated
+    assert WEIGHTS_GLOBAL["insider_conviction"] == 0.28   # original not mutated
 
 
 # ── Composite score computation ──────────────────────────────────────────────

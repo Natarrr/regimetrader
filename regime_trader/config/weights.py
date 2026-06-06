@@ -48,29 +48,27 @@ assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
 # congress = 0.00  (structural absence — STOCK Act is US-only)
 # transcript_tone = 0.00 (FMP earning-call-transcript-latest US-only)
 #
-# Net changes vs WEIGHTS_US:
-#   insider_conviction  0.30 → 0.30  (unchanged — MAR Art.19 parity with Form 4)
-#   analyst_consensus   0.00 → 0.10  (+0.10)
-#   news_sentiment      0.10 → 0.13  (+0.03)
-#   momentum_long       0.15 → 0.17  (+0.02)
-#   volume_attention    0.03 → 0.05  (+0.02)
-#   quality_piotroski   0.00 → 0.05  (+0.05)
-#   congress            0.22 → 0.00  (-0.22)
-#   analyst_revision    0.00 → 0.00  (not wired yet)
-#   price_target_upside 0.00 → 0.00  (not wired yet)
+# Net changes vs WEIGHTS_US (v2.3 sprint — activating 4 wired-but-zeroed factors):
+#   insider_conviction  0.30 → 0.28  (−0.02 donor — MAR Art.19 parity maintained)
+#   insider_breadth     0.15 → 0.14  (−0.01 donor)
+#   news_buzz           0.05 → 0.04  (−0.01 donor — lowest IC)
+#   volume_attention    0.05 → 0.04  (−0.01 donor)
+#   analyst_revision    0.00 → 0.02  (+0.02 — Chan, Jegadeesh & Lakonishok 1996)
+#   price_target_upside 0.00 → 0.03  (+0.03 — Brav & Lehavy 2003)
+#   congress            0.22 → 0.00  (structurally absent)
 #   transcript_tone     —   → 0.00  (structurally absent)
 WEIGHTS_GLOBAL: dict[str, float] = {
-    "insider_conviction":  0.30,   # unchanged — MAR Art.19 parity with Form 4
-    "insider_breadth":     0.15,   # unchanged
+    "insider_conviction":  0.28,   # −0.02 vs US — MAR Art.19 parity maintained
+    "insider_breadth":     0.14,   # −0.01 vs US
     "congress":            0.00,   # structurally absent outside US
     "news_sentiment":      0.13,   # +0.03 — global news corpus via FMP
-    "news_buzz":           0.05,   # unchanged
+    "news_buzz":           0.04,   # −0.01 donor
     "momentum_long":       0.17,   # +0.02 — Rouwenhorst 1998 EU premium
-    "volume_attention":    0.05,   # +0.02
+    "volume_attention":    0.04,   # −0.01 donor
     "analyst_consensus":   0.10,   # +0.10 — stronger signal in less-covered markets
     "quality_piotroski":   0.05,   # +0.05 — accounting-identity, universal
-    "analyst_revision":    0.00,   # not wired yet (sprint)
-    "price_target_upside": 0.00,   # not wired yet (sprint)
+    "analyst_revision":    0.02,   # activated — Chan, Jegadeesh & Lakonishok 1996
+    "price_target_upside": 0.03,   # activated — Brav & Lehavy 2003
     "transcript_tone":     0.00,   # structurally absent outside US
 }
 assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
