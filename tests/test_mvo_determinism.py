@@ -34,7 +34,7 @@ class TestMVODeterminism:
 
         results = [
             run_optimizer(tickers, scores, sectors, vix=22.0, prev_weights=prev)
-            for _ in range(5)
+            for _ in range(10)
         ]
         w0 = results[0][0]
         for w, _ in results[1:]:
