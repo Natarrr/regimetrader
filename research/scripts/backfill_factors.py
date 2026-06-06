@@ -159,3 +159,181 @@ def compute_forward_return(
     if p0 <= 0 or p1 <= 0:
         return None
     return (p1 - p0) / p0
+
+
+def fetch_insider_trades(ticker: str, snapshot_date: date) -> list[dict]:
+    """All P-code insider trades in [snapshot_date-90d, snapshot_date]."""
+    from_d = snapshot_date - timedelta(days=90)
+    data = _fmp_get(
+        "insider-trading/search",
+        {
+            "symbol": ticker,
+            "transactionType": "P-Purchase",
+            "from": str(from_d),
+            "to": str(snapshot_date),
+            "limit": 200,
+        },
+    )
+    return data if isinstance(data, list) else []
+
+
+def compute_insider_scores(
+    trades: list[dict], market_cap: float
+) -> tuple[float, float]:
+    """Return (insider_conviction_score, insider_breadth_score) in [0, 1].
+
+    Adapts a flat list of P-purchase trade dicts to the production function
+    signatures:
+      - score_insider_conviction(key_purchases_usd, market_cap, ...)
+      - score_insider_breadth(p_transactions, s_transactions, ...)
+    """
+    if not trades or market_cap <= 0:
+        return (0.0, 0.0)
+
+    # Aggregate total purchase USD across all trades in the window.
+    key_purchases_usd = sum(
+        float(t.get("securitiesTransacted", 0) or 0)
+        * float(t.get("price", 0) or 0)
+        for t in trades
+    )
+
+    # Recency: days since the most recent trade relative to snapshot context.
+    dates = [str(t.get("transactionDate") or t.get("date", "") or "")[:10] for t in trades]
+    dates = [d for d in dates if d]
+    if dates:
+        most_recent_str = max(dates)
+        try:
+            most_recent = date.fromisoformat(most_recent_str)
+            days_since = (date.today() - most_recent).days
+        except ValueError:
+            days_since = 0
+    else:
+        days_since = 0
+
+    # CEO purchase USD — sum trades where reportingName contains "CEO"
+    ceo_usd = sum(
+        float(t.get("securitiesTransacted", 0) or 0)
+        * float(t.get("price", 0) or 0)
+        for t in trades
+        if "CEO" in (t.get("reportingName") or t.get("typeOfOwner") or "").upper()
+    )
+
+    conviction = score_insider_conviction(
+        key_purchases_usd=key_purchases_usd,
+        market_cap=market_cap,
+        days_since_most_recent=days_since,
+        ceo_purchase_usd=ceo_usd,
+    )
+
+    # score_insider_breadth expects separate p_transactions and s_transactions lists.
+    # backfill fetch is P-purchase only, so s_transactions is empty.
+    breadth = score_insider_breadth(
+        p_transactions=trades,
+        s_transactions=[],
+    )
+
+    return (conviction, breadth)
+
+
+def fetch_congress_all() -> list[dict]:
+    """Fetch all S3 Stock Watcher senate transactions once per run."""
+    r = requests.get(CONGRESS_URL, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+def compute_congress_score(
+    ticker: str, congress_trades: list[dict], snapshot_date: date
+) -> float:
+    """Score congressional trades in [snapshot_date-90d, snapshot_date]."""
+    from_d = snapshot_date - timedelta(days=90)
+    relevant = [
+        t for t in congress_trades
+        if t.get("ticker", "").upper() == ticker.upper()
+        and str(from_d) <= (t.get("transaction_date") or "") <= str(snapshot_date)
+        and t.get("type", "").lower() in ("purchase", "buy")
+    ]
+    if not relevant:
+        return 0.0
+    # Score: capped at 1.0, proportional to count (5+ trades = max)
+    return min(1.0, len(relevant) / 5.0)
+
+
+def fetch_news(ticker: str, snapshot_date: date) -> list[dict]:
+    """FMP news articles in [snapshot_date-30d, snapshot_date]."""
+    from_d = snapshot_date - timedelta(days=30)
+    data = _fmp_get(
+        "news/stock",
+        {
+            "tickers": ticker,
+            "from": str(from_d),
+            "to": str(snapshot_date),
+            "limit": 200,
+        },
+    )
+    return data if isinstance(data, list) else []
+
+
+def load_analyst_bulk_index(bulk_path: Path) -> dict[str, dict]:
+    """Build ticker → record index from pre-fetched NDJSON bulk file.
+
+    Uses current snapshot as proxy for all historical dates (slow-moving signal).
+    """
+    index: dict[str, dict] = {}
+    if not bulk_path.exists():
+        return index
+    with open(bulk_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                sym = rec.get("symbol", "")
+                if sym:
+                    index[sym.upper()] = rec
+            except json.JSONDecodeError:
+                continue
+    return index
+
+
+def compute_analyst_score(ticker: str, analyst_index: dict[str, dict]) -> float:
+    rec = analyst_index.get(ticker.upper(), {})
+    if not rec:
+        return 0.0
+    score, _ = score_analyst_record(ticker, rec)
+    return score
+
+
+def fetch_piotroski(ticker: str, snapshot_date: date) -> float:
+    """Compute Piotroski F-score from most-recent ratios-ttm filing <= snapshot_date."""
+    data = _fmp_get("ratios-ttm", {"symbol": ticker})
+    if not data or not isinstance(data, list) or not data[0]:
+        return 0.5  # neutral default when unavailable
+    r = data[0]
+
+    # Piotroski (2000) 8-point F-score sub-components
+    roa = float(r.get("returnOnAssetsTTM") or 0)
+    cfo = float(r.get("operatingCashFlowPerShareTTM") or 0)
+    delta_roa = float(r.get("returnOnAssetsTTM") or 0)  # proxy: single period
+    accrual = cfo - roa  # CFO > ROA = accrual quality signal
+
+    current_ratio = float(r.get("currentRatioTTM") or 0)
+    delta_leverage = -float(r.get("debtEquityRatioTTM") or 0)  # lower is better
+    delta_shares = -float(r.get("priceToBookRatioTTM") or 0)  # proxy
+
+    gross_margin = float(r.get("grossProfitMarginTTM") or 0)
+    asset_turnover = float(r.get("assetTurnoverTTM") or 0)
+
+    f_score = sum([
+        roa > 0,
+        cfo > 0,
+        delta_roa >= 0,
+        accrual > 0,
+        delta_leverage >= 0,
+        current_ratio >= 1.0,
+        delta_shares >= 0,
+        gross_margin >= 0,
+        asset_turnover > 0,
+    ])
+    return min(1.0, f_score / 9.0)
