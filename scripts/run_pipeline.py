@@ -353,60 +353,6 @@ def _fetch_spy_return() -> float:
         return 0.0
 
 
-def _fetch_regional_return(ticker: str, label: str) -> float:
-    """Fetch 12-1 month return for a regional benchmark ETF via FMP.
-
-    PATCH 06: Generic helper for EU/Asia regional momentum benchmarks.
-    Jegadeesh & Titman (1993): momentum should be measured relative to
-    the local peer group, not a foreign index.
-
-    Args:
-        ticker: ETF symbol (e.g. "EZU" for Europe, "AAXJ" for Asia ex-Japan)
-        label:  Human-readable label for log messages
-
-    Returns:
-        12-1 month return as decimal, or 0.0 on any failure.
-    """
-    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays  # noqa: PLC0415
-    try:
-        rows = _FC().get_historical_prices(ticker, limit=310)
-        closes, _, _ = fmp_prices_to_arrays(rows)
-        if len(closes) < 252:
-            log.warning(
-                "Regional benchmark %s (%s): only %d bars, need 252 — falling back to 0.0",
-                ticker, label, len(closes),
-            )
-            return 0.0
-        idx_far  = max(0, len(closes) - 252)
-        idx_near = max(1, len(closes) - 21)
-        ret = float((closes[idx_near] - closes[idx_far]) / closes[idx_far])
-        log.info("Regional benchmark %s (%s) 12-1m return: %.4f (%.1f%%)", ticker, label, ret, ret * 100)
-        return ret
-    except Exception as exc:
-        log.warning("FMP %s (%s) 12-1m baseline failed: %s — using 0.0", ticker, label, exc)
-        return 0.0
-
-
-def _fetch_eu_return() -> float:
-    """iShares MSCI Eurozone ETF (EZU) 12-1 month return.
-
-    EZU tracks the MSCI EMU Index (Eurozone large/mid cap).
-    Used as the benchmark for European momentum signals.
-    Fallback: 0.0 (neutral — no bias to local or US market).
-    """
-    return _fetch_regional_return("EZU", "MSCI Eurozone")
-
-
-def _fetch_asia_return() -> float:
-    """iShares MSCI All Country Asia ex Japan ETF (AAXJ) 12-1 month return.
-
-    AAXJ covers large/mid cap across China, Korea, Taiwan, India, etc.
-    Used as the benchmark for Asia ex-Japan momentum signals.
-    Fallback: 0.0 (neutral).
-    """
-    return _fetch_regional_return("AAXJ", "MSCI Asia ex-Japan")
-
-
 def _compute_spy_regime(spy_return_12_1m: float, spy_return_63d: Optional[float]) -> str:
     """Classify current SPY momentum regime.
 
@@ -1168,174 +1114,6 @@ def fetch_edgar_data(
     )
 
 
-# ── Multi-market helpers ───────────────────────────────────────────────────────
-
-def _load_registry_tickers() -> Dict[str, List[str]]:
-    """Load EU/Asia ticker lists from config/ticker_registry.json."""
-    reg_path = ROOT / "config" / "ticker_registry.json"
-    try:
-        data = json.loads(reg_path.read_text(encoding="utf-8"))
-        return {
-            "EUROPE": [e["ticker"] for e in data.get("europe", [])],
-            "ASIA":   [e["ticker"] for e in data.get("asia", [])],
-        }
-    except Exception as exc:
-        log.warning("ticker_registry load failed: %s — EU/Asia skipped", exc)
-        return {"EUROPE": [], "ASIA": []}
-
-
-def _registry_meta() -> Dict[str, Dict[str, Any]]:
-    """Return {ticker: {sector, cap_tier, company_name}} from ticker_registry.json."""
-    reg_path = ROOT / "config" / "ticker_registry.json"
-    try:
-        data = json.loads(reg_path.read_text(encoding="utf-8"))
-        meta: Dict[str, Dict[str, Any]] = {}
-        for e in data.get("europe", []) + data.get("asia", []):
-            meta[e["ticker"]] = {
-                "sector":       e["sector"],
-                "cap_tier":     e["cap_tier"],
-                "company_name": e.get("name", ""),
-            }
-        return meta
-    except Exception:
-        return {}
-
-
-def _score_ticker_international(
-    entry: Any,
-    spy_return_baseline: float = 0.0,
-    bulk_piotroski_idx: Optional[Dict[str, Any]] = None,
-    bulk_consensus_idx: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Unified scorer for EUROPE and ASIA entries.
-
-    PATCH v2.2-global: reads all factor scores from entry.raw_factors,
-    which is now populated by FMPFetcher.prepare() with the full global
-    factor set (insider, news, analyst consensus, piotroski, price target).
-
-    congress_score and transcript_tone_score remain 0.0 — these have no
-    global data source (STOCK Act / FMP transcripts are US-only).
-
-    Factor output semantics:
-      0.0  — dead signal: factor available but no data for this ticker
-             (e.g. no insider trades in 180d). Weight included, ticker
-             penalized in cross-sectional normalizer.
-    """
-    market_str = entry.market.value  # "EUROPE" or "ASIA"
-    rf = entry.raw_factors
-
-    try:
-        def _rf(key: str, default: float = 0.0) -> float:
-            val = rf.get(key)
-            if val is None:
-                return default
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return default
-
-        momentum_long_score       = _rf("momentum_long_score")
-        volume_attention_score    = _rf("volume_attention_score")
-        news_sentiment_score      = _rf("news_sentiment_score")
-        news_buzz_score           = _rf("news_buzz_score")
-        insider_conviction_score  = _rf("insider_conviction_score")
-        insider_breadth_score     = _rf("insider_breadth_score")
-        analyst_consensus_score   = _rf("analyst_consensus_score")
-        analyst_revision_score    = _rf("analyst_revision_score")
-        quality_piotroski_score   = _rf("quality_piotroski_score")
-        price_target_upside_score = _rf("price_target_upside_score")
-
-        # Bulk index fallback for piotroski when raw_factors value absent
-        if quality_piotroski_score == 0.0 and bulk_piotroski_idx:
-            _base_pio = entry.ticker.split(".")[0].upper()
-            bulk_pio = (
-                bulk_piotroski_idx.get(entry.ticker.upper())
-                or bulk_piotroski_idx.get(_base_pio, {})
-            )
-            pio_raw = bulk_pio.get("piotroskiScore")
-            if pio_raw is not None:
-                try:
-                    quality_piotroski_score = round(int(pio_raw) / 9.0, 4)
-                except (TypeError, ValueError):
-                    pass
-
-        # Bulk consensus fallback when raw_factors value absent
-        if analyst_consensus_score == 0.0 and bulk_consensus_idx:
-            _base_con = entry.ticker.split(".")[0].upper()
-            bulk_rec = (
-                bulk_consensus_idx.get(entry.ticker.upper())
-                or bulk_consensus_idx.get(_base_con)
-            )
-            if bulk_rec:
-                try:
-                    from regime_trader.scoring.analyst import _score_record as _ac  # noqa: PLC0415
-                    analyst_consensus_score, _ = _ac(entry.ticker, bulk_rec)
-                except Exception:
-                    pass
-
-        return_12_1m = rf.get("return_12_1m")
-        mktcap = _rf("market_cap", 1.0) or 1.0
-
-        log.debug(
-            "EU/Asia %s (%s): IC=%.2f IB=%.2f NS=%.2f NB=%.2f MO=%.2f "
-            "VA=%.2f AC=%.2f AR=%.2f QF=%.2f PT=%.2f",
-            entry.ticker, market_str,
-            insider_conviction_score, insider_breadth_score,
-            news_sentiment_score, news_buzz_score,
-            momentum_long_score, volume_attention_score,
-            analyst_consensus_score, analyst_revision_score,
-            quality_piotroski_score, price_target_upside_score,
-        )
-
-        return {
-            "ticker":                    entry.ticker,
-            "company_name":              rf.get("company_name", ""),
-            "sector":                    entry.sector,
-            "cap_tier":                  entry.cap_tier,
-            "market":                    market_str,
-            "market_cap":                mktcap,
-            "source_reliability":        entry.source_reliability,
-            # ── All globally available factor scores ─────────────────────
-            "insider_conviction_score":  insider_conviction_score,
-            "insider_breadth_score":     insider_breadth_score,
-            "news_sentiment_score":      news_sentiment_score,
-            "news_buzz_score":           news_buzz_score,
-            "momentum_long_score":       momentum_long_score,
-            "volume_attention_score":    volume_attention_score,
-            "analyst_consensus_score":   analyst_consensus_score,
-            "analyst_revision_score":    analyst_revision_score,
-            "quality_piotroski_score":   quality_piotroski_score,
-            "price_target_upside_score": price_target_upside_score,
-            # ── Structurally absent — always 0.0 ─────────────────────────
-            "congress_score":            0.0,   # no STOCK Act outside US
-            "transcript_tone_score":     0.0,   # FMP transcripts US-only
-            # ── Raw inputs (diagnostic) ───────────────────────────────────
-            "return_12_1m":              return_12_1m,
-            "volume_spike":              _rf("volume_spike", 1.0),
-            "news_sentiment_source":     rf.get("news_sentiment_source", "fmp"),
-            "news_buzz_source":          rf.get("news_buzz_source", "fmp"),
-            "analyst_consensus_source":  rf.get("analyst_consensus_source", "bulk"),
-            "insider_source":            rf.get("insider_source", "fmp"),
-            "target_price":              rf.get("target_price"),
-            "current_price":             rf.get("current_price"),
-            "insider_usd":               0.0,
-            "ceo_buy":                   False,
-            "form4_count":               0,
-            "form4_purchase_count":      0,
-            "quiver_evidence":           {},
-            "momentum_spy_relative":     float(return_12_1m - spy_return_baseline)
-                                         if return_12_1m is not None else 0.0,
-            "_correlated_signal_flag":   (
-                insider_conviction_score > 0.50 and news_sentiment_score > 0.70
-            ),
-            "_correlated_signal_discount_advisory": 0.0,
-        }
-
-    except Exception as exc:
-        log.debug("_score_ticker_international skip %s: %s", entry.ticker, exc)
-        return None
-
-
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def run(
@@ -1353,6 +1131,20 @@ def run(
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     ticker_rows = load_tickers(tickers_file)
+
+    # Guard: run_pipeline.py is US-only. Reject international tickers at startup.
+    _INTL_SUFFIXES = frozenset({
+        ".DE", ".PA", ".L", ".AS", ".MI", ".MC", ".VX", ".BR", ".LS",
+        ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
+        ".T", ".HK", ".KS", ".KQ", ".SS", ".SZ", ".NS", ".BO", ".SI", ".BK", ".JK",
+    })
+    _intl_leaks = [t["ticker"] for t in ticker_rows if any(t["ticker"].endswith(s) for s in _INTL_SUFFIXES)]
+    if _intl_leaks:
+        raise ValueError(
+            f"run_pipeline.py is US-only. International tickers found in universe: {_intl_leaks}. "
+            "Check config/universe.csv — INTL tickers belong in config/ticker_registry.json."
+        )
+
     tickers     = [r["ticker"] for r in ticker_rows]
     cap_tier    = {r["ticker"]: r.get("cap_tier", "large") for r in ticker_rows}
     sector      = {r["ticker"]: r.get("sector", "Unknown") for r in ticker_rows}
@@ -1780,118 +1572,6 @@ def run(
             if r.get("_scoring_error", False):
                 errors += 1
             results.append(r)
-
-    # ── EU / Asia scoring ─────────────────────────────────────────────────────
-    registry_tickers = _load_registry_tickers()
-    _meta = _registry_meta()
-    log.info(
-        "Multi-market registry: %d EU tickers, %d Asia tickers",
-        len(registry_tickers.get("EUROPE", [])),
-        len(registry_tickers.get("ASIA", [])),
-    )
-    if any(registry_tickers.values()):
-        from regime_trader.fetchers import Orchestrator  # noqa: PLC0415
-        from regime_trader.fetchers.fmp_fetcher import FMPFetcher  # noqa: PLC0415
-        from regime_trader.fetchers.base import MarketEnum  # noqa: PLC0415
-
-        fmp_key = os.environ.get("FMP_API_KEY", "")
-        eu_asia_fetchers = []
-        if fmp_key and registry_tickers.get("EUROPE"):
-            eu_asia_fetchers.append(FMPFetcher(
-                api_key=fmp_key,
-                market=MarketEnum.EUROPE,
-                bulk_consensus_idx=_bulk_consensus_idx,
-            ))
-            log.info("FMPFetcher added for EUROPE (%d tickers)", len(registry_tickers["EUROPE"]))
-        elif not fmp_key:
-            log.warning("FMP_API_KEY absent -- EUROPE section will be empty in Discord")
-        if fmp_key and registry_tickers.get("ASIA"):
-            eu_asia_fetchers.append(FMPFetcher(
-                api_key=fmp_key,
-                market=MarketEnum.ASIA,
-                bulk_consensus_idx=_bulk_consensus_idx,
-            ))
-            log.info("FMPFetcher added for ASIA (%d tickers)", len(registry_tickers["ASIA"]))
-        elif registry_tickers.get("ASIA") and not fmp_key:
-            log.warning("FMP_API_KEY absent -- ASIA section will be empty in Discord")
-
-        if eu_asia_fetchers:
-            orch = Orchestrator(eu_asia_fetchers)
-            raw_entries = orch.run(registry_tickers)
-            eu_raw = [e for e in raw_entries if e.market.value == "EUROPE"]
-            asia_raw = [e for e in raw_entries if e.market.value == "ASIA"]
-            log.info("Orchestrator raw entries: %d EU, %d Asia", len(eu_raw), len(asia_raw))
-            for e in raw_entries:
-                m = _meta.get(e.ticker, {})
-                e.sector = m.get("sector", "Unknown")
-                e.cap_tier = m.get("cap_tier", "large")
-                e.raw_factors["company_name"] = m.get("company_name", "")
-
-            # PATCH 06: Fetch regional benchmarks before EU/Asia scoring.
-            # Jegadeesh & Titman (1993): momentum is measured vs the local peer group.
-            # EZU = iShares MSCI Eurozone, AAXJ = iShares MSCI Asia ex-Japan.
-            log.info("Fetching regional momentum benchmarks for EU/Asia scoring…")
-            eu_return_baseline   = _fetch_eu_return()
-            asia_return_baseline = _fetch_asia_return()
-            log.info(
-                "Regional baselines: EU(EZU)=%.4f (%.1f%%), Asia(AAXJ)=%.4f (%.1f%%)",
-                eu_return_baseline, eu_return_baseline * 100,
-                asia_return_baseline, asia_return_baseline * 100,
-            )
-            log.info(
-                "Orchestrator raw entries: %d EU, %d Asia (benchmarks: EU=EZU %.4f, Asia=AAXJ %.4f)",
-                len(eu_raw), len(asia_raw),
-                eu_return_baseline if eu_raw else 0.0,
-                asia_return_baseline if asia_raw else 0.0,
-            )
-
-            # Fix #5 + PATCH 06: unified scorer with regional benchmark injection
-            log.info(
-                "Fix #5 + PATCH 06: _score_ticker_international uses regional benchmarks. "
-                "EU entries benchmark vs EZU, Asia entries vs AAXJ. "
-                "insider/news/congress=None (structurally absent for non-US)."
-            )
-
-            def _regional_baseline(entry) -> float:
-                """Return the correct 12-1m benchmark for this market."""
-                if entry.market.value == "EUROPE":
-                    return eu_return_baseline
-                if entry.market.value == "ASIA":
-                    return asia_return_baseline
-                return spy_return_baseline  # fallback — should not occur
-
-            with ThreadPoolExecutor(max_workers=4) as eu_pool:
-                eu_futures = {
-                    eu_pool.submit(
-                        _score_ticker_international, e, _regional_baseline(e),
-                        _bulk_piotroski_idx, _bulk_consensus_idx
-                    ): e.ticker
-                    for e in raw_entries
-                    if e.market.value in ("EUROPE", "ASIA")
-                }
-                eu_scored = asia_scored = 0
-                for fut in as_completed(eu_futures):
-                    scored = fut.result()
-                    if scored:
-                        results.append(scored)
-                        if scored.get("market") == "EUROPE":
-                            eu_scored += 1
-                        elif scored.get("market") == "ASIA":
-                            asia_scored += 1
-            log.info("Scored: %d EU entries, %d Asia entries added to results", eu_scored, asia_scored)
-
-            # Regression guard: EU/Asia tickers must never carry a non-zero congress_score.
-            # congress is structurally absent outside the US (no STOCK Act equivalent).
-            _intl_markets = frozenset({"EUROPE", "ASIA"})
-            for _r in results:
-                if _r.get("market") in _intl_markets and float(_r.get("congress_score", 0.0)) != 0.0:
-                    log.error(
-                        "BUG: %s (market=%s) has congress_score=%.4f — should be 0.0. "
-                        "Weight routing is broken; check get_weights() / _renorm_cache.",
-                        _r.get("ticker"), _r.get("market"), _r["congress_score"],
-                    )
-        else:
-            log.warning("No EU/Asia fetchers active — both sections will be empty in Discord")
 
     # PATCH 08: Report any structural FMP failures found during _score_ticker().
     if _structural_failures_in_scoring:
