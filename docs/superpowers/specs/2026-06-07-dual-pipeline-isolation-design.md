@@ -154,13 +154,19 @@ if vix is None:
 
 **VIX dampening for INTL entries (new):**
 ```python
+import math
+
 def _apply_vix_multiplier(vix: float) -> float:
+    if not isinstance(vix, (int, float)) or math.isnan(vix) or vix < 0:
+        raise ValueError(f"[COOK] Invalid VIX value: {vix!r}")
     if vix >= 40: return 0.20
     if vix >= 30: return 0.50
     if vix >= 25: return 0.80
     return 1.00
 ```
-Apply `entry["final_score"] *= _apply_vix_multiplier(vix)` to each normalized INTL entry before the europe/asia split. This mirrors the thresholds in `generate_top_lists.py:_apply_vix_overlay()` exactly.
+The guard is required because `float('nan') >= 40` evaluates `False` in Python — NaN would silently fall through to `return 1.00`, bypassing dampening entirely. Raising here propagates to `cook_toplists.py`'s main error handler, which already exits with code 1.
+
+Apply `entry["final_score"] *= _apply_vix_multiplier(vix)` to each normalized INTL entry before the europe/asia split. Mirrors the thresholds in `generate_top_lists.py:_apply_vix_overlay()` exactly.
 
 **Input path**: `logs/top_lists.json` → **`logs/top_lists_us.json`** (match new generate_top_lists output name).
 
@@ -170,30 +176,49 @@ Apply `entry["final_score"] *= _apply_vix_multiplier(vix)` to each normalized IN
 
 The `_factor_contribution_line()` function falls back to `WEIGHTS_US` (which carries `congress=0.22`) when `entry.get("weights")` is absent. For EU/Asia entries this produces incorrect contribution percentages.
 
-**Fix:** Add `_weights_for_ticker(ticker: str) -> dict` helper that inspects the ticker suffix and returns the correct weight dict:
-```python
-_EU_ASIA_SUFFIXES = frozenset({
-    ".DE", ".L", ".AS", ".PA", ".MI", ".MC", ".VX", ".BR", ".LS",
-    ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
-    ".T", ".HK", ".KS", ".KQ", ".SS", ".SZ", ".NS", ".BO", ".SI", ".BK", ".JK"
-})
+**Fix — inject `"pipeline"` metadata upstream, not suffix-parse downstream:**
 
-def _weights_for_ticker(ticker: str) -> dict:
-    for suffix in _EU_ASIA_SUFFIXES:
-        if ticker.endswith(suffix):
-            return WEIGHTS_GLOBAL
-    return WEIGHTS_US
+In `generate_top_lists.py`, add `"pipeline": "US"` to each entry in `logs/top_lists_us.json`. In `run_pipeline_profile.py` / StrategyEngine, add `"pipeline": "INTL"` to each entry in `top_lists_intl.json`. `cook_toplists.py` preserves this field in the merged output.
+
+`send_toplists_discord.py` then reads the metadata directly:
+```python
+def _weights_for_entry(entry: dict) -> dict:
+    return WEIGHTS_GLOBAL if entry.get("pipeline") == "INTL" else WEIGHTS_US
 ```
-Use `_weights_for_ticker(entry["ticker"])` as the fallback in `_factor_contribution_line()`.
+Use `_weights_for_entry(entry)` as the fallback in `_factor_contribution_line()`. This removes the fragile suffix-parsing and makes the weight selection explicit and exchange-agnostic — adding `.TO` or `.AX` tickers in the future requires zero changes in the Discord layer.
 
 ---
 
-### 7. `.github/workflows/daily_toplists_discord.yml` — Verify Parallel Artifact Gate
+### 7. `.github/workflows/daily_trading_pipeline.yml` — Consolidate into Single Workflow
 
-Verify (not rewrite):
-- Both `us-top-lists` and `intl-top-lists` artifact downloads use `if-no-files-found: error` (not `warn`)
-- Freshness gate applies independently: 6h for `workflow_run`, 25h for schedule trigger
-- Step order enforced: download → flatten → `cook_toplists.py` → `audit_payload.py` → `send_toplists_discord.py`
+**Replace the three-file structure** (`pipeline_us.yml` + `pipeline_intl.yml` + `daily_toplists_discord.yml`) with a single `daily_trading_pipeline.yml`. The `workflow_run` trigger fires once per completed workflow — if the Discord workflow listens to both upstream workflows, it fires twice: once when US finishes (INTL artifact not yet available) and once when INTL finishes (stale US artifact). The `needs:` dependency in a single workflow eliminates this race condition entirely.
+
+```yaml
+jobs:
+  run_us_pipeline:
+    runs-on: ubuntu-latest
+    # ... EDGAR + FMP US steps ...
+    # Uploads: us-top-lists artifact
+
+  run_intl_pipeline:
+    runs-on: ubuntu-latest
+    # ... FMP Global INTL steps ...
+    # Uploads: intl-top-lists artifact
+
+  cook_and_notify:
+    runs-on: ubuntu-latest
+    needs: [run_us_pipeline, run_intl_pipeline]  # blocks until both complete
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: us-top-lists, if-no-files-found: error }
+      - uses: actions/download-artifact@v4
+        with: { name: intl-top-lists, if-no-files-found: error }
+      - run: python scripts/cook_toplists.py
+      - run: python scripts/audit_payload.py
+      - run: python scripts/send_toplists_discord.py
+```
+
+The cron schedule moves to the top-level `on: schedule:` trigger. Both pipeline jobs run concurrently within the same workflow run, and `cook_and_notify` is guaranteed to have both artifacts present when it starts.
 
 ---
 
@@ -214,13 +239,17 @@ Verify (not rewrite):
 | File | Change | Summary |
 |------|--------|---------|
 | `scripts/run_pipeline.py` | Remove | Delete `_score_ticker_international()` + EU/Asia orchestrator + regression guard |
-| `backend/market_intel/generate_top_lists.py` | Remove + Rename output | Remove `intl_clean` split; write `logs/top_lists_us.json` |
+| `backend/market_intel/generate_top_lists.py` | Remove + Modify | Remove `intl_clean` split; write `logs/top_lists_us.json`; inject `"pipeline": "US"` into each entry |
 | `backend/market_intel/_generate_top_lists_intl_patch.py` | Delete | Dead code after removal |
 | `backend/market_intel/profiles/intl_strategy.json` | Modify | Add 4 factors to `active_factors` |
+| `run_pipeline_profile.py` / StrategyEngine | Modify | Inject `"pipeline": "INTL"` into each entry in `top_lists_intl.json` |
 | `regime_trader/config/weights.py` | Modify WEIGHTS_GLOBAL | Activate analyst_revision (0.02) and price_target_upside (0.03) |
-| `scripts/cook_toplists.py` | Modify | Read `top_lists_us.json`; VIX dampening; fix Bugs 1, 2, count |
-| `scripts/send_toplists_discord.py` | Modify | Add `_weights_for_ticker()`; fix Bug 8 fallback |
-| `.github/workflows/daily_toplists_discord.yml` | Verify/Fix | Hard-require both artifacts |
+| `scripts/cook_toplists.py` | Modify | Read `top_lists_us.json`; VIX dampening with NaN guard; fix Bugs 1, 2, count; preserve `"pipeline"` field |
+| `scripts/send_toplists_discord.py` | Modify | Replace suffix-parsing with `_weights_for_entry()` reading `entry["pipeline"]` |
+| `.github/workflows/daily_trading_pipeline.yml` | Create (replace 3 files) | Single workflow: parallel US + INTL jobs, `cook_and_notify` with `needs:` |
+| `.github/workflows/pipeline_us.yml` | Delete | Superseded by consolidated workflow |
+| `.github/workflows/pipeline_intl.yml` | Delete | Superseded by consolidated workflow |
+| `.github/workflows/daily_toplists_discord.yml` | Delete | Superseded by consolidated workflow |
 
 ---
 
