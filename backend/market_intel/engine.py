@@ -72,6 +72,7 @@ class StrategyEngine:
                 "composite_score": composite_score,
                 "region_applied": self.region,
                 "factor_snapshots": factor_breakdown,
+                "pipeline": "INTL",
             })
 
         # Sort universe descending by final quantitative output ranking

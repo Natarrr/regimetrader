@@ -422,3 +422,29 @@ def test_engine_dynamic_denominator_catches_sub_one_sum():
         )
     finally:
         os.unlink(path)
+
+
+def test_strategy_engine_injects_pipeline_key():
+    """Each entry produced by StrategyEngine must carry 'pipeline': 'INTL'."""
+    import json, tempfile, os
+    from backend.market_intel.engine import StrategyEngine
+
+    profile = {
+        "region": "INTL",
+        "active_factors": {"momentum_long": 0.60, "news_sentiment": 0.40},
+        "output_filename": "test_out.json",
+    }
+    raw = [{"ticker": "SAP.DE", "metrics": {"momentum_long_score": 0.8, "news_sentiment_score": 0.6}}]
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(profile, f)
+        profile_path = f.name
+
+    try:
+        engine = StrategyEngine(profile_path)
+        results = engine.score_ticker_pool(raw)
+        assert results[0].get("pipeline") == "INTL", (
+            f"Expected 'INTL', got {results[0].get('pipeline')!r}"
+        )
+    finally:
+        os.unlink(profile_path)
