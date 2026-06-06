@@ -1,3 +1,10 @@
+from regime_trader.fetchers.base import TickerEntry
+from regime_trader.fetchers.orchestrator import Orchestrator
+from scripts.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
+from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+from unittest.mock import patch, MagicMock
+from pathlib import Path
+import json
 import pytest
 from regime_trader.fetchers.base import BaseMarketFetcher, MarketEnum
 
@@ -18,10 +25,6 @@ def test_concrete_fetcher_must_implement_fetch():
         pass
     with pytest.raises(TypeError):
         BadFetcher()
-
-
-import json
-from pathlib import Path
 
 
 def test_ticker_registry_exists_and_valid():
@@ -48,12 +51,8 @@ def test_registry_ticker_format():
     import re
     pattern = re.compile(r"^[A-Z0-9]{1,6}\.[A-Z]{1,2}$")
     for entry in data["europe"] + data["asia"]:
-        assert pattern.match(entry["ticker"]), f"Bad ticker format: {entry['ticker']}"
-
-
-from unittest.mock import patch, MagicMock
-from regime_trader.fetchers.fmp_fetcher import FMPFetcher
-from scripts.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
+        assert pattern.match(
+            entry["ticker"]), f"Bad ticker format: {entry['ticker']}"
 
 
 def test_fmp_fetcher_market():
@@ -115,7 +114,8 @@ def test_fmp_fetcher_prepare_returns_entry_with_fmp_data():
     assert len(result) == 1
     assert result[0].ticker == "SAP.DE"
     assert result[0].market == MarketEnum.EUROPE
-    assert result[0].source_reliability == pytest.approx(1.0)   # v2.2-global: dampening removed
+    assert result[0].source_reliability == pytest.approx(
+        1.0)   # v2.2-global: dampening removed
     assert result[0].raw_factors["return_12_1m"] is not None
     assert result[0].raw_factors["volume_spike"] > 0
 
@@ -128,7 +128,8 @@ def test_fmp_fetcher_prepare_asia_market():
         result = f.prepare(["7203.T"])
     assert len(result) == 1
     assert result[0].market == MarketEnum.ASIA
-    assert result[0].source_reliability == pytest.approx(1.0)   # v2.2-global: dampening removed
+    assert result[0].source_reliability == pytest.approx(
+        1.0)   # v2.2-global: dampening removed
 
 
 def test_fmp_fetcher_no_quota_logic():
@@ -145,6 +146,7 @@ def test_fmp_fetcher_historical_price_falls_back_to_base_symbol():
     rows = _fmp_price_rows(275)
 
     call_args: list[str] = []
+
     def fake_history(ticker, limit=280):
         call_args.append(ticker)
         return [] if ticker == "ASML.AS" else rows
@@ -163,6 +165,7 @@ def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
     rows = _fmp_price_rows(275)
 
     call_count = [0]
+
     def fake_prices(ticker, limit=280):
         call_count[0] += 1
         return rows
@@ -198,10 +201,6 @@ def test_map_bulk_data_to_universe_matches_base_symbol():
     mapped = map_bulk_data_to_universe(universe, rows)
     assert mapped["ASML.AS"]["score"] == 1.0
     assert mapped["SAP.DE"]["score"] == 0.8
-
-
-from regime_trader.fetchers.orchestrator import Orchestrator
-from regime_trader.fetchers.base import TickerEntry
 
 
 def _make_entry(ticker: str, market: MarketEnum) -> TickerEntry:

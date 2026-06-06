@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 
 _VOL_BASELINE_BARS = 90
 _VOL_BASELINE_SKIP = 5
-_VOL_MAX_SPIKE     = 20.0
+_VOL_MAX_SPIKE = 20.0
 _MIN_BARS_MOMENTUM = 252
-_PRICE_LIMIT       = 280   # 13 months of trading days
+_PRICE_LIMIT = 280   # 13 months of trading days
 
 
 class FMPFetcher(BaseMarketFetcher):
@@ -61,7 +61,7 @@ class FMPFetcher(BaseMarketFetcher):
         bulk_consensus_idx: Optional[dict] = None,
     ) -> None:
         self._api_key = api_key
-        self._market  = market
+        self._market = market
         # Bulk consensus index: {SYMBOL_UPPER: record_dict}
         # Injected from fmp_bulk_prefetch cache to avoid per-ticker API calls.
         self._bulk_consensus_idx: dict = bulk_consensus_idx or {}
@@ -100,7 +100,7 @@ class FMPFetcher(BaseMarketFetcher):
         )
         from regime_trader.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
 
-        client  = FMPClient(api_key=self._api_key)
+        client = FMPClient(api_key=self._api_key)
         entries: list[TickerEntry] = []
 
         for ticker in tickers:
@@ -150,16 +150,18 @@ class FMPFetcher(BaseMarketFetcher):
         # ── 1. Prices — momentum + volume ────────────────────────────────────
         rows = client.get_historical_prices(ticker, limit=_PRICE_LIMIT)
         if not rows and "." in ticker:
-            rows = client.get_historical_prices(ticker.split(".")[0], limit=_PRICE_LIMIT)
+            rows = client.get_historical_prices(
+                ticker.split(".")[0], limit=_PRICE_LIMIT)
         closes, volumes, _ = fmp_prices_to_arrays(rows)
 
         if len(closes) < 5:
-            logger.warning("FMPFetcher: no price data for %s — skipping", ticker)
+            logger.warning(
+                "FMPFetcher: no price data for %s — skipping", ticker)
             return None
 
         return_12_1m: Optional[float] = None
         if len(closes) >= _MIN_BARS_MOMENTUM:
-            idx_far  = max(0, len(closes) - _MIN_BARS_MOMENTUM)
+            idx_far = max(0, len(closes) - _MIN_BARS_MOMENTUM)
             idx_near = max(1, len(closes) - 21)
             p_far, p_near = closes[idx_far], closes[idx_near]
             return_12_1m = (p_near - p_far) / p_far if p_far != 0 else None
@@ -167,19 +169,21 @@ class FMPFetcher(BaseMarketFetcher):
         volume_spike = 0.0
         n_vol = len(volumes)
         if n_vol > _VOL_BASELINE_SKIP + 5:
-            baseline_end   = max(0, n_vol - _VOL_BASELINE_SKIP)
+            baseline_end = max(0, n_vol - _VOL_BASELINE_SKIP)
             baseline_start = max(0, baseline_end - _VOL_BASELINE_BARS)
-            avg_vol  = sum(volumes[baseline_start:baseline_end]) / max(1, baseline_end - baseline_start)
+            avg_vol = sum(volumes[baseline_start:baseline_end]
+                          ) / max(1, baseline_end - baseline_start)
             last_vol = volumes[-1]
             if avg_vol > 0:
                 volume_spike = min(last_vol / avg_vol, _VOL_MAX_SPIKE)
 
-        momentum_long_score    = score_momentum_long(return_12_1m, spy_return_12_1m=0.0)
+        momentum_long_score = score_momentum_long(
+            return_12_1m, spy_return_12_1m=0.0)
         volume_attention_score = score_volume_attention(volume_spike)
 
         # ── 2. News — sentiment + buzz ────────────────────────────────────────
         news_sentiment_score = 0.0
-        news_buzz_score      = 0.0
+        news_buzz_score = 0.0
         try:
             articles = client.get_news_raw_articles(ticker)
             if not articles and "." in ticker:
@@ -195,11 +199,12 @@ class FMPFetcher(BaseMarketFetcher):
 
         # ── 3. Insider — conviction + breadth ────────────────────────────────
         insider_conviction_score = 0.0
-        insider_breadth_score    = 0.0
+        insider_breadth_score = 0.0
         try:
-            quote  = client.get_quote(ticker)
+            quote = client.get_quote(ticker)
             mktcap = float(quote.get("marketCap", 0) or 0)
-            total_usd, days_since = client.get_insider_purchases(ticker, lookback_days=180)
+            total_usd, days_since = client.get_insider_purchases(
+                ticker, lookback_days=180)
             btx = client.get_insider_transactions(ticker, lookback_days=90)
             if total_usd > 0 and mktcap > 0:
                 insider_conviction_score = score_insider_conviction(
@@ -207,7 +212,8 @@ class FMPFetcher(BaseMarketFetcher):
                     market_cap=mktcap,
                     days_since_most_recent=days_since,
                 )
-            breadth_raw = score_insider_breadth(btx.get("P", []), btx.get("S", []))
+            breadth_raw = score_insider_breadth(
+                btx.get("P", []), btx.get("S", []))
             insider_conviction_score, insider_breadth_score = orthogonalize_insider_scores(
                 insider_conviction_score, breadth_raw
             )
@@ -227,7 +233,8 @@ class FMPFetcher(BaseMarketFetcher):
             else:
                 ratings = client.get_analyst_ratings(ticker)
                 if ratings:
-                    analyst_consensus_score, _ = ac_score_record(ticker, ratings)
+                    analyst_consensus_score, _ = ac_score_record(
+                        ticker, ratings)
         except Exception as exc:
             logger.debug("FMPFetcher analyst_consensus %s: %s", ticker, exc)
 
@@ -254,15 +261,17 @@ class FMPFetcher(BaseMarketFetcher):
 
         # ── 7. Price target upside ────────────────────────────────────────────
         price_target_upside_score = 0.0
-        raw_target_price  = None
+        raw_target_price = None
         raw_current_price = None
         try:
             pt_data = client.get_price_target_consensus(ticker)
             if not pt_data and "." in ticker:
-                pt_data = client.get_price_target_consensus(ticker.split(".")[0])
+                pt_data = client.get_price_target_consensus(
+                    ticker.split(".")[0])
             if not locals().get("quote"):
                 quote = client.get_quote(ticker)
-            raw_target_price  = pt_data.get("targetConsensus") if pt_data else None
+            raw_target_price = pt_data.get(
+                "targetConsensus") if pt_data else None
             raw_current_price = quote.get("price") if quote else None
             upside = client.get_upside_to_target(ticker)
             if upside is None and "." in ticker:

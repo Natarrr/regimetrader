@@ -1,13 +1,13 @@
 {
-  "region": "INTL",
-  "expected_factors": 6,
-  "active_factors": {
-    "news_sentiment": 0.20,
-    "news_buzz": 0.10,
-    "momentum_long": 0.20,
-    "volume_attention": 0.15,
-    "analyst_consensus": 0.15,
-    "quality_piotroski": 0.20
-  },
-  "output_filename": "top_lists_intl.json"
+    "region": "INTL",
+    "expected_factors": 6,
+    "active_factors": {
+        "news_sentiment": 0.20,
+        "news_buzz": 0.10,
+        "momentum_long": 0.20,
+        "volume_attention": 0.15,
+        "analyst_consensus": 0.15,
+        "quality_piotroski": 0.20
+    },
+    "output_filename": "top_lists_intl.json"
 }

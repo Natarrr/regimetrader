@@ -7,10 +7,14 @@ from backend.market_intel.engine import StrategyEngine
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parallel Decoupled Quant Engine Entrypoint")
-    parser.add_argument("--config", required=True, help="Path to regional strategy JSON profile")
-    parser.add_argument("--raw-data", required=True, help="Path to raw fetched metrics payload")
-    parser.add_argument("--out-dir", default="logs", help="Output matrix destination")
+    parser = argparse.ArgumentParser(
+        description="Parallel Decoupled Quant Engine Entrypoint")
+    parser.add_argument("--config", required=True,
+                        help="Path to regional strategy JSON profile")
+    parser.add_argument("--raw-data", required=True,
+                        help="Path to raw fetched metrics payload")
+    parser.add_argument("--out-dir", default="logs",
+                        help="Output matrix destination")
     args = parser.parse_args()
 
     try:
@@ -23,7 +27,8 @@ def main():
         rankings = engine.score_ticker_pool(raw_payload)
         engine.save_results(args.out_dir, rankings)
 
-        print(f"Pipeline executed successfully for profile region: {engine.region}")
+        print(
+            f"Pipeline executed successfully for profile region: {engine.region}")
     except Exception as e:
         print(f"CRITICAL: Pipeline processing exception encountered: {str(e)}")
         sys.exit(1)
