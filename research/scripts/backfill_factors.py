@@ -338,3 +338,113 @@ def fetch_piotroski(ticker: str, snapshot_date: date) -> float:
         asset_turnover > 0,
     ])
     return min(1.0, f_score / 9.0)
+
+
+def build_snapshot(
+    ticker: str,
+    snapshot_date: date,
+    prices: list[dict],
+    congress_trades: list[dict],
+    analyst_index: dict[str, dict],
+    market_cap: float,
+    spy_prices: list[dict],
+) -> Optional[dict]:
+    """Build one (ticker, snapshot_date) record. Returns None if unusable."""
+    # Momentum + volume
+    return_12_1m, vol_ratio = compute_momentum_at(prices, snapshot_date)
+    if return_12_1m is None:
+        log.debug("%s %s: insufficient price history, skipping", ticker, snapshot_date)
+        return None
+
+    spy_return_12_1m, _ = compute_momentum_at(spy_prices, snapshot_date)
+    momentum_score = score_momentum_long(return_12_1m, spy_return_12_1m or 0.0)
+    vol_score = score_volume_attention(vol_ratio) if vol_ratio else 0.0
+
+    # Insider
+    insider_trades = fetch_insider_trades(ticker, snapshot_date)
+    conviction_score, breadth_score = compute_insider_scores(
+        insider_trades, market_cap, snapshot_date
+    )
+
+    # Congress (US only)
+    congress_score = compute_congress_score(ticker, congress_trades, snapshot_date)
+
+    # News
+    articles = fetch_news(ticker, snapshot_date)
+    sentiment_score = score_news_sentiment(articles)
+    buzz_score = score_news_buzz(articles)
+
+    # Analyst (current snapshot proxy — see spec known limitation)
+    analyst_score = compute_analyst_score(ticker, analyst_index)
+
+    # Piotroski
+    piotroski_score = fetch_piotroski(ticker, snapshot_date)
+
+    # Forward return label (21 trading days ≈ 30 calendar days)
+    fwd_return = compute_forward_return(prices, snapshot_date, horizon=21)
+    spy_fwd = compute_forward_return(spy_prices, snapshot_date, horizon=21)
+
+    if fwd_return is None:
+        return None  # can't compute IC without label
+
+    return {
+        "ticker": ticker,
+        "snapshot_date": str(snapshot_date),
+        "insider_conviction": round(conviction_score, 6),
+        "insider_breadth":    round(breadth_score, 6),
+        "congress":           round(congress_score, 6),
+        "news_sentiment":     round(sentiment_score, 6),
+        "news_buzz":          round(buzz_score, 6),
+        "momentum_long":      round(momentum_score, 6),
+        "volume_attention":   round(vol_score, 6),
+        "analyst_consensus":  round(analyst_score, 6),
+        "quality_piotroski":  round(piotroski_score, 6),
+        "forward_return_21d": round(fwd_return, 6),
+        "spy_return_21d":     round(spy_fwd or 0.0, 6),
+    }
+
+
+def main() -> None:
+    if not _API_KEY:
+        raise EnvironmentError("FMP_API_KEY not set")
+
+    _OUT.parent.mkdir(parents=True, exist_ok=True)
+    tickers = _load_universe()
+    fridays = _fridays(52)
+    log.info("Backfilling %d tickers × %d dates", len(tickers), len(fridays))
+
+    # Pre-fetch shared data once
+    log.info("Fetching congress trades (S3)...")
+    congress_trades = fetch_congress_all()
+
+    bulk_path = Path(".cache/bulk_snapshots/upgrades-downgrades-consensus-bulk.ndjson")
+    log.info("Loading analyst bulk index...")
+    analyst_index = load_analyst_bulk_index(bulk_path)
+
+    # Fetch SPY prices once
+    oldest = fridays[0] - timedelta(days=400)
+    newest = fridays[-1] + timedelta(days=35)
+    log.info("Fetching SPY prices %s → %s", oldest, newest)
+    spy_prices = fetch_prices("SPY", oldest, newest)
+
+    records_written = 0
+    with open(_OUT, "w") as out_f:
+        for ticker in tickers:
+            log.info("Processing %s...", ticker)
+            prices = fetch_prices(ticker, oldest, newest)
+            market_cap = 1e10  # fallback; FMP quote not fetched here to save calls
+
+            for snap_date in fridays:
+                rec = build_snapshot(
+                    ticker, snap_date, prices, congress_trades,
+                    analyst_index, market_cap, spy_prices,
+                )
+                if rec is not None:
+                    out_f.write(json.dumps(rec) + "\n")
+                    records_written += 1
+
+    log.info("Done. %d records written to %s", records_written, _OUT)
+
+
+if __name__ == "__main__":
+    main()
