@@ -132,7 +132,39 @@ jobs:
           echo "=== logs/ contents after staging ==="
           ls -la logs/
 
-      # ── 9. Freshness gate — trigger-aware threshold ───────────────────────────
+      # ── 9. Synthesize US + INTL into combined top_lists.json ────────────────
+      # cook_toplists.py merges:
+      #   logs/top_lists.json       (US 9-factor, from pipeline_us artifact)
+      #   logs/top_lists_intl.json  (INTL 6-factor, from pipeline_intl artifact)
+      # -> combined logs/top_lists.json with top_buys_usa / top_buys_europe / top_buys_asia.
+      # Normalizes INTL schema (composite_score->final_score, region->market, congress:0.0).
+      # stdlib-only — no pip install required.
+      - name: Synthesize regional outputs (cook_toplists)
+        run: |
+          if [ -f logs/top_lists.json ] && [ -f logs/top_lists_intl.json ]; then
+            python scripts/cook_toplists.py \
+              --us-input    logs/top_lists.json \
+              --intl-input  logs/top_lists_intl.json \
+              --registry    config/ticker_registry.json \
+              --output      logs/top_lists.json
+          else
+            echo "::warning::One or both regional artifacts missing — skipping synthesis"
+            echo "  top_lists.json present:      $([ -f logs/top_lists.json ] && echo yes || echo NO)"
+            echo "  top_lists_intl.json present: $([ -f logs/top_lists_intl.json ] && echo yes || echo NO)"
+          fi
+
+      # ── 10. Combined pre-flight audit (RT-QA-2026-REV5) ─────────────────────
+      # Validates the combined top_lists.json across all seven checks:
+      #   A. Score range [0, 1]          D. Geographic leakage
+      #   B. Badge consistency           E. Cross-contamination (congress==0 for EU/Asia)
+      #   C. Sort order (descending)     E2. Dynamic intl ceiling
+      #                                  F. VIX coherence  G. Ticker regex
+      # Runs only when synthesis produced the combined file.
+      - name: Audit combined payload (RT-QA-2026-REV5)
+        if: hashFiles('logs/top_lists.json') != ''
+        run: python scripts/audit_payload.py --input logs/top_lists.json
+
+      # ── 11. Freshness gate — trigger-aware threshold ──────────────────────────
       #
       # workflow_run (chained from pipeline_us): artifact should be <6h old.
       # schedule (13:00 UTC fallback):          allows up to 25h for a missed run.
@@ -183,7 +215,9 @@ jobs:
               print(f"::warning::Freshness check failed ({e}) — proceeding anyway")
           EOF
 
-      # ── 10. Send to Discord (3 retries, 30s/60s backoff) ─────────────────────
+      # ── 12. Send to Discord (3 retries, 30s/60s backoff) ─────────────────────
+      # Uses the combined top_lists.json (post-synthesis) which activates the
+      # v2.1-global regional embed path (top_buys_usa / top_buys_europe / top_buys_asia).
       - name: Send daily market checkup
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
@@ -193,11 +227,11 @@ jobs:
             DRY_RUN_FLAG="--dry-run"
           fi
           python scripts/send_toplists_discord.py \
-            --input   logs/intel_source_status.json \
+            --input   logs/top_lists.json \
             --log-dir logs \
             $DRY_RUN_FLAG
 
-      # ── 11. Upload send log on failure ───────────────────────────────────────
+      # ── 13. Upload send log on failure ───────────────────────────────────────
       - name: Upload Discord send log
         if: always()
         uses: actions/upload-artifact@v4
