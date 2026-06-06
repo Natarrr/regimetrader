@@ -816,9 +816,12 @@ def generate(
         except Exception as _exc:
             log.debug("portfolio prev_weights load failed (non-fatal): %s", _exc)
 
-    _portfolio_tickers = [e["ticker"] for e in _portfolio_candidates]
-    _portfolio_scores = [e["final_score"] for e in _portfolio_candidates]
-    _portfolio_sectors = [e.get("sector", "Unknown") for e in _portfolio_candidates]
+    _portfolio_tickers, _portfolio_scores, _portfolio_sectors = zip(
+        *((e["ticker"], e["final_score"], e.get("sector", "Unknown")) for e in _portfolio_candidates)
+    ) if _portfolio_candidates else ([], [], [])
+    _portfolio_tickers = list(_portfolio_tickers)
+    _portfolio_scores = list(_portfolio_scores)
+    _portfolio_sectors = list(_portfolio_sectors)
     _vix = current_vix if current_vix is not None else 20.0
 
     try:
@@ -831,20 +834,19 @@ def generate(
         _opt_weights = {t: 0.0 for t in _portfolio_tickers}
         _opt_method = "failed"
 
+    # Precompute sector → total weight once (O(n)) to avoid O(n²) per-entry inner sum.
+    _sector_totals: dict = {}
+    for _t, _s in zip(_portfolio_tickers, _portfolio_sectors):
+        _sector_totals[_s] = _sector_totals.get(_s, 0.0) + _opt_weights.get(_t, 0.0)
+
     # Attach portfolio_weight to every entry (0.0 for non-top-20).
     _weight_set = set(_portfolio_tickers)
     for _entry in entries:
         _entry["portfolio_weight"] = round(_opt_weights.get(_entry["ticker"], 0.0), 6)
         _entry["portfolio_weight_method"] = _opt_method if _entry["ticker"] in _weight_set else "n/a"
         if _entry["ticker"] in _weight_set:
-            _entry_sector = _entry.get("sector", "Unknown")
             _entry["sector_weight_contribution"] = round(
-                sum(
-                    _opt_weights.get(t, 0.0)
-                    for t, s in zip(_portfolio_tickers, _portfolio_sectors)
-                    if s == _entry_sector
-                ),
-                6,
+                _sector_totals.get(_entry.get("sector", "Unknown"), 0.0), 6
             )
         else:
             _entry["sector_weight_contribution"] = 0.0

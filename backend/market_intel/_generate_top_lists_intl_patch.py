@@ -101,8 +101,7 @@ def _build_intl_entry(row: Dict[str, Any]) -> Dict[str, Any]:
         "analyst_consensus_source":  row.get("analyst_consensus_source", "bulk"),
         "insider_source":            row.get("insider_source", "fmp"),
         # Diagnostic metadata only — FMPFetcher.source_reliability() returns 1.0.
-        "source_reliability": _f("source_reliability") if _f("source_reliability") > 0.0 else 1.0,
-        "data_source_reliability":   _f("source_reliability"),
+        "source_reliability": _f("source_reliability") or 1.0,
         # Factor score pass-through for Discord formatter
         "insider_conviction_score":  _f("insider_conviction_score"),
         "insider_breadth_score":     _f("insider_breadth_score"),
