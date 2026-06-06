@@ -806,14 +806,15 @@ def generate(
     if _prev_path.exists():
         try:
             _prev_data = json.loads(_prev_path.read_text(encoding="utf-8"))
+            _LIST_KEYS = ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia", "mid_caps", "small_caps")
             _prev_weights = {
                 e["ticker"]: e.get("portfolio_weight", 0.0)
-                for section in _prev_data.get("top_lists", {}).values()
-                for e in (section if isinstance(section, list) else [])
-                if e.get("portfolio_weight", 0.0) > 0
+                for key in _LIST_KEYS
+                for e in _prev_data.get(key, [])
+                if isinstance(e, dict) and e.get("portfolio_weight", 0.0) > 0
             }
-        except Exception:
-            pass
+        except Exception as _exc:
+            log.debug("portfolio prev_weights load failed (non-fatal): %s", _exc)
 
     _portfolio_tickers = [e["ticker"] for e in _portfolio_candidates]
     _portfolio_scores = [e["final_score"] for e in _portfolio_candidates]
@@ -845,6 +846,8 @@ def generate(
                 ),
                 6,
             )
+        else:
+            _entry["sector_weight_contribution"] = 0.0
 
     def score_desc(e): return e["final_score"]  # noqa: E731
 

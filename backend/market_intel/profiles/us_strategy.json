@@ -1,16 +1,16 @@
 {
-  "region": "US",
-  "expected_factors": 9,
-  "active_factors": {
-    "insider_conviction": 0.10,
-    "insider_breadth": 0.10,
-    "congress": 0.05,
-    "news_sentiment": 0.15,
-    "news_buzz": 0.10,
-    "momentum_long": 0.15,
-    "volume_attention": 0.10,
-    "analyst_consensus": 0.10,
-    "quality_piotroski": 0.15
-  },
-  "output_filename": "top_lists_us.json"
+    "region": "US",
+    "expected_factors": 9,
+    "active_factors": {
+        "insider_conviction": 0.10,
+        "insider_breadth": 0.10,
+        "congress": 0.05,
+        "news_sentiment": 0.15,
+        "news_buzz": 0.10,
+        "momentum_long": 0.15,
+        "volume_attention": 0.10,
+        "analyst_consensus": 0.10,
+        "quality_piotroski": 0.15
+    },
+    "output_filename": "top_lists_us.json"
 }

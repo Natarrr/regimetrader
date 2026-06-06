@@ -84,9 +84,11 @@ def _is_cache_valid(cache_dir: Path, endpoint: str, ttl_hours: float) -> bool:
         cached_at = datetime.fromisoformat(cached_at_str)
         age_h = (datetime.now(timezone.utc) - cached_at).total_seconds() / 3600
         if age_h < ttl_hours:
-            logger.info("Cache HIT %s (age=%.1fh < ttl=%.1fh)", endpoint, age_h, ttl_hours)
+            logger.info("Cache HIT %s (age=%.1fh < ttl=%.1fh)",
+                        endpoint, age_h, ttl_hours)
             return True
-        logger.info("Cache STALE %s (age=%.1fh >= ttl=%.1fh)", endpoint, age_h, ttl_hours)
+        logger.info("Cache STALE %s (age=%.1fh >= ttl=%.1fh)",
+                    endpoint, age_h, ttl_hours)
         return False
     except Exception as exc:
         logger.warning("Cache read error for %s: %s", endpoint, exc)
@@ -143,23 +145,28 @@ def _fetch_endpoint(
     if delay > 0:
         time.sleep(delay)
 
-    logger.info("Fetching %s (~%.0f MB expected)...", endpoint, ENDPOINT_SIZES_MB.get(endpoint, 0))
+    logger.info("Fetching %s (~%.0f MB expected)...",
+                endpoint, ENDPOINT_SIZES_MB.get(endpoint, 0))
 
     t0 = time.monotonic()
     resp = session.get(url, params=params, timeout=120)
     elapsed = time.monotonic() - t0
 
     if resp.status_code == 401:
-        raise PermissionError(f"FMP 401 on {endpoint} — check FMP_API_KEY and plan tier")
+        raise PermissionError(
+            f"FMP 401 on {endpoint} — check FMP_API_KEY and plan tier")
     if resp.status_code == 403:
-        raise PermissionError(f"FMP 403 on {endpoint} — may require Ultimate tier upgrade")
+        raise PermissionError(
+            f"FMP 403 on {endpoint} — may require Ultimate tier upgrade")
     if resp.status_code == 404:
         raise ValueError(f"FMP 404 on {endpoint} — route {url!r} not found")
     if not resp.ok:
-        raise RuntimeError(f"FMP {resp.status_code} on {endpoint}: {resp.text[:200]}")
+        raise RuntimeError(
+            f"FMP {resp.status_code} on {endpoint}: {resp.text[:200]}")
 
     data = _parse_response(endpoint, resp.text)
-    logger.info("Fetched %s: %d records in %.1fs", endpoint, len(data), elapsed)
+    logger.info("Fetched %s: %d records in %.1fs",
+                endpoint, len(data), elapsed)
     return data
 
 
@@ -193,8 +200,10 @@ def prefetch(
                 "data": records,
             }
             p = _cache_path(cache_dir, endpoint)
-            p.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-            logger.info("Cached %s → %s (%d records)", endpoint, p, len(records))
+            p.write_text(json.dumps(
+                payload, separators=(",", ":")), encoding="utf-8")
+            logger.info("Cached %s → %s (%d records)",
+                        endpoint, p, len(records))
             results[endpoint] = True
 
         except Exception as exc:
@@ -250,9 +259,11 @@ def map_bulk_data_to_universe(
         base_key = normalize_ticker_key(ticker)
         base_to_universe_map.setdefault(base_key, []).append(ticker)
 
-    mapped_results: dict[str, dict[str, Any]] = {t: {} for t in universe_tickers}
+    mapped_results: dict[str, dict[str, Any]] = {
+        t: {} for t in universe_tickers}
     for row in bulk_rows:
-        raw_symbol = (row.get(ticker_column_name) or row.get("symbol") or row.get("ticker") or "").upper().strip()
+        raw_symbol = (row.get(ticker_column_name) or row.get(
+            "symbol") or row.get("ticker") or "").upper().strip()
         if not raw_symbol:
             continue
 
@@ -263,12 +274,14 @@ def map_bulk_data_to_universe(
 
         # Fallback to stripped base symbol matching.
         base_symbol = normalize_ticker_key(raw_symbol)
-        raw_suffix = raw_symbol.split(".", 1)[1].upper() if "." in raw_symbol else ""
+        raw_suffix = raw_symbol.split(
+            ".", 1)[1].upper() if "." in raw_symbol else ""
         candidates = base_to_universe_map.get(base_symbol, [])
         for target in candidates:
             if mapped_results[target]:
                 continue  # already matched exactly — skip
-            target_suffix = target.split(".", 1)[1].upper() if "." in target else ""
+            target_suffix = target.split(
+                ".", 1)[1].upper() if "." in target else ""
             # Only accept the base-symbol match when:
             #   (a) exchange suffixes match exactly, OR
             #   (b) the bulk row carries no suffix AND this base resolves to exactly one
@@ -291,7 +304,8 @@ def build_ticker_index(
     index: dict[str, dict[str, Any]] = {}
     ambiguous_bases: set[str] = set()
     for rec in records:
-        sym = rec.get(key_field) or rec.get("symbol") or rec.get("ticker") or ""
+        sym = rec.get(key_field) or rec.get(
+            "symbol") or rec.get("ticker") or ""
         if not sym:
             continue
         sym = sym.upper().strip()
@@ -310,7 +324,8 @@ def build_ticker_index(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="FMP Ultimate bulk pre-fetcher")
+    parser = argparse.ArgumentParser(
+        description="FMP Ultimate bulk pre-fetcher")
     parser.add_argument(
         "--cache-dir", default=".cache/bulk_snapshots",
         help="Directory to write cached bulk files",
@@ -324,7 +339,8 @@ def main() -> None:
         choices=list(ENDPOINT_ROUTES.keys()),
         help="Bulk endpoints to fetch",
     )
-    parser.add_argument("--verbose", action="store_true", help="Enable DEBUG logging")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable DEBUG logging")
     args = parser.parse_args()
 
     logging.basicConfig(
