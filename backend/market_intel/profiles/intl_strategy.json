@@ -1,13 +1,17 @@
 {
     "region": "INTL",
-    "expected_factors": 6,
+    "expected_factors": 10,
     "active_factors": {
-        "news_sentiment": 0.20,
-        "news_buzz": 0.10,
-        "momentum_long": 0.20,
-        "volume_attention": 0.15,
-        "analyst_consensus": 0.15,
-        "quality_piotroski": 0.20
+        "insider_conviction":  0.28,
+        "insider_breadth":     0.14,
+        "news_sentiment":      0.13,
+        "news_buzz":           0.04,
+        "momentum_long":       0.17,
+        "volume_attention":    0.04,
+        "analyst_consensus":   0.10,
+        "quality_piotroski":   0.05,
+        "analyst_revision":    0.02,
+        "price_target_upside": 0.03
     },
     "output_filename": "top_lists_intl.json"
 }
