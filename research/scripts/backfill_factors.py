@@ -178,7 +178,7 @@ def fetch_insider_trades(ticker: str, snapshot_date: date) -> list[dict]:
 
 
 def compute_insider_scores(
-    trades: list[dict], market_cap: float
+    trades: list[dict], market_cap: float, snapshot_date: date
 ) -> tuple[float, float]:
     """Return (insider_conviction_score, insider_breadth_score) in [0, 1].
 
@@ -204,7 +204,7 @@ def compute_insider_scores(
         most_recent_str = max(dates)
         try:
             most_recent = date.fromisoformat(most_recent_str)
-            days_since = (date.today() - most_recent).days
+            days_since = (snapshot_date - most_recent).days
         except ValueError:
             days_since = 0
     else:
@@ -293,6 +293,7 @@ def load_analyst_bulk_index(bulk_path: Path) -> dict[str, dict]:
                 if sym:
                     index[sym.upper()] = rec
             except json.JSONDecodeError:
+                log.warning("Malformed NDJSON line in %s — skipping", bulk_path)
                 continue
     return index
 
@@ -312,10 +313,10 @@ def fetch_piotroski(ticker: str, snapshot_date: date) -> float:
         return 0.5  # neutral default when unavailable
     r = data[0]
 
-    # Piotroski (2000) 8-point F-score sub-components
+    # Piotroski (2000) 9-component single-period approximation
     roa = float(r.get("returnOnAssetsTTM") or 0)
     cfo = float(r.get("operatingCashFlowPerShareTTM") or 0)
-    delta_roa = float(r.get("returnOnAssetsTTM") or 0)  # proxy: single period
+    delta_roa = roa  # delta_roa: using single TTM period as proxy (no prior-period data available)
     accrual = cfo - roa  # CFO > ROA = accrual quality signal
 
     current_ratio = float(r.get("currentRatioTTM") or 0)
