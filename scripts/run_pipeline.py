@@ -1726,27 +1726,13 @@ def run(
     clean_for_norm  = [r for r in results if not r.get("_validation_failed")]
     quarantined_out = [r for r in results if r.get("_validation_failed")]
 
-    us_clean   = [r for r in clean_for_norm if r.get("market", "USA") in ("USA", "US")]
-    intl_clean = [r for r in clean_for_norm if r.get("market", "USA") not in ("USA", "US")]
-
-    us_clean = neutralize_factors(
-        us_clean,
+    clean_for_norm = neutralize_factors(
+        clean_for_norm,
         factors=_v2_factors,
         group_by=("sector", "cap_tier"),
         min_bucket_size=5,
         fallback_group_by=("cap_tier",),
     )
-
-    if intl_clean:
-        intl_clean = neutralize_factors(
-            intl_clean,
-            factors=_v2_factors,
-            group_by=("market", "sector", "cap_tier"),
-            min_bucket_size=1,
-            fallback_group_by=("market",),
-        )
-
-    clean_for_norm = us_clean + intl_clean
 
     # Quarantined tickers: zero out scores, mark low coverage
     for r in quarantined_out:
