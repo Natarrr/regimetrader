@@ -75,6 +75,48 @@ assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_GLOBAL sums to {sum(WEIGHTS_GLOBAL.values()):.8f}, not 1.0"
 )
 
+# ── European universe — Quality-Core Model ─────────────────────────────────────
+# quality_piotroski + analyst_revision + price_target_upside >= 0.55 (quality pillar)
+# Piotroski 2000; Chan, Jegadeesh & Lakonishok 1996; Brav & Lehavy 2003
+WEIGHTS_EU: dict[str, float] = {
+    "insider_conviction":  0.12,
+    "insider_breadth":     0.06,
+    "congress":            0.00,   # structurally absent
+    "news_sentiment":      0.05,
+    "news_buzz":           0.02,
+    "momentum_long":       0.08,   # Rouwenhorst 1998 (moderated for EU)
+    "volume_attention":    0.02,
+    "analyst_consensus":   0.07,
+    "quality_piotroski":   0.28,   # dominant pillar — Piotroski 2000
+    "analyst_revision":    0.15,   # Chan, Jegadeesh & Lakonishok 1996
+    "price_target_upside": 0.15,   # Brav & Lehavy 2003
+    "transcript_tone":     0.00,   # structurally absent outside US
+}
+assert abs(sum(WEIGHTS_EU.values()) - 1.0) < 1e-6, (
+    f"WEIGHTS_EU sums to {sum(WEIGHTS_EU.values()):.8f}, not 1.0"
+)
+
+# ── Asian universe — Liquidity & Momentum Model ────────────────────────────────
+# momentum_long + volume_attention >= 0.35 (liquidity/momentum pillar)
+# Rouwenhorst 1998; Gervais & Odean 2001; Givoly & Lakonishok 1979; Tetlock 2007
+WEIGHTS_ASIA: dict[str, float] = {
+    "insider_conviction":  0.15,
+    "insider_breadth":     0.07,
+    "congress":            0.00,   # structurally absent
+    "news_sentiment":      0.15,   # Tetlock 2007
+    "news_buzz":           0.08,
+    "momentum_long":       0.25,   # Rouwenhorst 1998 — APAC momentum premium
+    "volume_attention":    0.10,   # Gervais & Odean 2001
+    "analyst_consensus":   0.12,   # Givoly & Lakonishok 1979
+    "quality_piotroski":   0.03,
+    "analyst_revision":    0.03,
+    "price_target_upside": 0.02,
+    "transcript_tone":     0.00,   # structurally absent outside US
+}
+assert abs(sum(WEIGHTS_ASIA.values()) - 1.0) < 1e-6, (
+    f"WEIGHTS_ASIA sums to {sum(WEIGHTS_ASIA.values()):.8f}, not 1.0"
+)
+
 # ── Convenience alias (legacy callers expecting WEIGHTS get US set) ────────────
 WEIGHTS = WEIGHTS_US
 
@@ -126,9 +168,11 @@ def get_region(ticker: str) -> str:
 def get_weights(ticker: str) -> dict[str, float]:
     """Return the correct weight set for ticker (copy — callers may not mutate)."""
     region = get_region(ticker)
-    if region == "US":
-        return dict(WEIGHTS_US)
-    return dict(WEIGHTS_GLOBAL)
+    if region == "EU":
+        return dict(WEIGHTS_EU)
+    if region == "ASIA":
+        return dict(WEIGHTS_ASIA)
+    return dict(WEIGHTS_US)
 
 
 def is_congress_eligible(ticker: str) -> bool:

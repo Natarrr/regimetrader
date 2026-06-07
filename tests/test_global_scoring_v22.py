@@ -104,29 +104,33 @@ def test_eu_score_uses_global_weights():
     from backend.market_intel._score_compositor import compute_composite_score
 
     factors = {
-        "insider_conviction": 0.60,
-        "insider_breadth":    0.50,
-        "congress":           0.00,
-        "news_sentiment":     0.70,
-        "news_buzz":          0.45,
-        "momentum_long":      0.75,
-        "volume_attention":   0.35,
-        "analyst_consensus":  0.80,
-        "quality_piotroski":  0.75,
+        "insider_conviction":  0.60,
+        "insider_breadth":     0.50,
+        "congress":            0.00,
+        "news_sentiment":      0.70,
+        "news_buzz":           0.45,
+        "momentum_long":       0.75,
+        "volume_attention":    0.35,
+        "analyst_consensus":   0.80,
+        "quality_piotroski":   0.75,
+        "analyst_revision":    0.65,   # WEIGHTS_EU specific (0.15 weight)
+        "price_target_upside": 0.70,   # WEIGHTS_EU specific (0.15 weight)
+        "transcript_tone":     0.00,   # structurally absent
     }
     score, meta = compute_composite_score("SAP.DE", factors, piotroski_raw=7)
 
-    assert meta["weights_set"] == "GLOBAL"
+    assert meta["weights_set"] == "EU"
     assert meta["region"] == "EU"
     assert score >= 0.55, f"Expected score >= 0.55, got {score:.4f}"
 
 
 def test_eu_score_vs_old_penalty():
-    """EU score with WEIGHTS_GLOBAL must exceed naive WEIGHTS_US score (dead congress weight)."""
+    """EU score with WEIGHTS_EU must exceed naive WEIGHTS_US score (dead congress weight)."""
     from backend.market_intel._score_compositor import compute_composite_score
-    from regime_trader.config.weights import WEIGHTS_US
+    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_EU
 
-    factors = {k: 0.7 for k in WEIGHTS_US}
+    # Supply all WEIGHTS_EU keys so quality/analyst factors contribute fully
+    factors = {k: 0.7 for k in WEIGHTS_EU}
     factors["congress"] = 0.0
 
     score_new, _ = compute_composite_score("SAP.DE", factors)
@@ -188,7 +192,7 @@ def test_eu_perfect_factors_reaches_score_one():
     assert score == pytest.approx(1.0, abs=1e-4), (
         f"Perfect EU ticker should score 1.0 without dampening, got {score:.4f}"
     )
-    assert meta["weights_set"] == "GLOBAL"
+    assert meta["weights_set"] == "EU"
 
 
 def test_eu_score_not_capped_at_point_eight():

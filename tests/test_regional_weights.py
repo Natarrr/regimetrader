@@ -98,10 +98,16 @@ def test_get_weights_us_returns_copy():
     w["congress"] = 999.0
     assert WEIGHTS_US["congress"] == 0.22   # original not mutated
 
+def test_get_weights_eu_returns_copy():
+    from regime_trader.config.weights import WEIGHTS_EU
+    w = get_weights("SAP.DE")
+    w["insider_conviction"] = 999.0
+    assert WEIGHTS_EU["insider_conviction"] == 0.12   # original not mutated (WEIGHTS_EU, not GLOBAL)
+
 def test_get_weights_global_returns_copy():
     w = get_weights("SAP.DE")
     w["insider_conviction"] = 999.0
-    assert WEIGHTS_GLOBAL["insider_conviction"] == 0.28   # original not mutated
+    assert WEIGHTS_GLOBAL["insider_conviction"] == 0.28   # WEIGHTS_GLOBAL itself not mutated
 
 
 # ── Composite score computation ──────────────────────────────────────────────
@@ -115,28 +121,30 @@ def test_us_ticker_uses_us_weights():
     assert meta["region"] == "US"
     assert meta["congress_masked"] is False
 
-def test_eu_ticker_uses_global_weights():
-    """EU ticker with perfect scores should reach 1.0 (WEIGHTS_GLOBAL sums to 1)."""
-    perfect = {k: 1.0 for k in WEIGHTS_GLOBAL}
+def test_eu_ticker_uses_eu_weights():
+    """EU ticker with perfect scores should reach 1.0 (WEIGHTS_EU sums to 1)."""
+    from regime_trader.config.weights import WEIGHTS_EU
+    perfect = {k: 1.0 for k in WEIGHTS_EU}
     perfect["congress"] = 0.0   # EU: congress structurally absent — not contamination
     score, meta = compute_composite_score("SAP.DE", perfect, piotroski_raw=9)
     assert score == pytest.approx(1.0, abs=1e-6)
-    assert meta["weights_set"] == "GLOBAL"
+    assert meta["weights_set"] == "EU"
     assert meta["region"] == "EU"
     assert meta["congress_masked"] is False   # congress was already 0.0 — no contamination
 
 def test_eu_ticker_congress_contamination_guard():
     """If upstream scorer accidentally passes congress_score > 0 for an EU ticker,
     the compositor must zero it and log a warning."""
-    contaminated = {k: 0.5 for k in WEIGHTS_GLOBAL}
+    from regime_trader.config.weights import WEIGHTS_EU
+    contaminated = {k: 0.5 for k in WEIGHTS_EU}
     contaminated["congress"] = 0.8   # upstream contamination
     score, meta = compute_composite_score("SAP.DE", contaminated, piotroski_raw=7)
     assert meta["congress_masked"] is True
-    # Score must equal what we'd get with congress=0.0
+    # Score must equal what we'd get with congress=0.0 (using WEIGHTS_EU)
     clean = dict(contaminated)
     clean["congress"] = 0.0
     expected_score = sum(
-        WEIGHTS_GLOBAL[f] * clean.get(f, 0.0) for f in WEIGHTS_GLOBAL
+        WEIGHTS_EU[f] * clean.get(f, 0.0) for f in WEIGHTS_EU
     ) * 1.0   # piotroski_raw=7 → gate=1.0
     assert score == pytest.approx(expected_score, abs=1e-6)
 
@@ -158,19 +166,20 @@ def test_us_score_unaffected_by_patch():
     assert score == pytest.approx(expected, abs=1e-6)
 
 def test_eu_score_higher_than_penalty_score():
-    """An EU ticker must score higher with WEIGHTS_GLOBAL (proper redistribution)
+    """An EU ticker must score higher with WEIGHTS_EU (proper redistribution)
     than it would with WEIGHTS_US where congress=0.22 is dead weight."""
-    factors = {k: 0.6 for k in WEIGHTS_US}
+    from regime_trader.config.weights import WEIGHTS_EU
+    factors = {k: 0.6 for k in WEIGHTS_EU}
     factors["congress"] = 0.0   # absent
 
-    # Score with WEIGHTS_GLOBAL (correct)
-    score_global, _ = compute_composite_score("SAP.DE", factors, piotroski_raw=None)
+    # Score with WEIGHTS_EU (correct — congress weight redistributed to quality factors)
+    score_eu, _ = compute_composite_score("SAP.DE", factors, piotroski_raw=None)
 
-    # Score with WEIGHTS_US applied naively (old behaviour — penalised)
+    # Score with WEIGHTS_US applied naively (old behaviour — penalised by congress=0)
     score_us_naive = sum(WEIGHTS_US[f] * factors.get(f, 0.0) for f in WEIGHTS_US)
 
-    assert score_global > score_us_naive, (
-        f"WEIGHTS_GLOBAL ({score_global:.4f}) should exceed "
+    assert score_eu > score_us_naive, (
+        f"WEIGHTS_EU ({score_eu:.4f}) should exceed "
         f"naive US score ({score_us_naive:.4f}) for EU ticker with congress=0"
     )
 
@@ -196,6 +205,83 @@ def test_piotroski_gate_suppresses_eu_buy():
     score, meta = compute_composite_score("SAP.DE", strong_factors, piotroski_raw=1)
     assert score == pytest.approx(0.0)
     assert meta["piotroski_gate"] == 0.0
+
+
+# ── WEIGHTS_EU (Quality-Core Model) ─────────────────────────────────────────
+
+class TestWeightsEU:
+    def test_sums_to_one(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        assert abs(sum(WEIGHTS_EU.values()) - 1.0) < 1e-6
+
+    def test_congress_absent(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        assert WEIGHTS_EU["congress"] == 0.0
+
+    def test_transcript_tone_absent(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        assert WEIGHTS_EU["transcript_tone"] == 0.0
+
+    def test_quality_pillar(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        # quality_piotroski + analyst_revision + price_target_upside >= 0.55
+        pillar = WEIGHTS_EU["quality_piotroski"] + WEIGHTS_EU["analyst_revision"] + WEIGHTS_EU["price_target_upside"]
+        assert pillar >= 0.55
+
+    def test_quality_piotroski_dominant(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        assert WEIGHTS_EU["quality_piotroski"] >= 0.20
+
+
+# ── WEIGHTS_ASIA (Liquidity/Momentum Model) ──────────────────────────────────
+
+class TestWeightsAsia:
+    def test_sums_to_one(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        assert abs(sum(WEIGHTS_ASIA.values()) - 1.0) < 1e-6
+
+    def test_congress_absent(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        assert WEIGHTS_ASIA["congress"] == 0.0
+
+    def test_transcript_tone_absent(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        assert WEIGHTS_ASIA["transcript_tone"] == 0.0
+
+    def test_momentum_pillar(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        # momentum_long + volume_attention >= 0.35
+        pillar = WEIGHTS_ASIA["momentum_long"] + WEIGHTS_ASIA["volume_attention"]
+        assert pillar >= 0.35
+
+    def test_momentum_long_dominant(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        assert WEIGHTS_ASIA["momentum_long"] >= 0.20
+
+
+# ── 3-way get_weights() ──────────────────────────────────────────────────────
+
+class TestGetWeightsThreeWay:
+    def test_eu_ticker_returns_eu_weights(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        assert get_weights("SAP.DE") == dict(WEIGHTS_EU)
+
+    def test_asia_ticker_returns_asia_weights(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        assert get_weights("9984.T") == dict(WEIGHTS_ASIA)
+
+    def test_us_ticker_returns_us_weights(self):
+        assert get_weights("AAPL") == dict(WEIGHTS_US)
+
+    def test_eu_weights_differ_from_global(self):
+        from regime_trader.config.weights import WEIGHTS_EU
+        # Quality-core model must differ significantly from WEIGHTS_GLOBAL
+        assert WEIGHTS_EU["quality_piotroski"] > WEIGHTS_GLOBAL["quality_piotroski"]
+
+    def test_asia_weights_differ_from_global(self):
+        from regime_trader.config.weights import WEIGHTS_ASIA
+        # Momentum-first model must differ significantly from WEIGHTS_GLOBAL
+        assert WEIGHTS_ASIA["momentum_long"] > WEIGHTS_GLOBAL["momentum_long"]
 
 
 # ── Soft failure ─────────────────────────────────────────────────────────────
