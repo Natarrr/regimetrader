@@ -445,6 +445,89 @@ def test_vix_dampening_applied_to_intl_entries(cook_mod, registry, tmp_path):
     assert eu_entry.get("_capitulation_survivor") is True
 
 
+class TestSectorCountCap:
+    def _make_entries(self, sectors):
+        return [
+            {
+                "ticker": f"T{i}",
+                "final_score": round(0.9 - 0.01 * i, 2),
+                "factors": {"sector": s, "beta": 0.5, "quality_piotroski": 0.9},
+                "market": "US",
+                "badge": "HIGH BUY",
+            }
+            for i, s in enumerate(sectors)
+        ]
+
+    def test_max_two_per_sector(self, cook_mod):
+        entries = self._make_entries(["Tech", "Tech", "Tech", "Health"])
+        primary, overflow = cook_mod._apply_sector_count_cap(entries, max_per_sector=2)
+        tech_in_primary = sum(1 for e in primary if e["factors"]["sector"] == "Tech")
+        assert tech_in_primary == 2
+        assert len(overflow) == 1
+
+    def test_no_entries_lost(self, cook_mod):
+        entries = self._make_entries(["A", "A", "A", "B"])
+        primary, overflow = cook_mod._apply_sector_count_cap(entries, max_per_sector=2)
+        assert len(primary) + len(overflow) == 4
+
+    def test_descending_score_order(self, cook_mod):
+        entries = self._make_entries(["Tech", "Health", "Tech"])
+        primary, _ = cook_mod._apply_sector_count_cap(entries, max_per_sector=2)
+        scores = [e["final_score"] for e in primary]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_output_keys_in_combined(self, cook_mod, registry, tmp_path):
+        """cook() output must include usa_overflow and eu_overflow keys."""
+        us_path = tmp_path / "us.json"
+        us_path.write_text(json.dumps({
+            "top_buys": [], "vix": 18.0, "vix_regime": "NORMAL", "kill_switch": False, "ticker_count": 0,
+        }), encoding="utf-8")
+        intl_path = tmp_path / "intl.json"
+        intl_path.write_text(json.dumps([]), encoding="utf-8")
+        out = tmp_path / "out.json"
+        cook_mod.cook(us_path, intl_path, registry, out)
+        result = json.loads(out.read_text())
+        assert "usa_overflow" in result
+        assert "eu_overflow" in result
+        assert "asia_overflow" in result
+
+
+class TestSegmentByMarketCap:
+    def _make_cap_entry(self, ticker, cap):
+        return {"ticker": ticker, "market_cap": cap, "final_score": 0.85,
+                "factors": {}, "badge": "HIGH BUY"}
+
+    def test_three_tiers(self, cook_mod):
+        entries = [
+            self._make_cap_entry("LRG", 50_000_000_000),
+            self._make_cap_entry("MID", 5_000_000_000),
+            self._make_cap_entry("SML", 800_000_000),
+            self._make_cap_entry("TIN", 50_000_000),   # excluded
+        ]
+        large, mid, small = cook_mod._segment_by_market_cap(entries)
+        assert [e["ticker"] for e in large] == ["LRG"]
+        assert [e["ticker"] for e in mid]   == ["MID"]
+        assert [e["ticker"] for e in small] == ["SML"]
+        assert not any(e["ticker"] == "TIN" for e in large + mid + small)
+
+    def test_empty_lists_when_no_entries(self, cook_mod):
+        large, mid, small = cook_mod._segment_by_market_cap([])
+        assert large == mid == small == []
+
+    def test_mvo_pools_key_in_output(self, cook_mod, registry, tmp_path):
+        """cook() output must include mvo_pools key."""
+        us_path = tmp_path / "us.json"
+        us_path.write_text(json.dumps({
+            "top_buys": [], "vix": 18.0, "vix_regime": "NORMAL", "kill_switch": False, "ticker_count": 0,
+        }), encoding="utf-8")
+        intl_path = tmp_path / "intl.json"
+        intl_path.write_text(json.dumps([]), encoding="utf-8")
+        out = tmp_path / "out.json"
+        cook_mod.cook(us_path, intl_path, registry, out)
+        result = json.loads(out.read_text())
+        assert "mvo_pools" in result
+
+
 def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):
     """Normalized INTL entries must carry 'pipeline': 'INTL'."""
     us_path = tmp_path / "top_lists_us.json"

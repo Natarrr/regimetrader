@@ -15,12 +15,60 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from regime_trader.risk.regime import (
+    RiskRegime,
     apply_capitulation_filter,
     get_regime,
     score_multiplier,
 )
 
+try:
+    from backend.market_intel.portfolio_optimizer import (
+        run_optimizer as _run_optimizer,
+        build_large_cap_anchors as _build_anchors,
+    )
+    from regime_trader.risk.exit_rules import enrich_with_exit_anchors as _enrich_exits
+    _EXTENSIONS_AVAILABLE = True
+except ImportError:
+    _EXTENSIONS_AVAILABLE = False
+
+_LARGE_CAP_THRESHOLD = 10_000_000_000
+_MID_CAP_MIN         =  2_000_000_000
+_MID_CAP_MAX         = 10_000_000_000
+_SMALL_CAP_MIN       =    300_000_000
+_SMALL_CAP_MAX       =  2_000_000_000
+
 _BADGE_THRESHOLDS = [(0.80, "HIGH BUY"), (0.60, "TACTICAL BUY"), (0.00, "WATCHLIST")]
+
+
+def _apply_sector_count_cap(
+    entries: list, max_per_sector: int = 2
+) -> tuple[list, list]:
+    """Return (primary, overflow) — primary keeps ≤ max_per_sector per sector, sorted by score."""
+    sorted_entries = sorted(entries, key=lambda e: e.get("final_score", 0), reverse=True)
+    sector_counts: dict[str, int] = {}
+    primary, overflow = [], []
+    for entry in sorted_entries:
+        sector = entry.get("factors", {}).get("sector", "Unknown")
+        if sector_counts.get(sector, 0) < max_per_sector:
+            primary.append(entry)
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+        else:
+            overflow.append(entry)
+    return primary, overflow
+
+
+def _segment_by_market_cap(entries: list) -> tuple[list, list, list]:
+    """Return (large_cap >$10B, mid_cap $2B-$10B, small_cap $300M-$2B). Others excluded."""
+    large, mid, small = [], [], []
+    for entry in entries:
+        cap = entry.get("market_cap", 0) or 0
+        if cap > _LARGE_CAP_THRESHOLD:
+            large.append(entry)
+        elif _MID_CAP_MIN <= cap <= _MID_CAP_MAX:
+            mid.append(entry)
+        elif _SMALL_CAP_MIN <= cap < _MID_CAP_MIN:
+            small.append(entry)
+    return large, mid, small
 
 
 def _badge(score: float) -> str:
@@ -51,7 +99,11 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     ticker = raw.get("ticker", "")
     market = ticker_market_map.get(ticker, "EUROPE")
     composite_score = float(raw.get("composite_score", 0.0))
-    composite_score = round(composite_score * score_multiplier(get_regime(vix)), 4)
+    regime = get_regime(vix)
+    # CAPITULATION dampening is applied by apply_capitulation_filter() — skip here
+    # to avoid double-dampening (BEAR and NORMAL still receive their multiplier)
+    if regime != RiskRegime.CAPITULATION:
+        composite_score = round(composite_score * score_multiplier(regime), 4)
     factor_snapshots = raw.get("factor_snapshots", {})
     # Strip any congress value from snapshots then pin to 0.0 (cannot be overridden)
     factors = {k: v for k, v in factor_snapshots.items() if k != "congress"}
@@ -66,7 +118,14 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     }
 
 
-def cook(us_input: Path, intl_input: Path, registry: Path, output: Path) -> None:
+def cook(
+    us_input: Path,
+    intl_input: Path,
+    registry: Path,
+    output: Path,
+    mvo_enabled: bool = True,
+    sector_count_cap: int = 2,
+) -> None:
     # ── US payload ────────────────────────────────────────────────────────────
     us_data = json.loads(us_input.read_text(encoding="utf-8"))
     # Support both top_buys_usa (new) and top_buys (legacy) key names
@@ -102,16 +161,91 @@ def cook(us_input: Path, intl_input: Path, registry: Path, output: Path) -> None
     top_buys_asia   = apply_capitulation_filter(top_buys_asia,   vix)
     vix_regime      = regime.value
 
+    # ── ATR / Batch Floor enrichment ──────────────────────────────────────────
+    if _EXTENSIONS_AVAILABLE:
+        for entry in top_buys_usa + top_buys_europe + top_buys_asia:
+            _enrich_exits(entry, entry.get("atr_14"))
+
+    # ── Sector count cap ─────────────────────────────────────────────────────
+    top_buys_usa,    usa_overflow    = _apply_sector_count_cap(top_buys_usa,    sector_count_cap)
+    top_buys_europe, eu_overflow     = _apply_sector_count_cap(top_buys_europe, sector_count_cap)
+    top_buys_asia,   asia_overflow   = _apply_sector_count_cap(top_buys_asia,   sector_count_cap)
+
+    # ── 3-tier capital allocation ─────────────────────────────────────────────
+    mvo_pools: dict = {}
+    if _EXTENSIONS_AVAILABLE and mvo_enabled:
+        all_candidates = top_buys_usa + top_buys_europe + top_buys_asia
+        large_entries, mid_entries, small_entries = _segment_by_market_cap(all_candidates)
+
+        if large_entries:
+            mvo_pools["large_cap_anchors"] = {
+                "bracket": "LARGE_CAP_ANCHOR",
+                "cap_range": ">$10B",
+                "positions": _build_anchors(large_entries),
+            }
+
+        if len(mid_entries) >= 2:
+            mid_weights, mid_method = _run_optimizer(
+                [e["ticker"] for e in mid_entries],
+                [e["final_score"] for e in mid_entries],
+                [e.get("factors", {}).get("sector", "Unknown") for e in mid_entries],
+                vix=vix, mode="sharpe", position_ceiling=0.35,
+            )
+            mvo_pools["mid_cap"] = {
+                "method": mid_method, "bracket": "MID_CAP", "cap_range": "$2B-$10B",
+                "positions": [
+                    {
+                        "ticker":       e["ticker"],
+                        "allocation":   round(mid_weights.get(e["ticker"], 0.0), 4),
+                        "final_score":  e["final_score"],
+                        "price_target": e.get("price_target"),
+                        "exit_anchors": e.get("exit_anchors", {}),
+                    }
+                    for e in mid_entries if mid_weights.get(e["ticker"], 0.0) > 0.001
+                ],
+            }
+
+        if len(small_entries) >= 2:
+            adv_map = {
+                e["ticker"]: e.get("adv_20d_usd")
+                for e in small_entries if e.get("adv_20d_usd")
+            }
+            small_weights, small_method = _run_optimizer(
+                [e["ticker"] for e in small_entries],
+                [e["final_score"] for e in small_entries],
+                [e.get("factors", {}).get("sector", "Unknown") for e in small_entries],
+                vix=vix, mode="min_variance",
+                position_floor=0.10, position_ceiling=0.25,
+                adv_20d_map=adv_map or None,
+            )
+            mvo_pools["small_cap"] = {
+                "method": small_method, "bracket": "SMALL_CAP", "cap_range": "$300M-$2B",
+                "positions": [
+                    {
+                        "ticker":       e["ticker"],
+                        "allocation":   round(small_weights.get(e["ticker"], 0.0), 4),
+                        "final_score":  e["final_score"],
+                        "price_target": e.get("price_target"),
+                        "exit_anchors": e.get("exit_anchors", {}),
+                    }
+                    for e in small_entries if small_weights.get(e["ticker"], 0.0) > 0.001
+                ],
+            }
+
     # ── Write combined output ─────────────────────────────────────────────────
     combined = {
-        "top_buys_usa": top_buys_usa,
+        "top_buys_usa":    top_buys_usa,
         "top_buys_europe": top_buys_europe,
-        "top_buys_asia": top_buys_asia,
-        "vix": vix,
-        "vix_regime": vix_regime,
-        "kill_switch": kill_switch,
-        "ticker_count": us_ticker_count + len(top_buys_europe) + len(top_buys_asia),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "top_buys_asia":   top_buys_asia,
+        "usa_overflow":    usa_overflow,
+        "eu_overflow":     eu_overflow,
+        "asia_overflow":   asia_overflow,
+        "mvo_pools":       mvo_pools,
+        "vix":             vix,
+        "vix_regime":      vix_regime,
+        "kill_switch":     kill_switch,
+        "ticker_count":    us_ticker_count + len(top_buys_europe) + len(top_buys_asia),
+        "generated_at":    datetime.now(timezone.utc).isoformat(),
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
