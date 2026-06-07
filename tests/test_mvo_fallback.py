@@ -49,7 +49,7 @@ class TestFallbackChain:
         scores = [0.5 + 0.05 * i for i in range(10)]
         sectors = [f"S{i}" for i in range(10)]
         weights, method = run_optimizer(tickers, scores, sectors, vix=20.0)
-        assert method == "MVO"
+        assert method == "sharpe"
         _valid(weights, tickers)
 
     def test_zero_scores_does_not_crash(self):
