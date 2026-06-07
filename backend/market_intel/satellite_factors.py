@@ -222,7 +222,7 @@ def main() -> None:
     )
 
     args.log_dir.mkdir(parents=True, exist_ok=True)
-    top_lists_path = args.log_dir / "top_lists.json"
+    top_lists_path = args.log_dir / "top_lists.json"    # merged output from cook_toplists.py
     if not top_lists_path.exists():
         log.error("top_lists.json not found at %s", top_lists_path)
         raise SystemExit(1)
