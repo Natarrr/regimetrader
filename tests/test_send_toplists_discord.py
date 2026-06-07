@@ -141,8 +141,8 @@ class TestBuildPayloadSatellite:
         assert cannibal_idx > cyclical_idx
 
 
-def test_weights_for_entry_returns_global_for_intl():
-    """INTL entries must use WEIGHTS_GLOBAL, US entries must use WEIGHTS_US."""
+def test_weights_for_entry_returns_regional_weights():
+    """EU tickers use WEIGHTS_EU, US tickers use WEIGHTS_US — per-ticker routing via get_weights()."""
     spec = importlib.util.spec_from_file_location(
         "send_toplists_discord",
         Path("scripts/send_toplists_discord.py"),
@@ -150,7 +150,7 @@ def test_weights_for_entry_returns_global_for_intl():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_GLOBAL
+    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_EU
 
     intl_entry = {"ticker": "SAP.DE", "pipeline": "INTL", "factors": {"momentum_long": 0.8}}
     us_entry   = {"ticker": "MSFT",   "pipeline": "US",   "factors": {"congress": 0.5}}
@@ -158,6 +158,6 @@ def test_weights_for_entry_returns_global_for_intl():
     intl_weights = mod._weights_for_entry(intl_entry)
     us_weights   = mod._weights_for_entry(us_entry)
 
-    assert intl_weights == WEIGHTS_GLOBAL, "INTL entry must use WEIGHTS_GLOBAL"
-    assert us_weights   == WEIGHTS_US,     "US entry must use WEIGHTS_US"
-    assert intl_weights.get("congress", 0) == 0.0, "WEIGHTS_GLOBAL.congress must be 0.0"
+    assert intl_weights == WEIGHTS_EU, "EU ticker (SAP.DE) must use WEIGHTS_EU"
+    assert us_weights   == WEIGHTS_US, "US entry must use WEIGHTS_US"
+    assert intl_weights.get("congress", 0) == 0.0, "WEIGHTS_EU.congress must be 0.0"

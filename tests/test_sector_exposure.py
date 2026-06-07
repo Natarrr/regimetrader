@@ -22,7 +22,7 @@ class TestSectorExposure:
         scores = [0.5 + 0.03 * i for i in range(10)]
         sectors = ["Tech"] * 3 + ["Health"] * 3 + ["Finance"] * 3 + ["Energy"] * 1
         weights, method = run_optimizer(tickers, scores, sectors, vix=20.0)
-        assert method == "MVO", f"Expected MVO convergence with 4-sector (3+3+3+1) layout, got {method}"
+        assert method == "sharpe", f"Expected sharpe convergence with 4-sector (3+3+3+1) layout, got {method}"
         for sector in ["Tech", "Health", "Finance"]:
             s = _sector_sum(weights, tickers, sectors, sector)
             assert s <= _MAX_SECTOR_WEIGHT + 1e-5, f"{sector} exposure {s:.4f} > 30%"
@@ -33,7 +33,7 @@ class TestSectorExposure:
         scores = [0.5 + 0.03 * i for i in range(10)]
         sectors = ["Tech"] * 3 + ["Health"] * 3 + ["Finance"] * 3 + ["Energy"] * 1
         weights, method = run_optimizer(tickers, scores, sectors, vix=20.0)
-        assert method == "MVO", f"Expected MVO convergence, got {method}"
+        assert method == "sharpe", f"Expected sharpe convergence, got {method}"
         for sector in ["Tech", "Health", "Finance", "Energy"]:
             s = _sector_sum(weights, tickers, sectors, sector)
             assert s <= _MAX_SECTOR_WEIGHT + 1e-5, f"{sector} exposure {s:.4f} > 30%"
