@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "scripts/send_toplists_discord.py"
+      - "src/delivery/send_discord.py"
       - "scripts/mock_webhook_server.py"
       - ".github/workflows/test_daily_toplists_absence.yml"
 
@@ -64,7 +64,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: "http://localhost:9999"
         run: |
-          python scripts/send_toplists_discord.py \
+          python src/delivery/send_discord.py \
             --input /tmp/nonexistent_top_lists.json \
             --log-dir /tmp
           echo "Exit code: $?"
