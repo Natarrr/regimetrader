@@ -294,7 +294,7 @@ class TestNewsSentimentDeadSignal:
 
     def test_all_neutral_headlines_returns_zero(self, monkeypatch):
         """Headlines with zero bull AND zero bear words → 0.0 (dead signal)."""
-        from scripts import run_pipeline
+        from src.ingestion import run_pipeline
 
         neutral_headlines = [
             {"content": {"title": "Company announces something today"}},
@@ -305,7 +305,7 @@ class TestNewsSentimentDeadSignal:
             news = neutral_headlines
 
         monkeypatch.setattr(
-            "scripts.run_pipeline.yf",
+            "src.ingestion.run_pipeline.yf",
             type("yf", (), {"Ticker": staticmethod(lambda t: _FakeTicker())})(),
             raising=False,
         )
@@ -321,7 +321,7 @@ class TestNewsSentimentDeadSignal:
     def test_no_headlines_returns_zero(self, monkeypatch):
         """Empty news list → 0.0."""
         import sys
-        from scripts import run_pipeline
+        from src.ingestion import run_pipeline
 
         class _FakeTicker:
             news = []
@@ -335,7 +335,7 @@ class TestNewsSentimentDeadSignal:
     def test_bullish_headline_returns_above_half(self, monkeypatch):
         """Headline with bull words → score > 0.5."""
         import sys
-        from scripts import run_pipeline
+        from src.ingestion import run_pipeline
 
         class _FakeTicker:
             news = [{"content": {"title": "Company beats earnings upgrade buy strong"}}]
@@ -358,7 +358,7 @@ class TestRunIdInStatus:
         # the run() function emits into the status dict.
         # Since we can't run the full pipeline, we test the key contract directly
         # by inspecting the source and verifying the expected key is present.
-        import scripts.run_pipeline as rp
+        import src.ingestion.run_pipeline as rp
 
         # The fix requires os.getenv("GITHUB_RUN_ID", "local") in the status dict.
         # We verify the status dict structure by reading what run() assigns to
@@ -402,9 +402,9 @@ class TestRunIdInStatus:
         # We inspect the source code to verify the key is written.
         # This is a structural contract test — run_id must be a top-level key.
         import ast
-        import scripts.run_pipeline
-        src = Path(scripts.run_pipeline.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        import src.ingestion.run_pipeline as run_pipeline_mod
+        file_src = Path(run_pipeline_mod.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(file_src)
 
         # Find all assignments to status dict literal — look for "run_id" key
         found_run_id = False
@@ -457,9 +457,9 @@ class TestForm4PurchaseCount:
         # a structural test that verifies the field is emitted.
         import ast
         from pathlib import Path
-        import scripts.run_pipeline
-        src = Path(scripts.run_pipeline.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        import src.ingestion.run_pipeline as run_pipeline_mod
+        file_src = Path(run_pipeline_mod.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(file_src)
 
         found = False
         for node in ast.walk(tree):

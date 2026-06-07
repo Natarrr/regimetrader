@@ -268,7 +268,7 @@ class TestFetchFMPInsiderAll:
     def test_returns_dict_keyed_by_ticker(self, monkeypatch):
         monkeypatch.setenv("FMP_API_KEY", "test-key")
         monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        from scripts.run_pipeline import fetch_fmp_insider_all
+        from src.ingestion.run_pipeline import fetch_fmp_insider_all
         from regime_trader.services.fmp_client import FMPClient
 
         with patch.object(FMPClient, "get_insider_purchases", return_value=(800_000.0, 5)):
@@ -279,13 +279,13 @@ class TestFetchFMPInsiderAll:
 
     def test_returns_empty_when_no_api_key(self, monkeypatch):
         monkeypatch.delenv("FMP_API_KEY", raising=False)
-        from scripts.run_pipeline import fetch_fmp_insider_all
+        from src.ingestion.run_pipeline import fetch_fmp_insider_all
         result = fetch_fmp_insider_all(["NVDA"])
         assert result == {}
 
     def test_returns_empty_on_empty_input(self, monkeypatch):
         monkeypatch.setenv("FMP_API_KEY", "k")
-        from scripts.run_pipeline import fetch_fmp_insider_all
+        from src.ingestion.run_pipeline import fetch_fmp_insider_all
         result = fetch_fmp_insider_all([])
         assert result == {}
 
