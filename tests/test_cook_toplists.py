@@ -16,7 +16,7 @@ def _load_cook():
     """Dynamically import cook_toplists from the scripts/ directory."""
     spec = importlib.util.spec_from_file_location(
         "cook_toplists",
-        Path(__file__).parents[1] / "scripts" / "cook_toplists.py",
+        Path(__file__).parents[1] / "src" / "delivery" / "cook_toplists.py",
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
