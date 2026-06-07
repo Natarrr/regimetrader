@@ -248,7 +248,7 @@ class FMPFetcher(BaseMarketFetcher):
         # ── 5. Analyst revision momentum ──────────────────────────────────────
         analyst_revision_score = None  # None = API failure; 0.0 = no revision signal
         try:
-            from scripts.run_pipeline import score_analyst_revision  # noqa: PLC0415
+            from src.ingestion.run_pipeline import score_analyst_revision  # noqa: PLC0415
             rev_pct, rev_n = client.get_analyst_estimate_revision(ticker)
             analyst_revision_score = score_analyst_revision(rev_pct, rev_n)
         except Exception as exc:
