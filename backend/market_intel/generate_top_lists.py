@@ -344,6 +344,26 @@ def _apply_vix_overlay(score: float, vix: Optional[float]) -> float:
     return score
 
 
+def _ticker_effective_weights(
+    row: Dict[str, Any],
+    base_weights: Dict[str, float],
+) -> Dict[str, float]:
+    """Compute per-ticker effective weights, redistributing weight of None factors.
+
+    None  = API failure  → weight removed from denominator, redistributed pro-rata
+    0.0   = zero signal  → kept in denominator (genuine zero, not missing data)
+    """
+    available = {
+        f: w for f, w in base_weights.items()
+        if row.get(FACTOR_FIELDS.get(f, f + "_score")) is not None
+    }
+    total = sum(available.values())
+    if total <= 1e-9:
+        n = len(base_weights)
+        return {f: 1.0 / n for f in base_weights}
+    return {f: w / total for f, w in available.items()}
+
+
 def _to_entry(
     row: Dict[str, Any],
     norm_factors: Dict[str, float],
@@ -353,8 +373,9 @@ def _to_entry(
     momentum_multiplier: float = 1.0,
 ) -> Dict[str, Any]:
     w = weights if weights is not None else WEIGHTS
+    effective_w = _ticker_effective_weights(row, w)
     raw_score = round(
-        sum(w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in w),
+        sum(effective_w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in effective_w),
         4,
     )
     # Apply VIX macro overlay first (absolute regime risk)

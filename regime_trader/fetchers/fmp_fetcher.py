@@ -182,13 +182,16 @@ class FMPFetcher(BaseMarketFetcher):
         volume_attention_score = score_volume_attention(volume_spike)
 
         # ── 2. News — sentiment + buzz ────────────────────────────────────────
-        news_sentiment_score = 0.0
-        news_buzz_score = 0.0
+        news_sentiment_score = None  # None = API failure; 0.0 = no signal (genuine)
+        news_buzz_score = None
         try:
             articles = client.get_news_raw_articles(ticker)
             if not articles and "." in ticker:
                 # FMP news/stock indexes by base symbol (e.g. ASML not ASML.AS)
                 articles = client.get_news_raw_articles(ticker.split(".")[0])
+            # API call succeeded — 0.0 if no articles = genuine zero signal
+            news_sentiment_score = 0.0
+            news_buzz_score = 0.0
             if articles:
                 s = score_news_sentiment(articles)
                 if s > 0.0:
@@ -198,14 +201,17 @@ class FMPFetcher(BaseMarketFetcher):
             logger.debug("FMPFetcher news %s: %s", ticker, exc)
 
         # ── 3. Insider — conviction + breadth ────────────────────────────────
-        insider_conviction_score = 0.0
-        insider_breadth_score = 0.0
+        insider_conviction_score = None  # None = API failure; 0.0 = no insider activity
+        insider_breadth_score = None
         try:
             quote = client.get_quote(ticker)
             mktcap = float(quote.get("marketCap", 0) or 0)
             total_usd, days_since = client.get_insider_purchases(
                 ticker, lookback_days=180)
             btx = client.get_insider_transactions(ticker, lookback_days=90)
+            # All API calls succeeded — set defaults before scoring
+            insider_conviction_score = 0.0
+            insider_breadth_score = 0.0
             if total_usd > 0 and mktcap > 0:
                 insider_conviction_score = score_insider_conviction(
                     key_purchases_usd=total_usd,
@@ -221,13 +227,14 @@ class FMPFetcher(BaseMarketFetcher):
             logger.debug("FMPFetcher insider %s: %s", ticker, exc)
 
         # ── 4. Analyst consensus — bulk index lookup ──────────────────────────
-        analyst_consensus_score = 0.0
+        analyst_consensus_score = None  # None = API failure; 0.0 = no analyst coverage
         try:
             _base_sym = ticker.split(".")[0].upper()
             bulk_rec = (
                 self._bulk_consensus_idx.get(ticker.upper())
                 or self._bulk_consensus_idx.get(_base_sym)
             )
+            analyst_consensus_score = 0.0  # API lookup succeeded
             if bulk_rec:
                 analyst_consensus_score, _ = ac_score_record(ticker, bulk_rec)
             else:
@@ -239,7 +246,7 @@ class FMPFetcher(BaseMarketFetcher):
             logger.debug("FMPFetcher analyst_consensus %s: %s", ticker, exc)
 
         # ── 5. Analyst revision momentum ──────────────────────────────────────
-        analyst_revision_score = 0.0
+        analyst_revision_score = None  # None = API failure; 0.0 = no revision signal
         try:
             from scripts.run_pipeline import score_analyst_revision  # noqa: PLC0415
             rev_pct, rev_n = client.get_analyst_estimate_revision(ticker)
@@ -248,19 +255,20 @@ class FMPFetcher(BaseMarketFetcher):
             logger.debug("FMPFetcher analyst_revision %s: %s", ticker, exc)
 
         # ── 6. Quality — Piotroski F-Score ────────────────────────────────────
-        quality_piotroski_score = 0.0
+        quality_piotroski_score = None  # None = API failure; 0.0 = no quality signal
         try:
             ratios = client.get_ratios_ttm(ticker)
             if not ratios and "." in ticker:
                 # ratios-ttm-bulk indexes by base symbol (e.g. ASML not ASML.AS)
                 ratios = client.get_ratios_ttm(ticker.split(".")[0])
+            quality_piotroski_score = 0.0  # API call succeeded
             if ratios:
                 quality_piotroski_score = score_quality_piotroski(ratios)
         except Exception as exc:
             logger.debug("FMPFetcher piotroski %s: %s", ticker, exc)
 
         # ── 7. Price target upside ────────────────────────────────────────────
-        price_target_upside_score = 0.0
+        price_target_upside_score = None  # None = API failure; 0.0 = no PT signal
         raw_target_price = None
         raw_current_price = None
         try:
@@ -273,6 +281,7 @@ class FMPFetcher(BaseMarketFetcher):
             raw_target_price = pt_data.get(
                 "targetConsensus") if pt_data else None
             raw_current_price = quote.get("price") if quote else None
+            price_target_upside_score = 0.0  # API call succeeded
             upside = client.get_upside_to_target(ticker)
             if upside is None and "." in ticker:
                 upside = client.get_upside_to_target(ticker.split(".")[0])
@@ -310,8 +319,8 @@ class FMPFetcher(BaseMarketFetcher):
             "market_cap":                mktcap_final,
             "target_price":              raw_target_price,
             "current_price":             raw_current_price,
-            "news_sentiment_source":     "fmp" if news_sentiment_score > 0 else "none",
-            "news_buzz_source":          "fmp" if news_buzz_score > 0 else "none",
-            "analyst_consensus_source":  "bulk" if analyst_consensus_score > 0 else "none",
-            "insider_source":            "fmp" if insider_conviction_score > 0 else "none",
+            "news_sentiment_source":     "fmp" if (news_sentiment_score or 0) > 0 else "none",
+            "news_buzz_source":          "fmp" if (news_buzz_score or 0) > 0 else "none",
+            "analyst_consensus_source":  "bulk" if (analyst_consensus_score or 0) > 0 else "none",
+            "insider_source":            "fmp" if (insider_conviction_score or 0) > 0 else "none",
         }

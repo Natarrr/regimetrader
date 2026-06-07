@@ -281,7 +281,7 @@ def test_cook_preserves_vix_from_us(cook_mod, tmp_path, us_payload, intl_payload
     cook_mod.cook(us_payload, intl_payload, registry, out)
     result = json.loads(out.read_text())
     assert result["vix"] == 17.3
-    assert result["vix_regime"] == "Normal"
+    assert result["vix_regime"] == "NORMAL"
     assert result["kill_switch"] is False
 
 
@@ -422,20 +422,27 @@ def test_missing_vix_exits_with_code_1(cook_mod, registry, tmp_path):
 
 
 def test_vix_dampening_applied_to_intl_entries(cook_mod, registry, tmp_path):
-    """INTL final_score must be multiplied by _apply_vix_multiplier(vix=40.0) = 0.20."""
+    """In CAPITULATION (VIX=35): high-quality survivor entries get 0.50x score dampening."""
     us_path = tmp_path / "top_lists_us.json"
     us_path.write_text(json.dumps({
-        "top_buys": [], "vix": 40.0, "vix_regime": "BEAR_CRASH", "kill_switch": False, "ticker_count": 0,
+        "top_buys": [], "vix": 35.0, "vix_regime": "CAPITULATION", "kill_switch": False, "ticker_count": 0,
     }), encoding="utf-8")
     intl_path = tmp_path / "top_lists_intl.json"
+    # Entry must pass capitulation filter: beta ≤ 1.2 AND (piotroski ≥ 0.70 OR de_ratio ≤ 0.30)
     intl_path.write_text(json.dumps([
-        {"ticker": "SAP.DE", "composite_score": 1.0, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+        {
+            "ticker": "SAP.DE", "composite_score": 1.0, "region_applied": "INTL",
+            "factor_snapshots": {"beta": 0.6, "quality_piotroski": 0.85, "debt_to_equity": 0.2},
+            "pipeline": "INTL",
+        },
     ]), encoding="utf-8")
     out = tmp_path / "out.json"
     cook_mod.cook(us_path, intl_path, registry, out)
     result = json.loads(out.read_text())
     eu_entry = result["top_buys_europe"][0]
-    assert abs(eu_entry["final_score"] - 0.20) < 1e-4, f"Expected 0.20, got {eu_entry['final_score']}"
+    # CAPITULATION multiplier = 0.50× (quality anchors survive, score dampened)
+    assert abs(eu_entry["final_score"] - 0.50) < 1e-4, f"Expected 0.50, got {eu_entry['final_score']}"
+    assert eu_entry.get("_capitulation_survivor") is True
 
 
 def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):
