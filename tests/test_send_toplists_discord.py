@@ -3,8 +3,9 @@ Tests for satellite integration in send_toplists_discord.py.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
-
+from pathlib import Path
 
 from scripts.send_toplists_discord import _load_satellite, build_payload
 
@@ -138,3 +139,25 @@ class TestBuildPayloadSatellite:
         # Both satellite fields come after all core fields
         assert cyclical_idx > 0
         assert cannibal_idx > cyclical_idx
+
+
+def test_weights_for_entry_returns_global_for_intl():
+    """INTL entries must use WEIGHTS_GLOBAL, US entries must use WEIGHTS_US."""
+    spec = importlib.util.spec_from_file_location(
+        "send_toplists_discord",
+        Path("scripts/send_toplists_discord.py"),
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_GLOBAL
+
+    intl_entry = {"ticker": "SAP.DE", "pipeline": "INTL", "factors": {"momentum_long": 0.8}}
+    us_entry   = {"ticker": "MSFT",   "pipeline": "US",   "factors": {"congress": 0.5}}
+
+    intl_weights = mod._weights_for_entry(intl_entry)
+    us_weights   = mod._weights_for_entry(us_entry)
+
+    assert intl_weights == WEIGHTS_GLOBAL, "INTL entry must use WEIGHTS_GLOBAL"
+    assert us_weights   == WEIGHTS_US,     "US entry must use WEIGHTS_US"
+    assert intl_weights.get("congress", 0) == 0.0, "WEIGHTS_GLOBAL.congress must be 0.0"

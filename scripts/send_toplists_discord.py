@@ -489,20 +489,24 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
     return catalyst_str
 
 
+def _weights_for_entry(entry: dict) -> dict:
+    """Return the correct weight dict based on entry pipeline metadata."""
+    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_GLOBAL  # noqa: PLC0415
+    return WEIGHTS_GLOBAL if entry.get("pipeline") == "INTL" else WEIGHTS_US
+
+
 def _factor_contribution_line(entry: Dict[str, Any]) -> str:
     """Return top-3 weighted factor contributions as a compact string.
 
     Contribution = weight × normalized_score.  Pulls weights from the
     'weights' key in the entry (written by generate_top_lists) or falls back
-    to regime_trader.weights.WEIGHTS.  Returns empty string when no factor
-    data is present.
+    to the correct regional weight set based on entry pipeline metadata.
+    Returns empty string when no factor data is present.
     """
-    from regime_trader.config.weights import WEIGHTS_US as _DEFAULT_WEIGHTS  # noqa: PLC0415
-
     factors = entry.get("factors")
     if not factors:
         return ""
-    weights = entry.get("weights") or _DEFAULT_WEIGHTS
+    weights = entry.get("weights") or _weights_for_entry(entry)
     contributions = {
         k: round(float(weights.get(k, 0.0)) * float(factors.get(k, 0.0)), 4)
         for k in factors
