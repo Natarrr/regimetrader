@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from .base import BaseMarketFetcher, MarketEnum, TickerEntry
+from src.core.fetchers_base import BaseMarketFetcher, MarketEnum, TickerEntry
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .base import BaseMarketFetcher, MarketEnum, TickerEntry
+from src.core.fetchers_base import BaseMarketFetcher, MarketEnum, TickerEntry
 
 logger = logging.getLogger(__name__)
 
