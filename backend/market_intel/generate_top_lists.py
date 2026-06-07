@@ -700,9 +700,8 @@ def generate(
         )
         momentum_multiplier = 1.0  # reset — VIX overlay handles dampening
 
-    # EU/Asia rows carry a pre-scored final_score and must NOT enter cross-sectional
-    # normalization — they have structural zeros in edgar/congress/news which would
-    # corrupt the US peer-group min/max and distort all US scores.
+    # INTL scoring moved to StrategyEngine (run_pipeline_profile.py). This module
+    # is US-only; the filter below is a safety guard against registry contamination.
     us_results = [r for r in results if r.get("market", "USA") == "USA"]
 
     # Schema gate: attach validation_metadata + circuit-breaker check.
