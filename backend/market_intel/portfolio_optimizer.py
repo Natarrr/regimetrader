@@ -103,6 +103,133 @@ def _mvo(
     return np.array(result.x)
 
 
+def _calibrate_scores_to_returns(
+    scores: np.ndarray,
+    lower_return: float = 0.04,
+    upper_return: float = 0.18,
+) -> np.ndarray:
+    """Convert ordinal factor scores [0, 1] to cardinal expected annual return estimates.
+
+    Winsorize → Z-score → linear map to [+4%, +18%] annualized return bounds.
+    Direct MVO input of raw scores implies linear return proportionality which
+    distorts the efficient frontier. [Grinold & Kahn, IR = IC × √BR]
+    """
+    lo = float(np.percentile(scores, 5))
+    hi = float(np.percentile(scores, 95))
+    clipped = np.clip(scores, lo, hi)
+    mu = clipped.mean()
+    sigma = clipped.std() + 1e-8
+    z = (clipped - mu) / sigma
+    mid   = (upper_return + lower_return) / 2.0
+    scale = (upper_return - lower_return) / 6.0   # ±3σ spans full range
+    return np.clip(mid + z * scale, lower_return, upper_return)
+
+
+def build_async_covariance(price_series: dict[str, list[float]]) -> Optional[np.ndarray]:
+    """Build covariance matrix using 2-day rolling log-return window for global assets.
+
+    Smooths non-overlapping timezone trading deltas (Tokyo/London/New York).
+    log_ret_2d[t] = log(price[t] / price[t-2] + ε).
+    Returns None if fewer than 5 observations.
+    """
+    if not price_series:
+        return None
+    tickers = list(price_series.keys())
+    min_len = min(len(v) for v in price_series.values())
+    if min_len < 5:
+        return None
+
+    returns_matrix = []
+    for t in tickers:
+        prices = np.array(price_series[t][-min_len:], dtype=float)
+        log_ret_2d = np.log(prices[2:] / prices[:-2] + 1e-10)
+        returns_matrix.append(log_ret_2d)
+
+    R = np.array(returns_matrix)   # (n_tickers, n_periods − 2)
+    return np.cov(R)
+
+
+_LARGE_CAP_THRESHOLD = 10_000_000_000   # $10B
+
+
+def build_large_cap_anchors(entries: list[dict]) -> list[dict]:
+    """Equal-weight Structural Core Anchor allocation for large-cap entries (>$10B).
+
+    These bypass MVO to preserve mid/small-cap efficient frontier integrity.
+    """
+    large = [e for e in entries if (e.get("market_cap") or 0) > _LARGE_CAP_THRESHOLD]
+    if not large:
+        return []
+    alloc = round(1.0 / len(large), 4)
+    return [
+        {
+            "ticker":       e["ticker"],
+            "allocation":   alloc,
+            "final_score":  e.get("final_score", 0.0),
+            "price_target": e.get("price_target"),
+            "exit_anchors": e.get("exit_anchors", {}),
+            "tier":         "LARGE_CAP_ANCHOR",
+        }
+        for e in large
+    ]
+
+
+def adv_capacity_ceiling(
+    current_ceiling: float,
+    adv_20d_usd: float,
+    portfolio_value_usd: float,
+    max_adv_pct: float = 0.03,
+) -> float:
+    """Return min(current_ceiling, max_adv_pct × ADV_20d / portfolio_value).
+
+    Prevents illiquid small-cap allocations exceeding 3% of trailing 20-day ADV
+    (standard hedge-fund liquidity capacity constraint).
+    """
+    if portfolio_value_usd <= 0 or adv_20d_usd <= 0:
+        return current_ceiling
+    adv_ceiling = (max_adv_pct * adv_20d_usd) / portfolio_value_usd
+    return min(current_ceiling, adv_ceiling)
+
+
+def _min_variance(
+    cov: np.ndarray,
+    sector_ids: list[int],
+    n_sectors: int,
+    prev_weights: Optional[np.ndarray],
+    position_floor: float,
+    position_ceiling: float,
+) -> np.ndarray:
+    """Min-variance optimizer (SLSQP). Suitable for small-cap illiquid pools."""
+    n = cov.shape[0]
+
+    def portfolio_variance(w: np.ndarray) -> float:
+        return float(w @ cov @ w)
+
+    constraints: list[dict] = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
+    for s in range(n_sectors):
+        mask = np.array([1.0 if sector_ids[i] == s else 0.0 for i in range(n)])
+        if mask.sum() > 0:
+            constraints.append(
+                {"type": "ineq", "fun": lambda w, m=mask: _MAX_SECTOR_WEIGHT - float((w * m).sum())}
+            )
+    if prev_weights is not None and len(prev_weights) == n:
+        constraints.append(
+            {"type": "ineq", "fun": lambda w: _MAX_TURNOVER - float(np.abs(w - prev_weights).sum())}
+        )
+
+    bounds = [(position_floor, position_ceiling)] * n
+    w0 = np.ones(n) / n
+
+    result = minimize(
+        portfolio_variance, w0, method="SLSQP",
+        bounds=bounds, constraints=constraints,
+        options={"maxiter": 1000, "ftol": 1e-9},
+    )
+    if not result.success:
+        raise RuntimeError(f"Min variance did not converge: {result.message}")
+    return np.array(result.x)
+
+
 def _load_covariance(tickers: list[str]) -> Optional[np.ndarray]:
     if not _COVARIANCE_PATH.exists():
         log.debug("No covariance matrix at %s — will use identity fallback", _COVARIANCE_PATH)
@@ -158,19 +285,31 @@ def run_optimizer(
     sectors: list[str],
     vix: float,
     prev_weights: Optional[dict[str, float]] = None,
+    mode: str = "sharpe",
+    position_floor: float = 0.0,
+    position_ceiling: float = _MAX_POSITION,
+    price_series: Optional[dict[str, list[float]]] = None,
+    adv_20d_map: Optional[dict[str, float]] = None,
+    portfolio_value_usd: Optional[float] = None,
 ) -> tuple[dict[str, float], str]:
     """Compute portfolio weights for the given tickers.
 
     Args:
-        tickers:      Ticker list (top-20 by composite score).
-        scores:       Composite scores, same order as tickers.
-        sectors:      Sector strings, same order as tickers.
-        vix:          Current VIX level for vol-targeting.
-        prev_weights: Previous weight dict (ticker → weight) for turnover control.
+        tickers:            Ticker list (top-20 by composite score).
+        scores:             Composite scores, same order as tickers.
+        sectors:            Sector strings, same order as tickers.
+        vix:                Current VIX level for vol-targeting.
+        prev_weights:       Previous weight dict (ticker → weight) for turnover control.
+        mode:               "sharpe" (Sharpe-Max MVO) or "min_variance" (Min-Var MVO).
+        position_floor:     Minimum weight per position (default 0.0).
+        position_ceiling:   Maximum weight per position (default _MAX_POSITION).
+        price_series:       {ticker: [price, ...]} for async 2-day covariance estimation.
+        adv_20d_map:        {ticker: adv_usd} for ADV liquidity gate (small-cap only).
+        portfolio_value_usd: Portfolio value for ADV gate computation.
 
     Returns:
         (weights_dict, method_used)
-        method_used in {"MVO", "risk_parity", "score_proportional"}
+        method_used in {"sharpe", "min_variance", "risk_parity", "score_proportional"}
     """
     n = len(tickers)
     scores_arr = np.array(scores, dtype=float)
@@ -179,24 +318,36 @@ def run_optimizer(
     sector_map = {s: i for i, s in enumerate(unique_sectors)}
     sector_ids = [sector_map[s] for s in sectors]
 
-    cov = _load_covariance(tickers)
+    # Use async 2-day cov if price_series provided, else load from file
+    cov: Optional[np.ndarray] = None
+    if price_series:
+        cov = build_async_covariance({t: price_series[t] for t in tickers if t in price_series})
+        if cov is not None and cov.shape != (n, n):
+            cov = None
+    if cov is None:
+        cov = _load_covariance(tickers)
     if cov is None:
         cov = np.eye(n) * 0.04  # 20% annual vol fallback
 
-    ic = _ic_estimate()
-    z = (scores_arr - scores_arr.mean()) / (scores_arr.std() + 1e-8)
-    expected_returns = ic * z
+    # Calibrate ordinal factor scores to cardinal expected return estimates
+    expected_returns = _calibrate_scores_to_returns(scores_arr)
 
     prev_arr = (
         np.array([prev_weights.get(t, 0.0) for t in tickers])
         if prev_weights else None
     )
 
-    method = "MVO"
+    method = mode if mode in {"sharpe", "min_variance"} else "sharpe"
     try:
-        weights = _mvo(expected_returns, cov, sector_ids, len(unique_sectors), prev_arr)
+        if method == "min_variance":
+            weights = _min_variance(
+                cov, sector_ids, len(unique_sectors), prev_arr,
+                position_floor=position_floor, position_ceiling=position_ceiling,
+            )
+        else:
+            weights = _mvo(expected_returns, cov, sector_ids, len(unique_sectors), prev_arr)
     except Exception as exc:
-        log.warning("MVO failed (%s), trying risk parity", exc)
+        log.warning("%s failed (%s), trying risk parity", method, exc)
         method = "risk_parity"
         try:
             weights = _risk_parity(cov)
@@ -205,13 +356,23 @@ def run_optimizer(
             method = "score_proportional"
             weights = _score_proportional(scores_arr)
 
-    # Sector cap enforcement — applied to all methods (MVO enforces via constraint,
-    # but risk_parity and score_proportional have no built-in sector limit).
+    # Sector cap enforcement — applied to all methods
     weights = _clip_sector_weights(weights, sector_ids, len(unique_sectors))
 
+    # ADV liquidity gate — applied after sector cap for small-cap pools
+    if adv_20d_map and portfolio_value_usd:
+        for i, t in enumerate(tickers):
+            adv = adv_20d_map.get(t)
+            if adv:
+                cap = adv_capacity_ceiling(position_ceiling, adv, portfolio_value_usd)
+                weights[i] = min(weights[i], cap)
+        total = weights.sum()
+        if total > 1e-8:
+            weights = weights / total
+
     # VIX vol-targeting — scale down only, never up
-    regime = _vix_regime(vix)
-    target_vol = TARGET_VOL[regime]
+    regime_key = _vix_regime(vix)
+    target_vol = TARGET_VOL[regime_key]
     port_vol = float(np.sqrt(weights @ cov @ weights + 1e-10))
     if port_vol > 1e-8:
         scale = min(1.0, target_vol / port_vol)
