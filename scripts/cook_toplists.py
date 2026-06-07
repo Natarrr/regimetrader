@@ -10,10 +10,15 @@ Schema transformation for INTL StrategyEngine output:
 """
 import argparse
 import json
-import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from regime_trader.risk.regime import (
+    apply_capitulation_filter,
+    get_regime,
+    score_multiplier,
+)
 
 _BADGE_THRESHOLDS = [(0.80, "HIGH BUY"), (0.60, "TACTICAL BUY"), (0.00, "WATCHLIST")]
 
@@ -23,23 +28,6 @@ def _badge(score: float) -> str:
         if score >= threshold:
             return label
     return "WATCHLIST"
-
-
-def _apply_vix_multiplier(vix: float) -> float:
-    """Return the VIX-based score dampening multiplier.
-
-    Guard required: float('nan') >= 40 evaluates False in Python —
-    NaN would silently bypass dampening without the isinstance/isnan check.
-    """
-    if not isinstance(vix, (int, float)) or math.isnan(vix) or vix < 0:
-        raise ValueError(f"[COOK] Invalid VIX value: {vix!r}")
-    if vix >= 40:
-        return 0.20
-    if vix >= 30:
-        return 0.50
-    if vix >= 25:
-        return 0.80
-    return 1.00
 
 
 def _build_registry_map(registry_path: Path) -> dict:
@@ -63,7 +51,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     ticker = raw.get("ticker", "")
     market = ticker_market_map.get(ticker, "EUROPE")
     composite_score = float(raw.get("composite_score", 0.0))
-    composite_score = round(composite_score * _apply_vix_multiplier(vix), 4)
+    composite_score = round(composite_score * score_multiplier(get_regime(vix)), 4)
     factor_snapshots = raw.get("factor_snapshots", {})
     # Strip any congress value from snapshots then pin to 0.0 (cannot be overridden)
     factors = {k: v for k, v in factor_snapshots.items() if k != "congress"}
@@ -106,6 +94,13 @@ def cook(us_input: Path, intl_input: Path, registry: Path, output: Path) -> None
         elif normalized["market"] == "ASIA":
             top_buys_asia.append(normalized)
         # Tickers absent from registry are silently dropped — registry is authoritative
+
+    # ── Capitulation regime gate ──────────────────────────────────────────────
+    regime = get_regime(vix)
+    top_buys_usa    = apply_capitulation_filter(top_buys_usa,    vix)
+    top_buys_europe = apply_capitulation_filter(top_buys_europe, vix)
+    top_buys_asia   = apply_capitulation_filter(top_buys_asia,   vix)
+    vix_regime      = regime.value
 
     # ── Write combined output ─────────────────────────────────────────────────
     combined = {
