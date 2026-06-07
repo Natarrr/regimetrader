@@ -1,6 +1,6 @@
 from src.core.fetchers_base import TickerEntry
 from regime_trader.fetchers.orchestrator import Orchestrator
-from scripts.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
+from src.ingestion.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
 from regime_trader.fetchers.fmp_fetcher import FMPFetcher
 from unittest.mock import patch, MagicMock
 from pathlib import Path
@@ -182,7 +182,7 @@ def test_build_ticker_index_supports_base_symbol_lookup():
         {"symbol": "ASML", "score": 1.0},
         {"symbol": "SAP.DE", "score": 0.8},
     ]
-    with patch("scripts.fmp_bulk_prefetch.load_bulk", return_value=rows):
+    with patch("src.ingestion.fmp_bulk_prefetch.load_bulk", return_value=rows):
         index = build_ticker_index(Path("/tmp"), endpoint="dummy")
 
     assert index["ASML"]["score"] == 1.0
@@ -288,8 +288,8 @@ def _build_index_from_records(records: list[dict], key_field: str = "symbol") ->
     """Helper: exercise build_ticker_index without needing a real cache directory."""
     from pathlib import Path
     from unittest.mock import patch
-    from scripts.fmp_bulk_prefetch import build_ticker_index
-    with patch("scripts.fmp_bulk_prefetch.load_bulk", return_value=records):
+    from src.ingestion.fmp_bulk_prefetch import build_ticker_index
+    with patch("src.ingestion.fmp_bulk_prefetch.load_bulk", return_value=records):
         return build_ticker_index(Path(".cache"), "test-endpoint", key_field)
 
 
