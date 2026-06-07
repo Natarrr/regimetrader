@@ -99,7 +99,7 @@ jobs:
           BULK_CACHE_TTL_HOURS: "7"
         run: |
           set -euo pipefail
-          python scripts/fmp_bulk_prefetch.py \
+          python src/ingestion/fmp_bulk_prefetch.py \
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
@@ -127,7 +127,7 @@ jobs:
           for ATTEMPT in 1 2 3; do
             echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
             START=$(date +%s)
-            if timeout 20m python scripts/run_pipeline.py \
+            if timeout 20m python src/ingestion/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
               --max-workers  8 \
               --log-dir      "$LOG_DIR" \
@@ -187,7 +187,7 @@ jobs:
 
       # ── 7b. Institutional audit ──────────────────────────────────────────────
       - name: Audit payload (RT-QA-2026-REV5)
-        run: python scripts/audit_payload.py --input logs/top_lists.json
+        run: python src/delivery/audit_payload.py --input logs/top_lists.json
 
       # ── 7c. Validate top_lists.json ──────────────────────────────────────────
       - name: Validate top_lists.json

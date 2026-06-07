@@ -103,7 +103,7 @@ jobs:
           BULK_CACHE_TTL_HOURS: "7"
         run: |
           set -euo pipefail
-          python scripts/fmp_bulk_prefetch.py \
+          python src/ingestion/fmp_bulk_prefetch.py \
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
@@ -131,7 +131,7 @@ jobs:
           for ATTEMPT in 1 2 3; do
             echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
             START=$(date +%s)
-            if timeout 20m python scripts/run_pipeline.py \
+            if timeout 20m python src/ingestion/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
               --max-workers  8 \
               --log-dir      "$LOG_DIR" \
@@ -186,7 +186,7 @@ jobs:
 
       # ── 9. Audit + validate ──────────────────────────────────────────────────
       - name: Audit payload (RT-QA-2026-REV5)
-        run: python scripts/audit_payload.py --input logs/top_lists_us.json
+        run: python src/delivery/audit_payload.py --input logs/top_lists_us.json
 
       - name: Validate top_lists_us.json
         run: |
@@ -374,7 +374,7 @@ jobs:
           BULK_CACHE_TTL_HOURS: "7"
         run: |
           set -euo pipefail
-          python scripts/fmp_bulk_prefetch.py \
+          python src/ingestion/fmp_bulk_prefetch.py \
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
@@ -451,7 +451,7 @@ jobs:
       # assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6  (enforced in StrategyEngine)
       - name: Score INTL universe
         run: |
-          python scripts/run_pipeline_profile.py \
+          python src/engine/profile_runner.py \
             --config   backend/market_intel/profiles/intl_strategy.json \
             --raw-data logs/raw_intl_fetcher_output.json \
             --out-dir  logs/
@@ -599,7 +599,7 @@ jobs:
       #    region->market, congress:0.0). stdlib-only.
       - name: Cook (merge US + INTL)
         run: |
-          python scripts/cook_toplists.py \
+          python src/delivery/cook_toplists.py \
             --us-input    logs/top_lists_us.json \
             --intl-input  logs/top_lists_intl.json \
             --registry    config/ticker_registry.json \
@@ -612,7 +612,7 @@ jobs:
       #   C. Sort order (descending)     E2. Dynamic intl ceiling
       #                                  F. VIX coherence  G. Ticker regex
       - name: Audit combined payload (RT-QA-2026-REV5)
-        run: python scripts/audit_payload.py --input logs/top_lists.json
+        run: python src/delivery/audit_payload.py --input logs/top_lists.json
 
       # ── 10. Freshness gate ───────────────────────────────────────────────────
       # Artifacts from the same workflow run are always fresh (<1h old).
@@ -673,7 +673,7 @@ jobs:
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          python scripts/send_toplists_discord.py \
+          python src/delivery/send_discord.py \
             --input   logs/top_lists.json \
             --log-dir logs \
             $DRY_RUN_FLAG

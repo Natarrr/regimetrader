@@ -59,7 +59,7 @@ jobs:
       - name: Lint (ruff)
         run: |
           pip install ruff>=0.4.0
-          ruff check scripts/ regime_trader/ backend/ monitoring/ \
+          ruff check scripts/ src/ regime_trader/ backend/ monitoring/ \
             --select E,F,W --ignore E501
 
       # Inject secrets into environment for presence check only.

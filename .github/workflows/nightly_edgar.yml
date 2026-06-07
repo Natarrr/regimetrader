@@ -84,7 +84,7 @@ jobs:
             TTL="0"
             echo "Bulk cache bypass requested — forcing fresh download"
           fi
-          python scripts/fmp_bulk_prefetch.py \
+          python src/ingestion/fmp_bulk_prefetch.py \
             --cache-dir  "$BULK_CACHE_DIR" \
             --ttl-hours  "$TTL" \
             --endpoints  upgrades-downgrades-consensus-bulk \
@@ -111,7 +111,7 @@ jobs:
             echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
             START=$(date +%s)
 
-            if python scripts/run_pipeline.py \
+            if python src/ingestion/run_pipeline.py \
               --tickers-file "$TICKERS_FILE" \
               --max-workers  8 \
               --log-dir      "$LOG_DIR" \
