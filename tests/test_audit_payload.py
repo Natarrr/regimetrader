@@ -1,12 +1,7 @@
 """TDD tests for scripts/audit_payload.py — pre-flight Discord pipeline audit."""
-import sys
-import os
 import pytest
 
-# Allow importing from scripts/ directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
-from audit_payload import (
+from src.delivery.audit_payload import (
     audit,
     ScoreDivergenceError,
     BadgeMismatchError,
@@ -263,7 +258,7 @@ def test_intl_score_above_1_still_raises():
 def test_international_score_overflow_error_not_exported():
     """InternationalScoreOverflowError must no longer exist in audit_payload."""
     import importlib
-    import scripts.audit_payload as ap_module
+    import src.delivery.audit_payload as ap_module
     assert not hasattr(ap_module, "InternationalScoreOverflowError"), (
         "InternationalScoreOverflowError was removed in v2.2-global"
     )
