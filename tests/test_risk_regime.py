@@ -1,7 +1,7 @@
 """tests/test_risk_regime.py"""
 from __future__ import annotations
 import pytest
-from regime_trader.risk.regime import (
+from src.risk.regime import (
     RiskRegime,
     get_regime,
     is_panic,
