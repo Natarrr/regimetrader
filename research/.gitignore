@@ -1,7 +1,0 @@
-__pycache__/
-*.pyc
-data/
-notebooks/.ipynb_checkpoints/
-*.npz
-optimal_weights.json
-ic_report.json
