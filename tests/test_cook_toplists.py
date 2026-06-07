@@ -213,7 +213,8 @@ def test_normalize_sets_final_score(cook_mod, registry):
         "region_applied": "INTL",
         "factor_snapshots": {"news_sentiment": 0.85, "momentum_long": 0.80},
     }
-    result = cook_mod._normalize_intl_entry(raw, ticker_map)
+    result = cook_mod._normalize_intl_entry(raw, ticker_map, vix=15.0)
+    # vix=15 → multiplier 1.00, so final_score == composite_score
     assert result["final_score"] == 0.81
 
 
@@ -221,8 +222,8 @@ def test_normalize_maps_market_from_registry(cook_mod, registry):
     ticker_map = cook_mod._build_registry_map(registry)
     eu_raw = {"ticker": "SAP.DE", "composite_score": 0.70, "region_applied": "INTL", "factor_snapshots": {}}
     asia_raw = {"ticker": "7203.T", "composite_score": 0.65, "region_applied": "INTL", "factor_snapshots": {}}
-    assert cook_mod._normalize_intl_entry(eu_raw, ticker_map)["market"] == "EUROPE"
-    assert cook_mod._normalize_intl_entry(asia_raw, ticker_map)["market"] == "ASIA"
+    assert cook_mod._normalize_intl_entry(eu_raw, ticker_map, vix=15.0)["market"] == "EUROPE"
+    assert cook_mod._normalize_intl_entry(asia_raw, ticker_map, vix=15.0)["market"] == "ASIA"
 
 
 def test_normalize_adds_congress_zero(cook_mod, registry):
@@ -233,7 +234,7 @@ def test_normalize_adds_congress_zero(cook_mod, registry):
         "region_applied": "INTL",
         "factor_snapshots": {"news_sentiment": 0.7},
     }
-    result = cook_mod._normalize_intl_entry(raw, ticker_map)
+    result = cook_mod._normalize_intl_entry(raw, ticker_map, vix=15.0)
     assert result["factors"].get("congress") == 0.0
 
 
@@ -246,18 +247,19 @@ def test_normalize_congress_cannot_be_overridden(cook_mod, registry):
         "region_applied": "INTL",
         "factor_snapshots": {"congress": 0.99, "news_sentiment": 0.7},
     }
-    result = cook_mod._normalize_intl_entry(raw, ticker_map)
+    result = cook_mod._normalize_intl_entry(raw, ticker_map, vix=15.0)
     assert result["factors"]["congress"] == 0.0
 
 
 def test_normalize_computes_correct_badge(cook_mod, registry):
     ticker_map = cook_mod._build_registry_map(registry)
+    # Use vix=15 (multiplier=1.00) so raw scores map directly to badge thresholds
     high = {"ticker": "SAP.DE", "composite_score": 0.82, "region_applied": "INTL", "factor_snapshots": {}}
     tact = {"ticker": "SAP.DE", "composite_score": 0.65, "region_applied": "INTL", "factor_snapshots": {}}
     watch = {"ticker": "SAP.DE", "composite_score": 0.40, "region_applied": "INTL", "factor_snapshots": {}}
-    assert cook_mod._normalize_intl_entry(high, ticker_map)["badge"] == "HIGH BUY"
-    assert cook_mod._normalize_intl_entry(tact, ticker_map)["badge"] == "TACTICAL BUY"
-    assert cook_mod._normalize_intl_entry(watch, ticker_map)["badge"] == "WATCHLIST"
+    assert cook_mod._normalize_intl_entry(high, ticker_map, vix=15.0)["badge"] == "HIGH BUY"
+    assert cook_mod._normalize_intl_entry(tact, ticker_map, vix=15.0)["badge"] == "TACTICAL BUY"
+    assert cook_mod._normalize_intl_entry(watch, ticker_map, vix=15.0)["badge"] == "WATCHLIST"
 
 
 # ---------------------------------------------------------------------------
@@ -368,3 +370,85 @@ def test_cook_generated_at_is_present(cook_mod, tmp_path, us_payload, intl_paylo
     result = json.loads(out.read_text())
     assert "generated_at" in result
     assert result["generated_at"]  # non-empty string
+
+
+# ---------------------------------------------------------------------------
+# Bug-fix regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_ticker_count_uses_actual_regional_entries(cook_mod, registry, tmp_path):
+    """ticker_count must equal us_count + len(europe) + len(asia).
+
+    Verifies the formula by asserting on the regional sub-list lengths independently,
+    confirming the sum matches what cook() reports.
+    """
+    us_payload_path = tmp_path / "top_lists_us.json"
+    us_payload_path.write_text(json.dumps({
+        "top_buys": [{"ticker": "AAPL", "final_score": 0.85, "market": "USA", "factors": {}}],
+        "vix": 18.0, "vix_regime": "Normal", "kill_switch": False, "ticker_count": 10,
+    }), encoding="utf-8")
+    intl_path = tmp_path / "top_lists_intl.json"
+    # 2 EU + 2 Asia from registry; ticker_count = 10 + 2 + 2 = 14
+    intl_path.write_text(json.dumps([
+        {"ticker": "SAP.DE",  "composite_score": 0.75, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+        {"ticker": "ASML.AS", "composite_score": 0.70, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+        {"ticker": "7203.T",  "composite_score": 0.65, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+        {"ticker": "9984.T",  "composite_score": 0.60, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+    ]), encoding="utf-8")
+    out = tmp_path / "out.json"
+    cook_mod.cook(us_payload_path, intl_path, registry, out)
+    result = json.loads(out.read_text())
+    n_eu = len(result["top_buys_europe"])
+    n_asia = len(result["top_buys_asia"])
+    assert n_eu == 2, f"Expected 2 EU entries, got {n_eu}"
+    assert n_asia == 2, f"Expected 2 Asia entries, got {n_asia}"
+    expected = 10 + n_eu + n_asia
+    assert result["ticker_count"] == expected, f"Expected {expected}, got {result['ticker_count']}"
+
+
+def test_missing_vix_exits_with_code_1(cook_mod, registry, tmp_path):
+    """cook() must exit(1) when vix is missing, not just print a warning."""
+    us_path = tmp_path / "top_lists_us.json"
+    us_path.write_text(json.dumps({
+        "top_buys": [], "vix_regime": "Normal", "kill_switch": False,
+    }), encoding="utf-8")
+    intl_path = tmp_path / "top_lists_intl.json"
+    intl_path.write_text(json.dumps([]), encoding="utf-8")
+    out = tmp_path / "out.json"
+    with pytest.raises(SystemExit) as exc_info:
+        cook_mod.cook(us_path, intl_path, registry, out)
+    assert exc_info.value.code != 0
+
+
+def test_vix_dampening_applied_to_intl_entries(cook_mod, registry, tmp_path):
+    """INTL final_score must be multiplied by _apply_vix_multiplier(vix=40.0) = 0.20."""
+    us_path = tmp_path / "top_lists_us.json"
+    us_path.write_text(json.dumps({
+        "top_buys": [], "vix": 40.0, "vix_regime": "BEAR_CRASH", "kill_switch": False, "ticker_count": 0,
+    }), encoding="utf-8")
+    intl_path = tmp_path / "top_lists_intl.json"
+    intl_path.write_text(json.dumps([
+        {"ticker": "SAP.DE", "composite_score": 1.0, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+    ]), encoding="utf-8")
+    out = tmp_path / "out.json"
+    cook_mod.cook(us_path, intl_path, registry, out)
+    result = json.loads(out.read_text())
+    eu_entry = result["top_buys_europe"][0]
+    assert abs(eu_entry["final_score"] - 0.20) < 1e-4, f"Expected 0.20, got {eu_entry['final_score']}"
+
+
+def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):
+    """Normalized INTL entries must carry 'pipeline': 'INTL'."""
+    us_path = tmp_path / "top_lists_us.json"
+    us_path.write_text(json.dumps({
+        "top_buys": [], "vix": 15.0, "vix_regime": "Normal", "kill_switch": False, "ticker_count": 0,
+    }), encoding="utf-8")
+    intl_path = tmp_path / "top_lists_intl.json"
+    intl_path.write_text(json.dumps([
+        {"ticker": "SAP.DE", "composite_score": 0.75, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+    ]), encoding="utf-8")
+    out = tmp_path / "out.json"
+    cook_mod.cook(us_path, intl_path, registry, out)
+    result = json.loads(out.read_text())
+    assert result["top_buys_europe"][0].get("pipeline") == "INTL"

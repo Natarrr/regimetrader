@@ -10,6 +10,7 @@ Schema transformation for INTL StrategyEngine output:
 """
 import argparse
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,23 @@ def _badge(score: float) -> str:
         if score >= threshold:
             return label
     return "WATCHLIST"
+
+
+def _apply_vix_multiplier(vix: float) -> float:
+    """Return the VIX-based score dampening multiplier.
+
+    Guard required: float('nan') >= 40 evaluates False in Python —
+    NaN would silently bypass dampening without the isinstance/isnan check.
+    """
+    if not isinstance(vix, (int, float)) or math.isnan(vix) or vix < 0:
+        raise ValueError(f"[COOK] Invalid VIX value: {vix!r}")
+    if vix >= 40:
+        return 0.20
+    if vix >= 30:
+        return 0.50
+    if vix >= 25:
+        return 0.80
+    return 1.00
 
 
 def _build_registry_map(registry_path: Path) -> dict:
@@ -37,16 +55,15 @@ def _build_registry_map(registry_path: Path) -> dict:
     return mapping
 
 
-def _normalize_intl_entry(raw: dict, ticker_market_map: dict) -> dict:
+def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dict:
     """Convert StrategyEngine entry to audit_payload-compatible format.
 
-    StrategyEngine uses composite_score / factor_snapshots / region_applied: "INTL".
-    audit_payload.py expects final_score / factors / market: "EUROPE"|"ASIA".
-    congress is forced to 0.0 regardless of factor_snapshots content (check E).
+    Applies VIX dampening to final_score. congress is forced to 0.0 (audit check E).
     """
     ticker = raw.get("ticker", "")
     market = ticker_market_map.get(ticker, "EUROPE")
     composite_score = float(raw.get("composite_score", 0.0))
+    composite_score = round(composite_score * _apply_vix_multiplier(vix), 4)
     factor_snapshots = raw.get("factor_snapshots", {})
     # Strip any congress value from snapshots then pin to 0.0 (cannot be overridden)
     factors = {k: v for k, v in factor_snapshots.items() if k != "congress"}
@@ -57,6 +74,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict) -> dict:
         "badge": _badge(composite_score),
         "market": market,
         "factors": factors,
+        "pipeline": raw.get("pipeline", "INTL"),
     }
 
 
@@ -71,9 +89,8 @@ def cook(us_input: Path, intl_input: Path, registry: Path, output: Path) -> None
     us_ticker_count = us_data.get("ticker_count", len(top_buys_usa))
 
     if vix is None:
-        print(
-            "[COOK] WARNING: US payload missing 'vix' field — audit check F will fail",
-            file=sys.stderr,
+        sys.exit(
+            "[COOK] ERROR: US payload missing 'vix' — cannot apply macro overlay. Aborting."
         )
 
     # ── INTL payload ──────────────────────────────────────────────────────────
@@ -83,7 +100,7 @@ def cook(us_input: Path, intl_input: Path, registry: Path, output: Path) -> None
     top_buys_europe: list = []
     top_buys_asia: list = []
     for raw_entry in intl_raw:
-        normalized = _normalize_intl_entry(raw_entry, ticker_market)
+        normalized = _normalize_intl_entry(raw_entry, ticker_market, vix)
         if normalized["market"] == "EUROPE":
             top_buys_europe.append(normalized)
         elif normalized["market"] == "ASIA":
@@ -98,7 +115,7 @@ def cook(us_input: Path, intl_input: Path, registry: Path, output: Path) -> None
         "vix": vix,
         "vix_regime": vix_regime,
         "kill_switch": kill_switch,
-        "ticker_count": us_ticker_count + len(intl_raw),
+        "ticker_count": us_ticker_count + len(top_buys_europe) + len(top_buys_asia),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -117,8 +134,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--us-input",
-        default="logs/top_lists.json",
-        help="Path to US top_lists.json (9-factor, from pipeline_us)",
+        default="logs/top_lists_us.json",
+        help="Path to US top_lists.json (9-factor, from run_pipeline.py)",
     )
     parser.add_argument(
         "--intl-input",
