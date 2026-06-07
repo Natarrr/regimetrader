@@ -31,12 +31,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from regime_trader.utils.io import save_json_atomic
 from regime_trader.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError
 from backend.market_intel.validator import validate_raw
 from regime_trader.config.weights import WEIGHTS_US as WEIGHTS, get_weights
+
+ROOT = Path(__file__).resolve().parent.parent.parent
 # Aligned with generate_top_lists.py — both now use config/weights.py as SSOT.
 # regime_trader/weights.py (12-factor) is DEPRECATED; kept for git history only.
 

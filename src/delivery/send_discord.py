@@ -42,6 +42,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+try:
     import requests
     _HAS_REQUESTS = True
 except ImportError:
@@ -1008,7 +1014,7 @@ def _fmt_region_block(label: str, model_name: str, entries: list, max_entries: i
         cap    = " [CAPITULATION SURVIVOR]" if e.get("_capitulation_survivor") else ""
         lines.append(f"  {rank}. {ticker:<8}| SCORE: {score:.4f} | {badge}{cap}")
         if _has_exit:
-            lines.append(f"     " + format_card_line(e))
+            lines.append("     " + format_card_line(e))
     if not entries[:max_entries]:
         lines.append("  [NO QUALIFYING ASSETS IN CURRENT REGIME]")
     return "\n".join(lines)
@@ -1029,7 +1035,7 @@ def _fmt_mvo_pool(label: str, pool: dict) -> str:
         stage  = "ENTER POSITION" if score >= 0.80 else "ASYMMETRIC LONG"
         lines.append(f"  - {ticker:<6} (ALLOC: {alloc:5.2f}%) | STAGE: {stage}")
         if _has_exit:
-            lines.append(f"    " + format_card_line(pos))
+            lines.append("    " + format_card_line(pos))
     return "\n".join(lines)
 
 
