@@ -82,7 +82,7 @@ def compute_composite_score(
     (composite_score, metadata)
         composite_score : float in [0.0, 1.0]
         metadata        : dict with keys:
-            weights_set     : "US" | "GLOBAL"
+            weights_set     : "US" | "EU" | "ASIA"
             region          : "US" | "EU" | "ASIA"
             weighted_factors: {factor: weighted_contribution}
             congress_masked : bool  (True when congress forced to 0.0)
@@ -92,7 +92,7 @@ def compute_composite_score(
     try:
         region = get_region(ticker)
         weights = get_weights(ticker)
-        weights_set = "US" if region == "US" else "GLOBAL"
+        weights_set = region  # "US", "EU", or "ASIA"
 
         # ── Safety guard: force congress to 0.0 for non-US ──────────────────
         congress_masked = False
