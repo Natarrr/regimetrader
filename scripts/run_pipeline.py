@@ -1157,7 +1157,7 @@ def run(
     _bulk_consensus_idx: Dict[str, Any] = {}
     if bulk_cache is not None:
         try:
-            from scripts.fmp_bulk_prefetch import build_ticker_index as _bti  # noqa: PLC0415
+            from src.ingestion.fmp_bulk_prefetch import build_ticker_index as _bti  # noqa: PLC0415
             # financial-scores-bulk has no FMP stable/ route; piotroski is per-ticker.
             # _bulk_piotroski_idx stays {} — scoring falls back to FMPClient.get_quality_score().
             _bulk_consensus_idx = _bti(bulk_cache, "upgrades-downgrades-consensus-bulk")
