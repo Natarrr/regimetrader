@@ -16,9 +16,9 @@ name: daily_trading_pipeline
 
 on:
   schedule:
-    - cron: "0 0 * * 1-5"   # 00:00 UTC — post-Asia close
-    - cron: "0 8 * * 1-5"   # 08:00 UTC — London open
-    - cron: "0 16 * * 1-5"  # 16:00 UTC — NYC mid-session
+    - cron: "30 0 * * 1-5"   # 00:30 UTC — +30 min after edgar_3x (00:00) cache write
+    - cron: "30 8 * * 1-5"   # 08:30 UTC — +30 min after edgar_3x (08:00) cache write
+    - cron: "30 16 * * 1-5"  # 16:30 UTC — +30 min after edgar_3x (16:00) cache write
   workflow_dispatch:
     inputs:
       dry_run:
