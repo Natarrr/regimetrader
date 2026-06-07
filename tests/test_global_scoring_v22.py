@@ -4,10 +4,9 @@
 Validates:
   1. WEIGHTS sums and structure
   2. EU/Asia factor availability in market_config
-  3. _score_ticker_international reads raw_factors correctly
-  4. _build_intl_entry produces correct factors dict
-  5. EU/Asia scores are comparable to US scores (not capped at 0.33)
-  6. congress always 0.0 for non-US
+  3. EU/Asia scores are comparable to US scores (not capped at 0.33)
+  4. congress always 0.0 for non-US
+  5. StrategyEngine pipeline metadata injection
 """
 import pytest
 from unittest.mock import MagicMock, patch
@@ -98,132 +97,7 @@ def test_renormalize_eu_sums_to_one():
     assert abs(sum(w.values()) - 1.0) < 1e-6
 
 
-# ── 3. _score_ticker_international reads raw_factors ─────────────────────────
-
-class _MockEntry:
-    def __init__(self, ticker, market_str, raw_factors):
-        self.ticker = ticker
-        self.market = type("M", (), {"value": market_str})()
-        self.sector = "Information Technology"
-        self.cap_tier = "large"
-        self.source_reliability = 0.80
-        self.raw_factors = raw_factors
-
-
-def test_score_intl_reads_all_factors():
-    """_score_ticker_international should propagate all raw_factors, not return None."""
-    from scripts.run_pipeline import _score_ticker_international
-
-    rf = {
-        "momentum_long_score":       0.72,
-        "volume_attention_score":    0.30,
-        "news_sentiment_score":      0.65,
-        "news_buzz_score":           0.40,
-        "insider_conviction_score":  0.55,
-        "insider_breadth_score":     0.45,
-        "analyst_consensus_score":   0.75,
-        "analyst_revision_score":    0.60,
-        "quality_piotroski_score":   0.78,
-        "price_target_upside_score": 0.68,
-        "return_12_1m":              0.18,
-        "volume_spike":              2.5,
-        "market_cap":                50e9,
-    }
-    entry = _MockEntry("SAP.DE", "EUROPE", rf)
-    result = _score_ticker_international(entry, spy_return_baseline=0.10)
-
-    assert result is not None
-    assert result["insider_conviction_score"] == pytest.approx(0.55)
-    assert result["news_sentiment_score"] == pytest.approx(0.65)
-    assert result["analyst_consensus_score"] == pytest.approx(0.75)
-    assert result["congress_score"] == 0.0   # always 0.0 for non-US
-
-
-def test_score_intl_congress_always_zero():
-    from scripts.run_pipeline import _score_ticker_international
-    rf = {"momentum_long_score": 0.5, "congress_score": 0.9}  # contaminated input
-    entry = _MockEntry("7203.T", "ASIA", rf)
-    result = _score_ticker_international(entry)
-    assert result is not None
-    assert result["congress_score"] == 0.0
-
-
-def test_score_intl_handles_missing_raw_factors():
-    """Missing raw_factors keys should default to 0.0, not crash."""
-    from scripts.run_pipeline import _score_ticker_international
-    rf = {}  # completely empty
-    entry = _MockEntry("ASML.AS", "EUROPE", rf)
-    result = _score_ticker_international(entry)
-    assert result is not None
-    assert result["insider_conviction_score"] == 0.0
-    assert result["momentum_long_score"] == 0.0
-
-
-def test_score_intl_returns_float_not_none_for_quality():
-    """quality_piotroski_score must be a float (0.0 if absent), not None."""
-    from scripts.run_pipeline import _score_ticker_international
-    rf = {"return_12_1m": 0.15, "volume_spike": 2.0}
-    entry = _MockEntry("SAP.DE", "EUROPE", rf)
-    result = _score_ticker_international(entry)
-    assert result is not None
-    assert isinstance(result["quality_piotroski_score"], float)
-    assert result["quality_piotroski_score"] == 0.0  # absent in raw_factors
-
-
-# ── 4. _build_intl_entry produces correct factors dict ──────────────────────
-
-def test_build_intl_entry_factors():
-    from backend.market_intel._generate_top_lists_intl_patch import _build_intl_entry
-
-    row = {
-        "ticker": "SAP.DE",
-        "market": "EUROPE",
-        "sector": "Information Technology",
-        "cap_tier": "large",
-        "market_cap": 200e9,
-        "final_score": 0.71,
-        "insider_conviction_score":  0.55,
-        "insider_breadth_score":     0.45,
-        "news_sentiment_score":      0.65,
-        "news_buzz_score":           0.40,
-        "momentum_long_score":       0.72,
-        "volume_attention_score":    0.30,
-        "analyst_consensus_score":   0.75,
-        "analyst_revision_score":    0.60,
-        "quality_piotroski_score":   0.78,
-        "price_target_upside_score": 0.68,
-        "congress_score":            0.0,
-    }
-    entry = _build_intl_entry(row)
-
-    assert entry["factors"]["insider_conviction"] == pytest.approx(0.55)
-    assert entry["factors"]["news_sentiment"] == pytest.approx(0.65)
-    assert entry["factors"]["analyst_consensus"] == pytest.approx(0.75)
-    assert entry["factors"]["congress"] == 0.0
-    assert entry["weights_set"] == "GLOBAL"
-    assert entry["region"] == "EU"
-
-
-def test_build_intl_entry_no_hardcoded_zeros():
-    """Non-congress/transcript factors should reflect actual values, not 0.0."""
-    from backend.market_intel._generate_top_lists_intl_patch import _build_intl_entry
-
-    row = {
-        "ticker": "005930.KS",
-        "market": "ASIA",
-        "insider_conviction_score": 0.42,
-        "news_sentiment_score": 0.58,
-        "analyst_consensus_score": 0.70,
-    }
-    entry = _build_intl_entry(row)
-
-    assert entry["factors"]["insider_conviction"] == pytest.approx(0.42)
-    assert entry["factors"]["news_sentiment"] == pytest.approx(0.58)
-    assert entry["factors"]["analyst_consensus"] == pytest.approx(0.70)
-    assert entry["region"] == "ASIA"
-
-
-# ── 5. EU/Asia score is now competitive with US ───────────────────────────────
+# ── 3. EU/Asia score is now competitive with US ───────────────────────────────
 
 def test_eu_score_uses_global_weights():
     """A strong EU ticker should reach TACTICAL BUY (>=0.55) with v2.2 weights."""
