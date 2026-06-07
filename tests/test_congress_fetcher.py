@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.run_pipeline import fetch_congress_buys, score_congress
+from src.ingestion.run_pipeline import fetch_congress_buys, score_congress
 
 
 class TestScoreCongress:
@@ -86,7 +86,7 @@ class TestFetchCongressBuys:
 
     def test_counts_house_purchases(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         house = [
             {"transaction_date": "2026-04-01", "ticker": "AAPL", "type": "purchase"},
             {"transaction_date": "2026-04-10", "ticker": "AAPL", "type": "purchase"},
@@ -98,7 +98,7 @@ class TestFetchCongressBuys:
 
     def test_counts_senate_sales(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         senate = [{"transaction_date": "2026-04-05", "ticker": "MSFT", "type": "sale"}]
         with patch("requests.get", side_effect=self._make_mock_get([], senate)):
             result = fetch_congress_buys(lookback_days=90)
@@ -106,7 +106,7 @@ class TestFetchCongressBuys:
 
     def test_ignores_transactions_outside_lookback(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         house = [{"transaction_date": "2025-10-01", "ticker": "NVDA", "type": "purchase"}]
         with patch("requests.get", side_effect=self._make_mock_get(house, [])):
             result = fetch_congress_buys(lookback_days=90)
@@ -114,7 +114,7 @@ class TestFetchCongressBuys:
 
     def test_skips_invalid_tickers(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         house = [
             {"transaction_date": "2026-04-01", "ticker": "N/A", "type": "purchase"},
             {"transaction_date": "2026-04-01", "ticker": "",    "type": "purchase"},
@@ -128,7 +128,7 @@ class TestFetchCongressBuys:
         """When S3 returns 403, FMPClient.get_congress_trades() is used as fallback."""
         monkeypatch.setenv("FMP_API_KEY", "test-key")
         monkeypatch.setenv("FMP_MAX_RPS", "1000")
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
 
         fmp_result = {
             "purchases": 1, "sales": 0, "total": 1, "recency_days": 5,
@@ -151,14 +151,14 @@ class TestFetchCongressBuys:
 
     def test_all_sources_fail_returns_empty(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         with patch("requests.get", side_effect=Exception("timeout")):
             result = fetch_congress_buys(lookback_days=90)
         assert result == {}
 
     def test_cache_is_used_on_second_call(self, tmp_path, monkeypatch):
         self._no_quiver(monkeypatch)
-        monkeypatch.setattr("scripts.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", tmp_path / "cc.json")
         house = [{"transaction_date": "2026-04-01", "ticker": "JPM", "type": "purchase"}]
         with patch("requests.get", side_effect=self._make_mock_get(house, [])) as mock_get:
             fetch_congress_buys(lookback_days=90)

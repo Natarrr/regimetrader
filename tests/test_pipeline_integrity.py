@@ -75,7 +75,7 @@ def _status_payload(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 class TestScoreEdgar:
     def _fn(self):
-        from scripts.run_pipeline import score_edgar
+        from src.ingestion.run_pipeline import score_edgar
         return score_edgar
 
     def test_zero_filings_returns_zero(self):
@@ -106,7 +106,7 @@ class TestScoreEdgar:
 
 class TestScoreInsiderValue:
     def _fn(self):
-        from scripts.run_pipeline import score_insider_value
+        from src.ingestion.run_pipeline import score_insider_value
         return score_insider_value
 
     def test_zero_purchases_returns_zero(self):
@@ -291,7 +291,7 @@ class TestFetchEdgarDataRecency:
     """
 
     def _fetch(self):
-        from scripts.run_pipeline import fetch_edgar_data
+        from src.ingestion.run_pipeline import fetch_edgar_data
         return fetch_edgar_data
 
     def _make_sec_response(self, filing_date: str, accession: str = "0001234567-24-000001"):
@@ -320,9 +320,9 @@ class TestFetchEdgarDataRecency:
 
         p_tx = [{"date": tx_date_str, "value": 50_000, "title": "CEO", "code": "P", "is_ceo": True}]
 
-        with patch("scripts.run_pipeline._load_cik_map", return_value={"TEST": "0001234567"}), \
-             patch("scripts.run_pipeline._sec_get", return_value=self._make_sec_response(filing_date_str)), \
-             patch("scripts.run_pipeline._parse_form4_xml", return_value=p_tx):
+        with patch("src.ingestion.run_pipeline._load_cik_map", return_value={"TEST": "0001234567"}), \
+             patch("src.ingestion.run_pipeline._sec_get", return_value=self._make_sec_response(filing_date_str)), \
+             patch("src.ingestion.run_pipeline._parse_form4_xml", return_value=p_tx):
             result = self._fetch()("TEST", lookback_days=180)
 
         _, _, _, days_since, _, _, _ = result
@@ -339,9 +339,9 @@ class TestFetchEdgarDataRecency:
         filing_date_str = (date.today() - timedelta(days=5)).isoformat()
         p_tx_no_date = [{"value": 30_000, "title": "CFO", "code": "P", "is_ceo": False}]
 
-        with patch("scripts.run_pipeline._load_cik_map", return_value={"TEST": "0001234567"}), \
-             patch("scripts.run_pipeline._sec_get", return_value=self._make_sec_response(filing_date_str)), \
-             patch("scripts.run_pipeline._parse_form4_xml", return_value=p_tx_no_date):
+        with patch("src.ingestion.run_pipeline._load_cik_map", return_value={"TEST": "0001234567"}), \
+             patch("src.ingestion.run_pipeline._sec_get", return_value=self._make_sec_response(filing_date_str)), \
+             patch("src.ingestion.run_pipeline._parse_form4_xml", return_value=p_tx_no_date):
             result = self._fetch()("TEST", lookback_days=180)
 
         _, _, _, days_since, _, _, _ = result
@@ -353,7 +353,7 @@ class TestFetchEdgarDataRecency:
         """When no EDGAR data is available (e.g., CI without EDGAR_USER_AGENT), returns 0 gracefully."""
         from unittest.mock import patch
 
-        with patch("scripts.run_pipeline._load_cik_map", return_value={}):
+        with patch("src.ingestion.run_pipeline._load_cik_map", return_value={}):
             result = self._fetch()("UNKNOWN", lookback_days=180)
 
         _, _, _, days_since, _, _, _ = result
@@ -371,7 +371,7 @@ class TestPatch08FmpStructuralFailureInScoring:
 
     def _import(self):
         import importlib
-        import scripts.run_pipeline as rp
+        import src.ingestion.run_pipeline as rp
         importlib.reload(rp)  # reset module-level shared set between tests
         return rp
 

@@ -19,7 +19,7 @@ from backend.market_intel.generate_top_lists import (
     PipelineIntegrityError,
     WEIGHTS,
 )
-from scripts.run_pipeline import score_congress
+from src.ingestion.run_pipeline import score_congress
 
 
 def _make_results(n: int, overrides: dict | None = None) -> list:

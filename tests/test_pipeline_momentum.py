@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from scripts.run_pipeline import (
+from src.ingestion.run_pipeline import (
     fetch_price_data,
     fetch_fmp_profiles,
 )

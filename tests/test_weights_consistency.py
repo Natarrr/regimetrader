@@ -18,7 +18,7 @@ import pytest
 
 def _load_run_pipeline_weights() -> Dict[str, float]:
     """Import WEIGHTS from scripts/run_pipeline.py without side effects."""
-    rp_path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "run_pipeline.py"
+    rp_path = pathlib.Path(__file__).resolve().parent.parent / "src" / "ingestion" / "run_pipeline.py"
     if not rp_path.exists():
         pytest.skip(f"scripts/run_pipeline.py not found at {rp_path}")
     spec = importlib.util.spec_from_file_location("_run_pipeline_test", rp_path)

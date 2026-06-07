@@ -27,21 +27,21 @@ def _zero_mktcap_profiles(tickers):
 def _toxic_patches():
     """Context manager that applies all mocks needed for the toxic dataset."""
     with ExitStack() as stack:
-        stack.enter_context(patch("scripts.run_pipeline.fetch_fmp_profiles",
+        stack.enter_context(patch("src.ingestion.run_pipeline.fetch_fmp_profiles",
                                   side_effect=_zero_mktcap_profiles))
-        stack.enter_context(patch("scripts.run_pipeline.fetch_congress_buys",
+        stack.enter_context(patch("src.ingestion.run_pipeline.fetch_congress_buys",
                                   return_value={}))
-        stack.enter_context(patch("scripts.run_pipeline._fetch_spy_return",
+        stack.enter_context(patch("src.ingestion.run_pipeline._fetch_spy_return",
                                   return_value=0.0))
-        stack.enter_context(patch("scripts.run_pipeline.fetch_fmp_insider_all",
+        stack.enter_context(patch("src.ingestion.run_pipeline.fetch_fmp_insider_all",
                                   return_value={}))
-        stack.enter_context(patch("scripts.run_pipeline.fetch_price_data",
+        stack.enter_context(patch("src.ingestion.run_pipeline.fetch_price_data",
                                   return_value={"return_12_1m": None, "spy_return_12_1m": 0.0, "volume_spike": 1.0}))
-        stack.enter_context(patch("scripts.run_pipeline.fetch_edgar_data",
+        stack.enter_context(patch("src.ingestion.run_pipeline.fetch_edgar_data",
                                   return_value=(0, 0.0, False, 0)))
-        stack.enter_context(patch("scripts.run_pipeline._load_cik_map",
+        stack.enter_context(patch("src.ingestion.run_pipeline._load_cik_map",
                                   return_value={}))
-        stack.enter_context(patch("scripts.run_pipeline._sec_get",
+        stack.enter_context(patch("src.ingestion.run_pipeline._sec_get",
                                   side_effect=Exception("mocked — no network")))
         yield
 
@@ -53,7 +53,7 @@ class TestStressPipeline:
     def test_toxic_dataset_raises_integrity_error(self, tmp_path):
         """run() on an all-zero-cap universe must raise PipelineIntegrityError."""
         from backend.market_intel.validator import PipelineIntegrityError
-        from scripts.run_pipeline import run
+        from src.ingestion.run_pipeline import run
 
         with _toxic_patches():
             with pytest.raises(PipelineIntegrityError) as exc_info:
@@ -64,7 +64,7 @@ class TestStressPipeline:
     def test_toxic_dataset_integrity_error_mentions_missing_amount(self, tmp_path):
         """The error message must name the failure code so ops can triage."""
         from backend.market_intel.validator import PipelineIntegrityError
-        from scripts.run_pipeline import run
+        from src.ingestion.run_pipeline import run
 
         with _toxic_patches():
             with pytest.raises(PipelineIntegrityError) as exc_info:
@@ -74,7 +74,7 @@ class TestStressPipeline:
 
     def test_main_returns_exit_code_1_on_toxic_dataset(self, tmp_path):
         """main() must translate PipelineIntegrityError into exit code 1."""
-        from scripts.run_pipeline import main
+        from src.ingestion.run_pipeline import main
 
         with _toxic_patches():
             code = main(["--tickers-file", str(TOXIC_CSV), "--log-dir", str(tmp_path)])
@@ -84,7 +84,7 @@ class TestStressPipeline:
     def test_toxic_dataset_does_not_write_status_file(self, tmp_path):
         """The pipeline must not silently write a poisoned intel_source_status.json."""
         from backend.market_intel.validator import PipelineIntegrityError
-        from scripts.run_pipeline import run
+        from src.ingestion.run_pipeline import run
 
         with _toxic_patches():
             with pytest.raises(PipelineIntegrityError):
