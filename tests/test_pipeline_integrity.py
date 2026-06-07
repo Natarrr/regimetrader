@@ -245,7 +245,7 @@ class TestGenerateTopLists:
     def test_top_lists_json_written_to_disk(self, tmp_path):
         rows = [_raw_row(f"T{i}") for i in range(5)]
         self._generate(rows, tmp_path)
-        assert (tmp_path / "top_lists.json").exists()
+        assert (tmp_path / "top_lists_us.json").exists()
 
     def test_top5_csv_written_to_disk(self, tmp_path):
         rows = [_raw_row(f"T{i}") for i in range(5)]

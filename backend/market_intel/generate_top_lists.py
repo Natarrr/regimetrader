@@ -1,5 +1,5 @@
 """backend/market_intel/generate_top_lists.py
-Nine-factor weighted scoring → top_lists.json + top5.csv
+Nine-factor weighted scoring → top_lists_us.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
 and applies Markowitz (1990 Nobel) portfolio ranking. WEIGHTS are imported
@@ -15,11 +15,11 @@ Cap tiers (relative within universe, sorted by market cap):
   mid   : rank 21–35
   small : rank 36+
 
-Each section in top_lists.json is ranked by final_score descending (top 5).
+Each section in top_lists_us.json is ranked by final_score descending (top 5).
 
 Output:
-  logs/top_lists.json — consumed by scripts/send_toplists_discord.py
-  logs/top5.csv       — flat reference file for downstream analysis
+  logs/top_lists_us.json — consumed by scripts/send_toplists_discord.py
+  logs/top5.csv          — flat reference file for downstream analysis
 
 Usage:
   python -m backend.market_intel.generate_top_lists --log-dir logs --run-id $GITHUB_RUN_ID
@@ -47,7 +47,6 @@ from regime_trader.config.weights import (
     WEIGHTS, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
     get_region,
 )
-from backend.market_intel._generate_top_lists_intl_patch import _build_intl_entry
 from backend.market_intel.portfolio_optimizer import run_optimizer
 
 log = logging.getLogger("generate_top_lists")
@@ -88,7 +87,7 @@ _SCHEMA_MISSING_THRESHOLD = 6   # >6 zero factors → is_complete = False
 # are also dead — which indicates a genuine price/EDGAR feed failure.
 
 # Circuit breaker: if fewer than this fraction of the universe pass the schema
-# gate, PipelineIntegrityError is raised and top_lists.json is NOT written.
+# gate, PipelineIntegrityError is raised and top_lists_us.json is NOT written.
 _CIRCUIT_BREAKER_MIN_FRACTION = 0.40   # 40% of universe minimum
 # Rationale: with live FMP stable/ routes for insider/news/quote (Phase 1 migration),
 # the schema-completeness rate should be well above 40% on a healthy pipeline.
@@ -206,7 +205,7 @@ def _schema_gate(
         raise PipelineIntegrityError(
             f"Schema gate: only {complete_count}/{universe_size} tickers are complete "
             f"(threshold {_CIRCUIT_BREAKER_MIN_FRACTION:.0%} = {min_required}). "
-            "Data feeds may be down. top_lists.json will NOT be written."
+            "Data feeds may be down. top_lists_us.json will NOT be written."
         )
 
     log.info(
@@ -362,7 +361,7 @@ def _to_entry(
     score_after_vix = round(_apply_vix_overlay(raw_score, vix), 4)
     # Apply momentum regime pre-dampening (early bear detection, avoids double-count)
     score = round(score_after_vix * momentum_multiplier, 4)
-    # Carry schema-gate result into the entry so it appears in top_lists.json
+    # Carry schema-gate result into the entry so it appears in top_lists_us.json
     validation = row.get(
         "_validation", {"is_complete": True, "missing_sources": []})
     esg_flag_value = row.get("esg_flag")
@@ -413,6 +412,7 @@ def _to_entry(
         "esg_flag":                esg_flag_value,
         # PATCH-03: audit fields — momentum regime dampening
         "momentum_multiplier":     momentum_multiplier,
+        "pipeline":                "US",
     }
 
 
@@ -704,7 +704,6 @@ def generate(
     # normalization — they have structural zeros in edgar/congress/news which would
     # corrupt the US peer-group min/max and distort all US scores.
     us_results = [r for r in results if r.get("market", "USA") == "USA"]
-    intl_results = [r for r in results if r.get("market", "USA") != "USA"]
 
     # Schema gate: attach validation_metadata + circuit-breaker check.
     # Raises PipelineIntegrityError (before writing anything) if < 20% of the
@@ -754,18 +753,6 @@ def generate(
             ns_scores[0], len(ns_scores),
         )
 
-    # Merge EU/Asia entries — reads all factor scores populated by FMPFetcher.
-    # source_reliability is stored as diagnostic metadata in each entry dict.
-    # It no longer multiplies final_score — the dampening loop was removed in
-    # v2.2-global. See FMPFetcher.source_reliability() and _build_intl_entry().
-    for row in intl_results:
-        if row.get("_validation_failed"):
-            continue
-        entries.append(_build_intl_entry(row))
-    if intl_results:
-        log.info(
-            "Merged %d EU/Asia entries into ranked universe (pre-scored, bypass normalize)", len(intl_results))
-
     _assign_cap_tiers(entries)
 
     # Exclude tickers that failed Stage 1 validation before slicing to top-N
@@ -802,7 +789,7 @@ def generate(
     _portfolio_candidates = _sorted_for_portfolio[:_TOP_N_PORTFOLIO]
 
     _prev_weights: dict = {}
-    _prev_path = log_dir / "top_lists.json"
+    _prev_path = log_dir / "top_lists_us.json"
     if _prev_path.exists():
         try:
             _prev_data = json.loads(_prev_path.read_text(encoding="utf-8"))
@@ -959,7 +946,7 @@ def generate(
         },
     }
 
-    out_json = log_dir / "top_lists.json"
+    out_json = log_dir / "top_lists_us.json"
     save_json_atomic(out_json, top_lists)
     log.info(
         "Wrote %s — %d tickers, top buy: %s %.4f",
@@ -1012,16 +999,16 @@ def generate(
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Rank intel_source_status.json into top_lists.json"
+        description="Rank intel_source_status.json into top_lists_us.json"
     )
     parser.add_argument("--log-dir", type=Path, default=Path("logs"),
                         help="Directory containing intel_source_status.json (default: logs)")
     parser.add_argument("--run-id", type=str, default="local",
-                        help="Identifier stamped into top_lists.json (e.g. $GITHUB_RUN_ID)")
+                        help="Identifier stamped into top_lists_us.json (e.g. $GITHUB_RUN_ID)")
     parser.add_argument("--bulk-cache", type=Path, default=None,
                         help="Bulk snapshot dir (informational; data already scored by run_pipeline)")
     parser.add_argument("--force", action="store_true",
-                        help="Re-generate even if top_lists.json is less than 2 hours old")
+                        help="Re-generate even if top_lists_us.json is less than 2 hours old")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -1047,13 +1034,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Skip if fresh enough AND structurally valid.
     # A mid-write crash or empty payload must not block re-runs.
-    out = args.log_dir / "top_lists.json"
+    out = args.log_dir / "top_lists_us.json"
     if out.exists() and not args.force:
         try:
             existing = json.loads(out.read_text(encoding="utf-8"))
             if "top_buys" not in existing or not existing.get("top_buys"):
                 log.warning(
-                    "top_lists.json exists but has no top_buys — treating as corrupted, regenerating"
+                    "top_lists_us.json exists but has no top_buys — treating as corrupted, regenerating"
                 )
             else:
                 ts = datetime.fromisoformat(
@@ -1063,13 +1050,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                          ts).total_seconds() / 3600
                 if age_h < 2.0:
                     log.info(
-                        "top_lists.json is %.1fh old and valid — skipping (use --force to override)",
+                        "top_lists_us.json is %.1fh old and valid — skipping (use --force to override)",
                         age_h,
                     )
                     return 0
         except Exception:
             log.warning(
-                "top_lists.json unreadable or malformed — forcing regeneration")
+                "top_lists_us.json unreadable or malformed — forcing regeneration")
 
     try:
         generate(status, args.run_id, args.log_dir)
