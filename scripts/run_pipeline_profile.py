@@ -3,7 +3,7 @@
 import argparse
 import json
 import sys
-from backend.market_intel.engine import StrategyEngine
+from src.engine.engine import StrategyEngine
 
 
 def main():
