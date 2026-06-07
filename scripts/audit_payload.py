@@ -75,8 +75,11 @@ def _expected_badge(score: float) -> str:
 def _iter_all_entries(data: dict):
     """Yield every entry across all score buckets (deduped by ticker)."""
     seen: set = set()
-    for bucket in ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
-                   "mid_caps", "small_caps"):
+    for bucket in (
+        "top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
+        "usa_overflow", "eu_overflow", "asia_overflow",
+        "mid_caps", "small_caps",
+    ):
         for entry in data.get(bucket, []):
             key = (bucket, entry.get("ticker", ""))
             if key not in seen:
@@ -180,24 +183,19 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
                 )
 
     # ------------------------------------------------------------------
-    # E2. Dynamic range validation — international score ceiling
-    #     Ceiling = sum of available factor weights for the region.
-    #     WEIGHTS_GLOBAL zeroes congress and transcript_tone, so the
-    #     available weight sum = 1.0, meaning a flawless international
-    #     ticker can legitimately score 1.0 after v2.2-global.
-    #     Score > ceiling + tolerance signals US-factor injection or
-    #     arithmetic error (also caught by check A above for > 1.0).
+    # E2. Dynamic range validation — per-ticker international score ceiling
+    #     Ceiling = sum of available factor weights for the ticker's region.
+    #     WEIGHTS_EU / WEIGHTS_ASIA / WEIGHTS_GLOBAL all zero congress and
+    #     transcript_tone, so available weight = 1.0 for all intl regions.
+    #     Score > ceiling + tolerance signals US-factor injection or arithmetic
+    #     error (also caught by check A above for > 1.0).
     # ------------------------------------------------------------------
     try:
-        from regime_trader.config.weights import WEIGHTS_GLOBAL
-        _intl_available_weight = sum(
-            w for f, w in WEIGHTS_GLOBAL.items()
-            if f not in {"congress", "transcript_tone"}
-        )
+        from regime_trader.config.weights import get_weights as _get_weights
+        _weights_import_ok = True
     except ImportError:
-        _intl_available_weight = 1.0
+        _weights_import_ok = False
 
-    _DYNAMIC_INTL_CEILING = round(_intl_available_weight, 6)
     _CEILING_TOLERANCE = 1e-4
 
     for entry in _iter_all_entries(data):
@@ -209,10 +207,21 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
         score = float(entry.get("final_score", 0.0))
         factors = entry.get("factors", {})
 
-        if score > _DYNAMIC_INTL_CEILING + _CEILING_TOLERANCE:
+        try:
+            _weights = _get_weights(ticker) if _weights_import_ok else {}
+            _intl_available_weight = (
+                sum(w for f, w in _weights.items() if f not in {"congress", "transcript_tone"})
+                if _weights else 1.0
+            )
+        except Exception:
+            _intl_available_weight = 1.0
+
+        _dynamic_ceiling = round(_intl_available_weight, 6)
+
+        if score > _dynamic_ceiling + _CEILING_TOLERANCE:
             raise ScoreDivergenceError(
                 f"Ticker {ticker!r} ({market}): final_score={score:.4f} exceeds "
-                f"dynamic available-factor ceiling {_DYNAMIC_INTL_CEILING:.4f}. "
+                f"dynamic available-factor ceiling {_dynamic_ceiling:.4f}. "
                 f"Available weights sum: {_intl_available_weight:.4f}. "
                 f"Possible US-factor injection. factors={factors}"
             )
