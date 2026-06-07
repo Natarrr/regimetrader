@@ -1,7 +1,7 @@
 from src.core.fetchers_base import TickerEntry
 from regime_trader.fetchers.orchestrator import Orchestrator
 from src.ingestion.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
-from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+from src.ingestion.fmp_fetcher import FMPFetcher
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import json
