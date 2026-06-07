@@ -400,8 +400,8 @@ jobs:
           log = logging.getLogger("intl_fetch")
           sys.path.insert(0, ".")
 
-          from regime_trader.fetchers.fmp_fetcher import FMPFetcher
-          from regime_trader.fetchers.base import MarketEnum
+          from src.ingestion.fmp_fetcher import FMPFetcher
+          from src.core.fetchers_base import MarketEnum
 
           api_key = os.environ["FMP_API_KEY"]
           bulk_cache_dir = Path(os.environ.get("BULK_CACHE_DIR", ".cache/bulk_snapshots"))
@@ -409,7 +409,7 @@ jobs:
           # Inject bulk consensus index to avoid per-ticker analyst_consensus calls
           bulk_idx: dict = {}
           try:
-              from scripts.fmp_bulk_prefetch import build_ticker_index
+              from src.ingestion.fmp_bulk_prefetch import build_ticker_index
               bulk_idx = build_ticker_index(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
               log.info("Bulk consensus index: %d symbols loaded", len(bulk_idx))
           except Exception as exc:

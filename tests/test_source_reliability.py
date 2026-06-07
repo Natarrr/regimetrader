@@ -7,7 +7,7 @@ now returns 1.0 for all markets — dampening is replaced by the dynamic
 available-factor denominator in StrategyEngine.score_ticker_pool.
 """
 import pytest
-from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+from src.ingestion.fmp_fetcher import FMPFetcher
 from src.core.fetchers_base import MarketEnum
 
 
