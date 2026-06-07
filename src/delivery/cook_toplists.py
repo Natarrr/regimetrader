@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from regime_trader.risk.regime import (
+from src.risk.regime import (
     RiskRegime,
     apply_capitulation_filter,
     get_regime,
