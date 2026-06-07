@@ -219,7 +219,7 @@ def test_engine_dynamic_denominator_normalises_correctly():
     weighted_sum / actual_weight_sum, not weighted_sum / 1.0.
     """
     import json, tempfile, os
-    from backend.market_intel.engine import StrategyEngine
+    from src.engine.engine import StrategyEngine
 
     profile = {
         "region": "TEST",
@@ -247,7 +247,7 @@ def test_engine_dynamic_denominator_with_partial_availability():
     composite = (1.0*0.70 + 0.0*0.30) / (0.70 + 0.30) = 0.70
     """
     import json, tempfile, os
-    from backend.market_intel.engine import StrategyEngine
+    from src.engine.engine import StrategyEngine
 
     profile = {
         "region": "INTL_TEST",
@@ -276,7 +276,7 @@ def test_engine_dynamic_denominator_catches_sub_one_sum():
     0.8 * 0.6 = 0.48; with it, 0.8 * 0.6 / 0.6 = 0.8.
     """
     import json, tempfile, os
-    from backend.market_intel.engine import StrategyEngine
+    from src.engine.engine import StrategyEngine
 
     profile = {
         "region": "TEST",
@@ -305,7 +305,7 @@ def test_engine_dynamic_denominator_catches_sub_one_sum():
 def test_strategy_engine_injects_pipeline_key():
     """Each entry produced by StrategyEngine must carry 'pipeline': 'INTL'."""
     import json, tempfile, os
-    from backend.market_intel.engine import StrategyEngine
+    from src.engine.engine import StrategyEngine
 
     profile = {
         "region": "INTL",
