@@ -1,0 +1,690 @@
+name: daily_trading_pipeline
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Replaces: pipeline_us.yml + pipeline_intl.yml + daily_toplists_discord.yml
+#
+# Race condition fix: cook_and_notify uses needs: [run_us_pipeline, run_intl_pipeline]
+# to guarantee both artifacts are present before the merge step fires.
+# workflow_run would have fired twice (once when US completes, once when INTL
+# completes), causing the first fire to run with a missing artifact.
+#
+# Artifact flow (same workflow run — actions/download-artifact@v4, not dawidd6):
+#   run_us_pipeline   → us-top-lists   (logs/top_lists_us.json)
+#   run_intl_pipeline → intl-top-lists (logs/top_lists_intl.json)
+#   cook_and_notify   downloads both, cooks → logs/top_lists.json → Discord
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 0 * * 1-5"   # 00:00 UTC — post-Asia close
+    - cron: "0 8 * * 1-5"   # 08:00 UTC — London open
+    - cron: "0 16 * * 1-5"  # 16:00 UTC — NYC mid-session
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print Discord payload without sending"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      tickers_file:
+        description: "Tickers CSV (relative to repo root)"
+        required: false
+        default: "config/universe.csv"
+      force_regen:
+        description: "Force top_lists regeneration even if fresh"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily_trading_pipeline
+  cancel-in-progress: false
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 1: US Pipeline — EDGAR + FMP 9-Factor Scoring
+  # ═══════════════════════════════════════════════════════════════════════════
+  run_us_pipeline:
+    name: US — EDGAR + FMP 9-Factor Scoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Restore daily pipeline cache ─────────────────────────────────────
+      # Persists bulk snapshots (150 MB, stable within a trading day) and
+      # congress_cache.json (24h TTL) across the three intraday runs.
+      # Key is scoped to "us-pipeline" to avoid write conflicts with edgar_3x.
+      - name: Get cache date
+        id: cache_date
+        run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore pipeline data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/
+          key: us-pipeline-cache-${{ runner.os }}-${{ steps.cache_date.outputs.date }}
+          restore-keys: |
+            us-pipeline-cache-${{ runner.os }}-
+            pipeline-cache-${{ runner.os }}-
+
+      # ── 4. Install dependencies ──────────────────────────────────────────────
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Install full pipeline deps
+        run: pip install -r requirements.txt
+
+      # ── 5. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
+      - name: FMP bulk pre-fetch (Ultimate)
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+          BULK_CACHE_TTL_HOURS: "7"
+        run: |
+          set -euo pipefail
+          python scripts/fmp_bulk_prefetch.py \
+            --cache-dir  "$BULK_CACHE_DIR" \
+            --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
+            --endpoints  upgrades-downgrades-consensus-bulk \
+                         ratios-ttm-bulk \
+                         key-metrics-ttm-bulk \
+            --verbose
+
+      # ── 6. EDGAR fetch — 3-attempt retry ────────────────────────────────────
+      # SEC rate limit: 10 req/s (enforced via shared lock in run_pipeline.py).
+      # FMP_MAX_RPS=50 saturates Ultimate without exceeding the SEC limit.
+      - name: EDGAR full-universe fetch
+        id: edgar_fetch
+        env:
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          EDGAR_FIRST: "true"
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+        run: |
+          TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
+          LOG_DIR="logs"
+          mkdir -p "$LOG_DIR" .monitoring
+
+          SUCCESS=false
+          for ATTEMPT in 1 2 3; do
+            echo "::group::EDGAR fetch — attempt $ATTEMPT / 3"
+            START=$(date +%s)
+            if timeout 20m python scripts/run_pipeline.py \
+              --tickers-file "$TICKERS_FILE" \
+              --max-workers  8 \
+              --log-dir      "$LOG_DIR" \
+              --bulk-cache   ".cache/bulk_snapshots" \
+              --verbose; then
+              END=$(date +%s)
+              echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+              SUCCESS=true
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+            if [ "$ATTEMPT" -lt 3 ]; then
+              WAIT=$((ATTEMPT * 30))
+              echo "::warning::Attempt $ATTEMPT failed — retrying in ${WAIT}s"
+              sleep "$WAIT"
+            fi
+          done
+
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error::All 3 EDGAR fetch attempts failed"
+            exit 1
+          fi
+
+      # ── 7. Export metrics ────────────────────────────────────────────────────
+      - name: Export metrics
+        if: always()
+        run: |
+          python -m monitoring.metrics_exporter \
+            --log-dir logs \
+            --duration-seconds "${DURATION_SECONDS:-0}"
+
+      # ── 8. Generate top_lists_us.json ────────────────────────────────────────
+      # NOTE: output is top_lists_us.json (not top_lists.json) so cook_and_notify
+      # can distinguish US vs INTL artifacts in the same logs/ directory.
+      - name: Generate top lists
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+        run: |
+          FORCE=""
+          if [ "${{ github.event.inputs.force_regen }}" = "true" ]; then
+            FORCE="--force"
+          fi
+          python -m backend.market_intel.generate_top_lists \
+            --log-dir    logs \
+            --run-id     "$GITHUB_RUN_ID" \
+            --bulk-cache "$BULK_CACHE_DIR" \
+            --output-file top_lists_us.json \
+            --verbose \
+            $FORCE
+
+      # ── 9. Audit + validate ──────────────────────────────────────────────────
+      - name: Audit payload (RT-QA-2026-REV5)
+        run: python scripts/audit_payload.py --input logs/top_lists_us.json
+
+      - name: Validate top_lists_us.json
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+          p = Path("logs/top_lists_us.json")
+          if not p.exists():
+              print("::error::top_lists_us.json was not written — pipeline failed silently")
+              sys.exit(1)
+          d = json.loads(p.read_text())
+          if not d.get("top_buys"):
+              print("::error::top_lists_us.json exists but top_buys is empty")
+              sys.exit(1)
+          count = d.get("ticker_count", 0)
+          sample = d["top_buys"][0].get("factors", {})
+          required = {"analyst_consensus", "quality_piotroski"}
+          missing = required - set(sample.keys())
+          if missing:
+              print(f"::error::Missing 9-factor keys in top_buys[0].factors: {missing}")
+              sys.exit(1)
+          weights = d.get("weights", {})
+          if weights:
+              total = sum(weights.values())
+              if abs(total - 1.0) > 1e-6:
+                  print(f"::error::WEIGHTS sum={total:.8f} != 1.0")
+                  sys.exit(1)
+          print(f"Validated: {len(d['top_buys'])} top buys, {count} tickers scored, 9-factor schema OK")
+          EOF
+
+      # ── 10. Satellite insights ───────────────────────────────────────────────
+      - name: Generate satellite insights
+        continue-on-error: true
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          python -m backend.market_intel.satellite_factors \
+            --log-dir logs \
+            --verbose
+
+      # ── 11. Minsky stress + orthogonality ───────────────────────────────────
+      - name: Check Minsky insider stress
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
+        run: |
+          python -m monitoring.minsky_alert --log-dir logs
+          python - <<'EOF'
+          import sys, os
+          sys.path.insert(0, '.')
+          from pathlib import Path
+          from monitoring.minsky_alert import check_orthogonality_alert
+          check_orthogonality_alert(
+              Path('logs'),
+              webhook_url=os.environ.get('DISCORD_WEBHOOK_URL'),
+          )
+          EOF
+
+      # ── 12. Run summary ──────────────────────────────────────────────────────
+      - name: Generate run summary
+        if: always()
+        run: |
+          echo "## US Pipeline — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f logs/top_lists_us.json ]; then
+            echo "### Top 5 US Buys" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | IC | IB | Cong | NS | NB | Mom | Vol | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          try:
+              with open("logs/top_lists_us.json") as f:
+                  d = json.load(f)
+              for i, t in enumerate(d.get('top_buys', [])[:5], 1):
+                  fac = t.get('factors', {})
+                  print(f"| {i} | **{t['ticker']}** | {t['final_score']:.4f} | "
+                        f"{fac.get('insider_conviction', 0):.2f} | "
+                        f"{fac.get('insider_breadth', 0):.2f} | "
+                        f"{fac.get('congress', 0):.2f} | "
+                        f"{fac.get('news_sentiment', 0):.2f} | "
+                        f"{fac.get('news_buzz', 0):.2f} | "
+                        f"{fac.get('momentum_long', 0):.2f} | "
+                        f"{fac.get('volume_attention', 0):.2f} | "
+                        f"{fac.get('analyst_consensus', 0):.2f} | "
+                        f"{fac.get('quality_piotroski', 0):.2f} |")
+          except Exception as e:
+              print(f"| — | _summary unavailable: {e}_ | | | | | | | | | | |")
+          EOF
+          else
+            echo "⚠️ _top_lists_us.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 13. Upload artifacts ─────────────────────────────────────────────────
+      # CRITICAL: if-no-files-found: error — hard fail prevents cook_and_notify
+      # from running with a missing artifact. path is top_lists_us.json (not
+      # top_lists.json) so cook can distinguish US vs INTL in the same logs/ dir.
+      - name: Upload us-top-lists artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: us-top-lists
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            logs/top_lists_us.json
+            logs/top5.csv
+            logs/satellite_insights.json
+            logs/intel_source_status.json
+
+      - name: Upload US debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: us-pipeline-debug-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            logs/metrics.json
+            logs/edgar_debug_summary.json
+            logs/form4_summary.csv
+            logs/marketintel_events.json
+            logs/intel_source_status.json
+            logs/kill_switch_audit.ndjson
+            logs/*.log
+            .monitoring/edgar_cb.json
+            .monitoring/alert_state.json
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 2: INTL Pipeline — FMP 10-Factor Scoring (EU + Asia)
+  # ═══════════════════════════════════════════════════════════════════════════
+  run_intl_pipeline:
+    name: INTL — FMP 10-Factor Scoring (EU + Asia)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Restore daily pipeline cache ─────────────────────────────────────
+      # Bulk snapshots are region-agnostic (global FMP data). Falls back to the
+      # us-pipeline or legacy edgar_3x cache when the intl key is cold.
+      - name: Get cache date
+        id: cache_date
+        run: echo "date=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Restore pipeline data cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/
+          key: intl-pipeline-cache-${{ runner.os }}-${{ steps.cache_date.outputs.date }}
+          restore-keys: |
+            intl-pipeline-cache-${{ runner.os }}-
+            us-pipeline-cache-${{ runner.os }}-
+            pipeline-cache-${{ runner.os }}-
+
+      # ── 4. Install dependencies ──────────────────────────────────────────────
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Install full pipeline deps
+        run: pip install -r requirements.txt
+
+      # ── 5. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
+      # upgrades-downgrades-consensus-bulk is global — covers EU/Asia symbols.
+      # ratios-ttm-bulk provides quality_piotroski inputs for non-US tickers.
+      - name: FMP bulk pre-fetch (Ultimate)
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+          BULK_CACHE_TTL_HOURS: "7"
+        run: |
+          set -euo pipefail
+          python scripts/fmp_bulk_prefetch.py \
+            --cache-dir  "$BULK_CACHE_DIR" \
+            --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
+            --endpoints  upgrades-downgrades-consensus-bulk \
+                         ratios-ttm-bulk \
+                         key-metrics-ttm-bulk \
+            --verbose
+
+      # ── 6. Fetch INTL raw factor metrics (FMP Ultimate — EU + Asia) ──────────
+      # FMPFetcher.prepare() calls per-ticker FMP stable/ endpoints for every
+      # available factor. Outputs [{"ticker": ..., "metrics": raw_factors}]
+      # consumed by run_pipeline_profile.py in the next step.
+      - name: Fetch INTL raw metrics
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+        run: |
+          mkdir -p logs
+          python3 - <<'EOF'
+          import json, os, sys, logging
+          from pathlib import Path
+
+          logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+          log = logging.getLogger("intl_fetch")
+          sys.path.insert(0, ".")
+
+          from regime_trader.fetchers.fmp_fetcher import FMPFetcher
+          from regime_trader.fetchers.base import MarketEnum
+
+          api_key = os.environ["FMP_API_KEY"]
+          bulk_cache_dir = Path(os.environ.get("BULK_CACHE_DIR", ".cache/bulk_snapshots"))
+
+          # Inject bulk consensus index to avoid per-ticker analyst_consensus calls
+          bulk_idx: dict = {}
+          try:
+              from scripts.fmp_bulk_prefetch import build_ticker_index
+              bulk_idx = build_ticker_index(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
+              log.info("Bulk consensus index: %d symbols loaded", len(bulk_idx))
+          except Exception as exc:
+              log.warning("Bulk index load failed: %s — falling back to per-ticker FMP", exc)
+
+          reg_path = Path("config/ticker_registry.json")
+          if not reg_path.exists():
+              log.error("ticker_registry.json not found — aborting")
+              sys.exit(1)
+          registry = json.loads(reg_path.read_text(encoding="utf-8"))
+          eu_tickers   = [e["ticker"] for e in registry.get("europe", [])]
+          asia_tickers = [e["ticker"] for e in registry.get("asia", [])]
+          log.info("Registry: %d EU + %d Asia tickers", len(eu_tickers), len(asia_tickers))
+
+          payload: list[dict] = []
+          for market_enum, tickers in [
+              (MarketEnum.EUROPE, eu_tickers),
+              (MarketEnum.ASIA,   asia_tickers),
+          ]:
+              if not tickers:
+                  continue
+              fetcher = FMPFetcher(
+                  api_key=api_key,
+                  market=market_enum,
+                  bulk_consensus_idx=bulk_idx,
+              )
+              entries = fetcher.prepare(tickers)
+              for entry in entries:
+                  # raw_factors keys use _score suffix — compatible with StrategyEngine
+                  payload.append({"ticker": entry.ticker, "metrics": entry.raw_factors})
+              log.info("%s: fetched %d entries", market_enum.value, len(entries))
+
+          out_path = Path("logs/raw_intl_fetcher_output.json")
+          out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+          log.info("Wrote %d INTL entries → %s", len(payload), out_path)
+          EOF
+
+      # ── 7. Score INTL universe (StrategyEngine 6-factor) ────────────────────
+      # assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6  (enforced in StrategyEngine)
+      - name: Score INTL universe
+        run: |
+          python scripts/run_pipeline_profile.py \
+            --config   backend/market_intel/profiles/intl_strategy.json \
+            --raw-data logs/raw_intl_fetcher_output.json \
+            --out-dir  logs/
+
+      # ── 8. Validate output ───────────────────────────────────────────────────
+      - name: Validate top_lists_intl.json
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+          p = Path("logs/top_lists_intl.json")
+          if not p.exists():
+              print("::error::top_lists_intl.json was not written — intl pipeline failed silently")
+              sys.exit(1)
+          d = json.loads(p.read_text())
+          if not isinstance(d, list) or len(d) == 0:
+              print("::error::top_lists_intl.json is empty — no INTL tickers scored")
+              sys.exit(1)
+          sample = d[0]
+          required_keys = {"ticker", "composite_score", "region_applied", "factor_snapshots"}
+          missing = required_keys - set(sample.keys())
+          if missing:
+              print(f"::error::Missing schema keys in top_lists_intl.json[0]: {missing}")
+              sys.exit(1)
+          nonzero = sum(1 for t in d if t.get("composite_score", 0) > 0)
+          print(f"Validated: {len(d)} INTL tickers, {nonzero} with non-zero composite score, schema OK")
+          EOF
+
+      # ── 9. Run summary ───────────────────────────────────────────────────────
+      - name: Generate INTL run summary
+        if: always()
+        run: |
+          echo "## INTL Pipeline — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f logs/top_lists_intl.json ]; then
+            echo "### Top 5 International Buys" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | Region | NS | Mom | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          try:
+              with open("logs/top_lists_intl.json") as f:
+                  d = json.load(f)
+              for i, t in enumerate(d[:5], 1):
+                  fac = t.get("factor_snapshots", {})
+                  print(f"| {i} | **{t['ticker']}** | {t['composite_score']:.4f} | "
+                        f"{t.get('region_applied', '—')} | "
+                        f"{fac.get('news_sentiment', 0):.2f} | "
+                        f"{fac.get('momentum_long', 0):.2f} | "
+                        f"{fac.get('analyst_consensus', 0):.2f} | "
+                        f"{fac.get('quality_piotroski', 0):.2f} |")
+          except Exception as e:
+              print(f"| — | _summary unavailable: {e}_ | | | | | | |")
+          EOF
+          else
+            echo "⚠️ _top_lists_intl.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── 10. Upload artifacts ─────────────────────────────────────────────────
+      # CRITICAL: if-no-files-found: error — hard fail prevents cook_and_notify
+      # from silently proceeding with an incomplete INTL dataset.
+      - name: Upload intl-top-lists artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intl-top-lists
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            logs/top_lists_intl.json
+            logs/raw_intl_fetcher_output.json
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 3: Merge + Discord Notification
+  # needs: BLOCKS until BOTH pipeline jobs complete successfully.
+  # This is the core race-condition fix — workflow_run would have fired once
+  # per completed upstream workflow (2 fires = 1 fire with missing artifact).
+  # ═══════════════════════════════════════════════════════════════════════════
+  cook_and_notify:
+    name: Merge + Discord Notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [run_us_pipeline, run_intl_pipeline]
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 ───────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install send deps ─────────────────────────────────────────────────
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests>=2.31.0
+          pip install -r requirements-ci.txt
+
+      # ── 4. Verify London local timing ────────────────────────────────────────
+      - name: Verify London Local Timing Gate
+        run: |
+          python3 -c "
+          from datetime import datetime
+          import zoneinfo
+          london_time = datetime.now(zoneinfo.ZoneInfo('Europe/London'))
+          print(f'Current London Time: {london_time.strftime(\"%H:%M %Z\")}')
+          print(f'UTC offset: {london_time.strftime(\"%z\")}')
+          "
+
+      # ── 5. Create workspace directories ──────────────────────────────────────
+      - name: Create workspace directories
+        run: mkdir -p logs
+
+      # ── 6. Download US top-lists ─────────────────────────────────────────────
+      # Same-workflow artifact: uses actions/download-artifact@v4 (not dawidd6).
+      # Artifact was uploaded as logs/top_lists_us.json by run_us_pipeline.
+      - name: Download US top-lists
+        uses: actions/download-artifact@v4
+        with:
+          name: us-top-lists
+          path: logs/
+
+      # ── 7. Download International top-lists ─────────────────────────────────
+      # Same-workflow artifact: uses actions/download-artifact@v4 (not dawidd6).
+      - name: Download INTL top-lists
+        uses: actions/download-artifact@v4
+        with:
+          name: intl-top-lists
+          path: logs/
+
+      # ── 8. Synthesize US + INTL into combined top_lists.json ─────────────────
+      # cook_toplists.py merges:
+      #   logs/top_lists_us.json    (US 9-factor)
+      #   logs/top_lists_intl.json  (INTL 6-factor)
+      # -> combined logs/top_lists.json with top_buys_usa / top_buys_europe /
+      #    top_buys_asia. Normalizes INTL schema (composite_score->final_score,
+      #    region->market, congress:0.0). stdlib-only.
+      - name: Cook (merge US + INTL)
+        run: |
+          python scripts/cook_toplists.py \
+            --us-input    logs/top_lists_us.json \
+            --intl-input  logs/top_lists_intl.json \
+            --registry    config/ticker_registry.json \
+            --output      logs/top_lists.json
+
+      # ── 9. Combined pre-flight audit (RT-QA-2026-REV5) ──────────────────────
+      # Validates the combined top_lists.json across all seven checks:
+      #   A. Score range [0, 1]          D. Geographic leakage
+      #   B. Badge consistency           E. Cross-contamination (congress==0 for EU/Asia)
+      #   C. Sort order (descending)     E2. Dynamic intl ceiling
+      #                                  F. VIX coherence  G. Ticker regex
+      - name: Audit combined payload (RT-QA-2026-REV5)
+        run: python scripts/audit_payload.py --input logs/top_lists.json
+
+      # ── 10. Freshness gate ───────────────────────────────────────────────────
+      # Artifacts from the same workflow run are always fresh (<1h old).
+      # Still validate the timestamp to catch silent pipeline failures that
+      # produce a stale intel_source_status.json from a previous cache hit.
+      - name: Verify intel_source_status.json freshness
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          p = Path("logs/intel_source_status.json")
+          if not p.exists():
+              print("intel_source_status.json not found — send step will handle alert embed")
+              sys.exit(0)
+
+          try:
+              d = json.loads(p.read_text(encoding="utf-8"))
+              generated_at = (
+                  d.get("generated_at") or d.get("computed_at") or
+                  (d.get("_edgar_meta") or {}).get("last_run") or ""
+              )
+              if not generated_at:
+                  print("::error::intel_source_status.json has no timestamp — refusing stale data")
+                  sys.exit(1)
+
+              ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+              age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+
+              # Same-workflow artifacts: threshold is 6h (matching workflow_run threshold).
+              max_age_h = 6.0
+              print(f"Artifact age: {age_h:.1f}h | Threshold: {max_age_h}h")
+
+              if age_h > max_age_h:
+                  print(
+                      f"::error::Artifact is {age_h:.1f}h old (threshold: {max_age_h}h). "
+                      f"Refusing stale Discord send."
+                  )
+                  sys.exit(1)
+
+              print(f"Freshness OK: {age_h:.1f}h < {max_age_h}h")
+
+          except SystemExit:
+              raise
+          except Exception as e:
+              print(f"::warning::Freshness check failed ({e}) — proceeding anyway")
+          EOF
+
+      # ── 11. Send to Discord (3 retries, 30s/60s backoff) ────────────────────
+      # Uses the combined top_lists.json (post-synthesis) which activates the
+      # v2.1-global regional embed path (top_buys_usa / top_buys_europe / top_buys_asia).
+      - name: Send daily market checkup
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python scripts/send_toplists_discord.py \
+            --input   logs/top_lists.json \
+            --log-dir logs \
+            $DRY_RUN_FLAG
+
+      # ── 12. Upload send log on failure ───────────────────────────────────────
+      - name: Upload Discord send log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discord-send-log-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: logs/discord_send.log
