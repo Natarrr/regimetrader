@@ -225,3 +225,83 @@ class TestBuildPayloadSchema:
         from scripts.send_toplists_discord import _compute_percentile
         scores = [0.0, 0.2, 0.4, 0.6]
         assert _compute_percentile(0.0, scores) == 25
+
+
+_INSTITUTIONAL_SAMPLE = {
+    "top_buys_usa": [{
+        "ticker": "MSFT", "final_score": 0.942, "badge": "HIGH BUY",
+        "price_target": 480.0, "current_price": 420.0,
+        "factors": {"sector": "Technology"},
+        "exit_anchors": {
+            "batch_floor": 408.0, "upside_pct": 14.2,
+            "take_profit_alert": False, "breakout_extension": False,
+            "extended_target": None,
+        },
+    }],
+    "top_buys_europe": [{
+        "ticker": "ASML.AS", "final_score": 0.912, "badge": "HIGH BUY",
+        "price_target": 980.0, "current_price": 851.0,
+        "factors": {"sector": "Technology"},
+        "exit_anchors": {
+            "batch_floor": 820.0, "upside_pct": 15.1,
+            "take_profit_alert": False, "breakout_extension": False,
+            "extended_target": None,
+        },
+    }],
+    "top_buys_asia": [],
+    "mvo_pools": {
+        "mid_cap": {
+            "bracket": "MID_CAP",
+            "positions": [{
+                "ticker": "IFF", "allocation": 0.35, "final_score": 0.80,
+                "price_target": 110.0,
+                "exit_anchors": {"batch_floor": 88.0, "upside_pct": 16.2,
+                                 "take_profit_alert": False},
+            }],
+        }
+    },
+    "vix": 24.5, "vix_regime": "BEAR", "kill_switch": False,
+    "generated_at": "2026-06-07T12:00:00+00:00",
+}
+
+
+class TestInstitutionalFormat:
+    def _payloads(self):
+        from scripts.send_toplists_discord import build_institutional_payload
+        return build_institutional_payload(_INSTITUTIONAL_SAMPLE)
+
+    def test_returns_two_payloads(self):
+        assert len(self._payloads()) == 2
+
+    def test_both_have_embeds(self):
+        for p in self._payloads():
+            assert "embeds" in p
+
+    def test_header_in_first_embed(self):
+        desc = self._payloads()[0]["embeds"][0]["description"]
+        assert "INSTITUTIONAL RISK & ALPHA DISPATCH" in desc
+
+    def test_vix_in_regime_line(self):
+        desc = self._payloads()[0]["embeds"][0]["description"]
+        assert "24.5" in desc or "24.50" in desc
+
+    def test_batch_floor_label_not_hard_stop(self):
+        desc = self._payloads()[0]["embeds"][0]["description"]
+        assert "Batch Floor" in desc
+        assert "Hard Stop" not in desc
+
+    def test_spot_price_in_card(self):
+        desc = self._payloads()[0]["embeds"][0]["description"]
+        assert "420.00" in desc   # MSFT spot
+
+    def test_gtc_notice_in_second_embed(self):
+        desc = self._payloads()[1]["embeds"][0]["description"]
+        assert "GTC" in desc
+
+    def test_sector_concentration_header(self):
+        desc = self._payloads()[1]["embeds"][0]["description"]
+        assert "SECTOR CONCENTRATION" in desc.upper() or "Theme Sector Exposure" in desc
+
+    def test_description_within_4096(self):
+        for p in self._payloads():
+            assert len(p["embeds"][0].get("description", "")) <= 4096

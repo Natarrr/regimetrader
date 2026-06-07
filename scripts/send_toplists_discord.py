@@ -490,9 +490,10 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
 
 
 def _weights_for_entry(entry: dict) -> dict:
-    """Return the correct weight dict based on entry pipeline metadata."""
-    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_GLOBAL  # noqa: PLC0415
-    return WEIGHTS_GLOBAL if entry.get("pipeline") == "INTL" else WEIGHTS_US
+    """Return the correct weight dict based on ticker region."""
+    from regime_trader.config.weights import get_weights as _gw  # noqa: PLC0415
+    ticker = entry.get("ticker", "")
+    return _gw(ticker)
 
 
 def _factor_contribution_line(entry: Dict[str, Any]) -> str:
@@ -993,6 +994,161 @@ def build_regional_embeds(
         })
 
     return embeds
+
+
+# ── Institutional block (v22 — Batch Floor + GTC desk notice) ─────────────────
+
+def _fmt_region_block(label: str, model_name: str, entries: list, max_entries: int = 3) -> str:
+    try:
+        from regime_trader.risk.exit_rules import format_card_line  # noqa: PLC0415
+        _has_exit = True
+    except ImportError:
+        _has_exit = False
+
+    lines = [f"[{label} - {model_name}]"]
+    for rank, e in enumerate(entries[:max_entries], 1):
+        ticker = e.get("ticker", "???")
+        score  = e.get("final_score", 0.0)
+        badge  = e.get("badge", "WATCHLIST")
+        cap    = " [CAPITULATION SURVIVOR]" if e.get("_capitulation_survivor") else ""
+        lines.append(f"  {rank}. {ticker:<8}| SCORE: {score:.4f} | {badge}{cap}")
+        if _has_exit:
+            lines.append(f"     " + format_card_line(e))
+    if not entries[:max_entries]:
+        lines.append("  [NO QUALIFYING ASSETS IN CURRENT REGIME]")
+    return "\n".join(lines)
+
+
+def _fmt_mvo_pool(label: str, pool: dict) -> str:
+    try:
+        from regime_trader.risk.exit_rules import format_card_line  # noqa: PLC0415
+        _has_exit = True
+    except ImportError:
+        _has_exit = False
+
+    lines = [f"[{label}]"]
+    for pos in pool.get("positions", [])[:6]:
+        ticker = pos.get("ticker", "???")
+        alloc  = (pos.get("allocation") or 0) * 100
+        score  = pos.get("final_score", 0)
+        stage  = "ENTER POSITION" if score >= 0.80 else "ASYMMETRIC LONG"
+        lines.append(f"  - {ticker:<6} (ALLOC: {alloc:5.2f}%) | STAGE: {stage}")
+        if _has_exit:
+            lines.append(f"    " + format_card_line(pos))
+    return "\n".join(lines)
+
+
+def _fmt_sector_concentration(all_entries: list) -> str:
+    """Rigid syntax: Theme Sector Exposure: Sector (N) Ticker Weight | Sector (N) ..."""
+    sector_map: dict = {}
+    for e in all_entries:
+        raw   = (e.get("factors", {}).get("sector") or e.get("sector") or "Other").strip()
+        short = _SECTOR_SHORT.get(raw, raw[:5])
+        score = e.get("final_score", 0.0)
+        sector_map.setdefault(short, []).append((e.get("ticker", "?"), score))
+
+    parts = []
+    for sector in sorted(sector_map):
+        tickers = sector_map[sector]
+        count   = len(tickers)
+        top2    = sorted(tickers, key=lambda x: x[1], reverse=True)[:2]
+        ticker_str = " ".join(f"{t} {w:.2f}" for t, w in top2)
+        parts.append(f"{sector} ({count}) {ticker_str}")
+
+    return "Theme Sector Exposure: " + " | ".join(parts) if parts else "Theme Sector Exposure: N/A"
+
+
+def build_institutional_payload(top_lists: dict) -> list:
+    """Build two-embed institutional monospaced block with GTC desk notice.
+
+    Embed 1: Regime header + regional equity sections with Batch Floor card lines.
+    Embed 2: GTC desk notice + MVO pool sections + sector concentration.
+    """
+    vix         = top_lists.get("vix", 0.0)
+    vix_regime  = (top_lists.get("vix_regime") or "UNKNOWN").upper()
+    kill_switch = top_lists.get("kill_switch", False)
+    gen_at      = (top_lists.get("generated_at") or "")[:16]
+
+    if kill_switch or vix >= 30:
+        strategy = "CAPITULATION DISTRESSED REGIME / HIGH-QUALITY ANCHORS ONLY"
+    elif vix >= 25:
+        strategy = "DEFENSIVE / GRADUATED POSITIONING ACTIVATED"
+    else:
+        strategy = "NORMAL / FULL POSITIONING"
+
+    SEP  = "=" * 72
+    THIN = "-" * 72
+
+    block1 = "\n".join([
+        SEP,
+        "INSTITUTIONAL RISK & ALPHA DISPATCH",
+        SEP,
+        f"[REGIME STATUS] DETECTED REGIME: {vix_regime} (VIX: {vix:.2f})",
+        f"[RISK OVERLAY]  STRATEGY: {strategy}",
+        SEP,
+        "",
+        "TOP REGIONAL EQUITIES",
+        THIN,
+        _fmt_region_block("US MARKET", "INSIDER INFILTRATION MODEL",
+                          top_lists.get("top_buys_usa", [])),
+        "",
+        _fmt_region_block("ASIAN MARKET", "LIQUIDITY SENTIMENT MODEL",
+                          top_lists.get("top_buys_asia", [])),
+        "",
+        _fmt_region_block("EUROPEAN MARKET", "BALANCE SHEET QUALITY MODEL",
+                          top_lists.get("top_buys_europe", [])),
+    ])
+
+    mvo_pools = top_lists.get("mvo_pools", {})
+    mvo_lines = [
+        "[DESK NOTICE: PLACE GTC BROKERAGE STOPS AT BATCH FLOOR PRICES IMMEDIATELY]",
+        "",
+        "OPTIMIZED PORTFOLIO POOLS (MEAN-VARIANCE ENGINE)",
+        THIN,
+    ]
+
+    anchors = mvo_pools.get("large_cap_anchors", {})
+    if anchors.get("positions"):
+        mvo_lines.append(_fmt_mvo_pool("STRUCTURAL CORE ANCHORS (>$10B - EQUAL WEIGHT)", anchors))
+        mvo_lines.append("")
+
+    mid = mvo_pools.get("mid_cap", {})
+    if mid.get("positions"):
+        mvo_lines.append(_fmt_mvo_pool("MID-CAP SHARPE MAXIMIZER ($2B-$10B)", mid))
+        mvo_lines.append("")
+
+    small = mvo_pools.get("small_cap", {})
+    if small.get("positions"):
+        mvo_lines.append(_fmt_mvo_pool("SMALL-CAP MIN VARIANCE ($300M-$2B | ADV-GATED)", small))
+
+    all_entries = (
+        top_lists.get("top_buys_usa", []) +
+        top_lists.get("top_buys_europe", []) +
+        top_lists.get("top_buys_asia", [])
+    )
+    block2 = "\n".join(mvo_lines + [
+        "",
+        "GLOBAL THEMATIC SECTOR CONCENTRATION",
+        THIN,
+        _fmt_sector_concentration(all_entries),
+        "",
+        SEP,
+        f"[PIPELINE STATUS: NOMINAL | GENERATED: {gen_at}]",
+        SEP,
+    ])
+
+    color = _COLOR_RED if (kill_switch or vix >= 30) else (
+        _COLOR_ORANGE if vix >= 25 else _COLOR_GREEN
+    )
+
+    def _wrap_code(text: str) -> str:
+        wrapped = "```\n" + text + "\n```"
+        return wrapped[:4096]
+
+    return [
+        {"embeds": [{"description": _wrap_code(block1), "color": color}]},
+        {"embeds": [{"description": _wrap_code(block2), "color": color}]},
+    ]
 
 
 # ── Payload builder ────────────────────────────────────────────────────────────
