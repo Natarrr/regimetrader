@@ -181,7 +181,6 @@ jobs:
             --log-dir    logs \
             --run-id     "$GITHUB_RUN_ID" \
             --bulk-cache "$BULK_CACHE_DIR" \
-            --output-file top_lists_us.json \
             --verbose \
             $FORCE
 
