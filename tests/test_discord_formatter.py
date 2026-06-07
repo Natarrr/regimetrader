@@ -59,19 +59,19 @@ class TestTickerDetailField:
         return [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.82, 0.9]
 
     def test_ticker_in_field(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         f = _ticker_detail_field(
             1, self._entry(), all_scores=self._all_scores())
         assert "AAPL" in f["name"]
 
     def test_score_in_field(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         f = _ticker_detail_field(
             1, self._entry(), all_scores=self._all_scores())
         assert "0.8200" in f["name"]
 
     def test_7factor_matrix_rendered(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         f = _ticker_detail_field(
             1, self._entry(), all_scores=self._all_scores())
         val = f["value"]
@@ -84,7 +84,7 @@ class TestTickerDetailField:
         assert "VA:" in val
 
     def test_zero_factors_rendered_as_dash(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         f = _ticker_detail_field(
             1, self._entry(), all_scores=self._all_scores())
         val = f["value"]
@@ -93,27 +93,27 @@ class TestTickerDetailField:
         assert "VA:—" in val
 
     def test_ceo_tier_shown(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         entry = self._entry(insider_usd=22000, ceo_conviction_tier="CEO BUY")
         f = _ticker_detail_field(1, entry, all_scores=self._all_scores())
         assert "Insider" in f["value"]
         assert "CEO" in f["value"]
 
     def test_ceo_tier_absent_when_none(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         entry = self._entry(ceo_conviction_tier=None)
         f = _ticker_detail_field(1, entry, all_scores=self._all_scores())
         assert "CEO" not in f["value"]
 
     def test_percentile_in_field(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         # all_scores has 9 values, 0.82 is 8th → p88
         f = _ticker_detail_field(
             1, self._entry(), all_scores=self._all_scores())
         assert "p8" in f["name"]  # p80–p89 range
 
     def test_catalyst_line_present(self):
-        from scripts.send_toplists_discord import _ticker_detail_field
+        from src.delivery.send_discord import _ticker_detail_field
         f = _ticker_detail_field(
             1, self._entry(), all_scores=self._all_scores())
         assert any(kw in f["value"] for kw in ["Insider",
@@ -124,18 +124,18 @@ class TestComputePercentile:
     """_compute_percentile returns correct rank within population."""
 
     def test_top_score_is_p100(self):
-        from scripts.send_toplists_discord import _compute_percentile
+        from src.delivery.send_discord import _compute_percentile
         scores = [0.1, 0.2, 0.3, 0.4, 0.5]
         assert _compute_percentile(0.5, scores) == 100
 
     def test_bottom_score_is_low(self):
-        from scripts.send_toplists_discord import _compute_percentile
+        from src.delivery.send_discord import _compute_percentile
         scores = [0.1, 0.2, 0.3, 0.4, 0.5]
         pct = _compute_percentile(0.1, scores)
         assert pct <= 20
 
     def test_empty_population_returns_zero(self):
-        from scripts.send_toplists_discord import _compute_percentile
+        from src.delivery.send_discord import _compute_percentile
         assert _compute_percentile(0.5, []) == 0
 
 
@@ -143,7 +143,7 @@ class TestComputeCatalyst:
     """_compute_catalyst returns top active factors in descending order."""
 
     def test_returns_top_two_drivers(self):
-        from scripts.send_toplists_discord import _compute_catalyst
+        from src.delivery.send_discord import _compute_catalyst
         entry = {
             "insider_usd": 12500,
             "ceo_conviction_tier": "CEO BUY",
@@ -155,13 +155,13 @@ class TestComputeCatalyst:
         assert "EPS" in cat
 
     def test_no_active_factors_returns_no_catalyst(self):
-        from scripts.send_toplists_discord import _compute_catalyst
+        from src.delivery.send_discord import _compute_catalyst
         entry = {"factors": {"insider_conviction": 0.0, "congress": 0.0}}
         cat = _compute_catalyst(entry)
         assert "no primary catalyst" in cat
 
     def test_zeros_excluded_from_catalyst(self):
-        from scripts.send_toplists_discord import _compute_catalyst
+        from src.delivery.send_discord import _compute_catalyst
         entry = {"factors": {"insider_conviction": 0.9, "congress": 0.0,
                              "news_sentiment": 0.0}}
         cat = _compute_catalyst(entry)
@@ -172,20 +172,20 @@ class TestBuildPayloadSchema:
     """build_payload handles both intel_source_status.json and legacy top_lists.json."""
 
     def test_status_schema_produces_embed(self):
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
         payload = build_payload(_make_status())
         assert "embeds" in payload
         assert len(payload["embeds"]) >= 1
 
     def test_status_schema_has_usa_section(self):
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
         payload = build_payload(_make_status())
         fields = payload["embeds"][0]["fields"]
         names = [f["name"] for f in fields]
         assert any("USA" in n for n in names)
 
     def test_legacy_schema_still_works(self):
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
         legacy = {
             "generated_at": "2026-05-17T12:00:00+00:00",
             "source_run_id": "test-run",
@@ -205,7 +205,7 @@ class TestBuildPayloadSchema:
         assert "embeds" in payload
 
     def test_stale_data_shows_warning(self):
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
         # generated_at > 25h ago → DATA IS Xh OLD stale alert in description
         status = _make_status(generated_at="2026-05-17T12:00:00+00:00")
         payload = build_payload(status)
@@ -213,7 +213,7 @@ class TestBuildPayloadSchema:
         assert "OLD" in desc
 
     def test_status_schema_preserves_esg_metadata(self):
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
         status = _make_status()
         status["top_by_market"]["US"][0]["esg_score"] = 22.0
         status["top_by_market"]["US"][0]["esg_flag"] = True
@@ -222,7 +222,7 @@ class TestBuildPayloadSchema:
         assert any("ESG!" in n for n in names)
 
     def test_percentile_includes_zero_values(self):
-        from scripts.send_toplists_discord import _compute_percentile
+        from src.delivery.send_discord import _compute_percentile
         scores = [0.0, 0.2, 0.4, 0.6]
         assert _compute_percentile(0.0, scores) == 25
 
@@ -267,7 +267,7 @@ _INSTITUTIONAL_SAMPLE = {
 
 class TestInstitutionalFormat:
     def _payloads(self):
-        from scripts.send_toplists_discord import build_institutional_payload
+        from src.delivery.send_discord import build_institutional_payload
         return build_institutional_payload(_INSTITUTIONAL_SAMPLE)
 
     def test_returns_two_payloads(self):

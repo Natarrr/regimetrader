@@ -84,7 +84,7 @@ class TestTopListsOverlay:
 
     def test_overlay_helper_returns_vix(self, tmp_path):
         """_load_top_lists_overlay must extract vix, kill_switch, vix_multiplier."""
-        from scripts.send_toplists_discord import _load_top_lists_overlay
+        from src.delivery.send_discord import _load_top_lists_overlay
 
         top_lists = {
             "vix":            22.5,
@@ -101,14 +101,14 @@ class TestTopListsOverlay:
 
     def test_overlay_helper_returns_empty_on_missing_file(self, tmp_path):
         """Missing top_lists.json → empty dict, no exception."""
-        from scripts.send_toplists_discord import _load_top_lists_overlay
+        from src.delivery.send_discord import _load_top_lists_overlay
 
         result = _load_top_lists_overlay(tmp_path)
         assert result == {}
 
     def test_overlay_helper_returns_empty_on_corrupt_json(self, tmp_path):
         """Corrupt top_lists.json → empty dict, no exception."""
-        from scripts.send_toplists_discord import _load_top_lists_overlay
+        from src.delivery.send_discord import _load_top_lists_overlay
 
         (tmp_path / "top_lists.json").write_text("not json", encoding="utf-8")
         result = _load_top_lists_overlay(tmp_path)
@@ -117,7 +117,7 @@ class TestTopListsOverlay:
     def test_vix_appears_in_embed_description_via_overlay(self, tmp_path):
         """When intel_source_status.json has no vix but top_lists.json does,
         the embed description must show the VIX value from the overlay."""
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
 
         status = _base_status()
         del status["vix"]  # no VIX in status — must come from overlay
@@ -126,7 +126,7 @@ class TestTopListsOverlay:
         (tmp_path / "top_lists.json").write_text(json.dumps(top_lists), encoding="utf-8")
 
         # Manually merge overlay (simulating what main() does)
-        from scripts.send_toplists_discord import _load_top_lists_overlay
+        from src.delivery.send_discord import _load_top_lists_overlay
         overlay = _load_top_lists_overlay(tmp_path)
         for k, v in overlay.items():
             status.setdefault(k, v)
@@ -143,49 +143,49 @@ class TestNormaliseEntryAnalystFields:
     the _normalise_entry() pass so _fmt_factor_matrix shows non-dash AR/PT/AC."""
 
     def test_analyst_consensus_score_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", analyst_consensus_score=0.75)
         entry = _normalise_entry(raw)
         assert entry["analyst_consensus_score"] == 0.75
 
     def test_analyst_revision_score_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", analyst_revision_score=0.70)
         entry = _normalise_entry(raw)
         assert entry["analyst_revision_score"] == 0.70
 
     def test_analyst_revision_n_analysts_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", analyst_revision_n=12)
         entry = _normalise_entry(raw)
         assert entry["analyst_revision_n_analysts"] == 12
 
     def test_price_target_upside_score_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", price_target_upside_score=0.65)
         entry = _normalise_entry(raw)
         assert entry["price_target_upside_score"] == 0.65
 
     def test_quality_piotroski_score_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", quality_piotroski_score=0.60)
         entry = _normalise_entry(raw)
         assert entry["quality_piotroski_score"] == 0.60
 
     def test_insider_usd_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", insider_usd=50000.0)
         entry = _normalise_entry(raw)
         assert entry["insider_usd"] == 50000.0
 
     def test_form4_count_propagated(self):
-        from scripts.send_toplists_discord import _normalise_entry
+        from src.delivery.send_discord import _normalise_entry
 
         raw = _raw_entry("AAPL", form4_count=8)
         entry = _normalise_entry(raw)
@@ -193,7 +193,7 @@ class TestNormaliseEntryAnalystFields:
 
     def test_factor_matrix_shows_ar_not_dash_when_score_nonzero(self):
         """After normalise_entry, factor matrix must show AR:0.70 not AR:—."""
-        from scripts.send_toplists_discord import _normalise_entry, _fmt_factor_matrix
+        from src.delivery.send_discord import _normalise_entry, _fmt_factor_matrix
 
         raw = _raw_entry("AAPL", analyst_revision_score=0.70)
         entry = _normalise_entry(raw)
@@ -203,7 +203,7 @@ class TestNormaliseEntryAnalystFields:
 
     def test_factor_matrix_shows_pt_not_dash_when_score_nonzero(self):
         """After normalise_entry, factor matrix must show PT score not PT:—."""
-        from scripts.send_toplists_discord import _normalise_entry, _fmt_factor_matrix
+        from src.delivery.send_discord import _normalise_entry, _fmt_factor_matrix
 
         raw = _raw_entry("AAPL", price_target_upside_score=0.65)
         entry = _normalise_entry(raw)
@@ -218,7 +218,7 @@ class TestActionSectionVerbGating:
 
     def test_watchlist_score_shows_watch_not_buy(self):
         """score=0.45 (WATCHLIST) → verb must be WATCH even if top-ranked."""
-        from scripts.send_toplists_discord import _action_section, _badge_from_score
+        from src.delivery.send_discord import _action_section, _badge_from_score
 
         entries = [
             {"ticker": "WATCH1", "final_score": 0.45, "badge": _badge_from_score(0.45),
@@ -232,7 +232,7 @@ class TestActionSectionVerbGating:
 
     def test_tactical_buy_score_shows_buy(self):
         """score=0.65 (TACTICAL BUY) → verb must be BUY."""
-        from scripts.send_toplists_discord import _action_section, _badge_from_score
+        from src.delivery.send_discord import _action_section, _badge_from_score
 
         entries = [
             {"ticker": "BUY1", "final_score": 0.65, "badge": _badge_from_score(0.65),
@@ -245,7 +245,7 @@ class TestActionSectionVerbGating:
 
     def test_high_buy_score_shows_buy(self):
         """score=0.85 (HIGH BUY) → verb must be BUY."""
-        from scripts.send_toplists_discord import _action_section, _badge_from_score
+        from src.delivery.send_discord import _action_section, _badge_from_score
 
         entries = [
             {"ticker": "HBUY", "final_score": 0.85, "badge": _badge_from_score(0.85),
@@ -258,7 +258,7 @@ class TestActionSectionVerbGating:
 
     def test_boundary_score_0_60_shows_buy(self):
         """score=0.60 is exactly TACTICAL BUY threshold → verb must be BUY."""
-        from scripts.send_toplists_discord import _action_section, _badge_from_score
+        from src.delivery.send_discord import _action_section, _badge_from_score
 
         entries = [
             {"ticker": "EXACT", "final_score": 0.60, "badge": _badge_from_score(0.60),
@@ -271,7 +271,7 @@ class TestActionSectionVerbGating:
 
     def test_mixed_scores_correct_verbs_per_entry(self):
         """Mixed-score top-3: WATCH for <0.60, BUY for ≥0.60."""
-        from scripts.send_toplists_discord import _action_section, _badge_from_score
+        from src.delivery.send_discord import _action_section, _badge_from_score
 
         entries = [
             {"ticker": "BUYT",  "final_score": 0.75, "badge": _badge_from_score(0.75),
@@ -381,7 +381,7 @@ class TestRunIdInStatus:
 
     def test_build_payload_shows_run_id_in_footer(self):
         """build_payload with run_id='12345678901' → footer contains that ID."""
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
 
         status = _base_status(run_id="12345678901")
         payload = build_payload(status)
@@ -390,7 +390,7 @@ class TestRunIdInStatus:
 
     def test_build_payload_empty_run_id_shows_local_or_empty(self):
         """run_id='' or 'local' must appear in footer (not crash)."""
-        from scripts.send_toplists_discord import build_payload
+        from src.delivery.send_discord import build_payload
 
         status = _base_status(run_id="local")
         payload = build_payload(status)

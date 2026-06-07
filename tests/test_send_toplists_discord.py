@@ -7,7 +7,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-from scripts.send_toplists_discord import _load_satellite, build_payload
+from src.delivery.send_discord import _load_satellite, build_payload
 
 
 # ── Fixture: minimal valid top_lists ─────────────────────────────────────────
@@ -144,8 +144,8 @@ class TestBuildPayloadSatellite:
 def test_weights_for_entry_returns_regional_weights():
     """EU tickers use WEIGHTS_EU, US tickers use WEIGHTS_US — per-ticker routing via get_weights()."""
     spec = importlib.util.spec_from_file_location(
-        "send_toplists_discord",
-        Path("scripts/send_toplists_discord.py"),
+        "send_discord",
+        Path("src/delivery/send_discord.py"),
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
