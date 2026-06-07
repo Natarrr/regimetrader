@@ -1,4 +1,4 @@
-from regime_trader.fetchers.base import TickerEntry
+from src.core.fetchers_base import TickerEntry
 from regime_trader.fetchers.orchestrator import Orchestrator
 from scripts.fmp_bulk_prefetch import build_ticker_index, map_bulk_data_to_universe, normalize_ticker_key
 from regime_trader.fetchers.fmp_fetcher import FMPFetcher
@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 import json
 import pytest
-from regime_trader.fetchers.base import BaseMarketFetcher, MarketEnum
+from src.core.fetchers_base import BaseMarketFetcher, MarketEnum
 
 
 def test_market_enum_values():

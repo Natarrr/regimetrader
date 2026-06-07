@@ -1,4 +1,4 @@
-from .base import BaseMarketFetcher, MarketEnum
+from src.core.fetchers_base import BaseMarketFetcher, MarketEnum
 
 try:
     from .orchestrator import Orchestrator

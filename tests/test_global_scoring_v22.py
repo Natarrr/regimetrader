@@ -161,7 +161,7 @@ def test_canary_contamination_guard():
 
 def test_fmp_fetcher_source_reliability():
     from regime_trader.fetchers.fmp_fetcher import FMPFetcher
-    from regime_trader.fetchers.base import MarketEnum
+    from src.core.fetchers_base import MarketEnum
 
     eu = FMPFetcher(api_key="k", market=MarketEnum.EUROPE)
     asia = FMPFetcher(api_key="k", market=MarketEnum.ASIA)

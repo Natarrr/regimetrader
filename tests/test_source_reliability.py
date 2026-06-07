@@ -8,7 +8,7 @@ available-factor denominator in StrategyEngine.score_ticker_pool.
 """
 import pytest
 from regime_trader.fetchers.fmp_fetcher import FMPFetcher
-from regime_trader.fetchers.base import MarketEnum
+from src.core.fetchers_base import MarketEnum
 
 
 def test_source_reliability_eu_is_one():
