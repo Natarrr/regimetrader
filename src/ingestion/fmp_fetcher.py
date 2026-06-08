@@ -25,6 +25,14 @@ Factors now fetched for ALL markets:
 Structurally absent (no data source exists globally):
   - congress_score: US STOCK Act / S3 Stock Watcher only — always 0.0
   - transcript_tone_score: FMP earning-call-transcript-latest US-only — always 0.0
+
+Insider data coverage (critical for EU/Asia):
+  FMP insider-trading/search is SEC Form 4 data — US STOCK Act disclosures only.
+  EU/Asia companies file under MAR Art.19 (EU) or local regimes, which are NOT
+  indexed by FMP. For non-US tickers (those with an exchange suffix like .AS,
+  .PA, .KS, .T), insider_conviction_score and insider_breadth_score are forced
+  to None (excluded from the StrategyEngine denominator) rather than 0.0
+  (which would penalise them as genuine "no insider buying" signal).
 """
 from __future__ import annotations
 
@@ -194,105 +202,93 @@ class FMPFetcher(BaseMarketFetcher):
         if not quote:
             logger.warning(
                 "FMPFetcher: no quote for %s — all FMP factors absent from denominator", ticker)
-            return {
-                "momentum_long_score":       momentum_long_score,
-                "volume_attention_score":    volume_attention_score,
-                "news_sentiment_score":      None,
-                "news_buzz_score":           None,
-                "insider_conviction_score":  None,
-                "insider_breadth_score":     None,
-                "analyst_consensus_score":   None,
-                "analyst_revision_score":    None,
-                "quality_piotroski_score":   None,
-                "price_target_upside_score": None,
-                "congress_score":            0.0,
-                "transcript_tone_score":     0.0,
-                "return_12_1m":              return_12_1m,
-                "volume_spike":              volume_spike,
-                "market_cap":                0.0,
-                "target_price":              None,
-                "current_price":             None,
-                "news_sentiment_source":     "none",
-                "news_buzz_source":          "none",
-                "analyst_consensus_source":  "none",
-                "insider_source":            "none",
-            }
+            return _build_price_only_factors(
+                closes, volumes, return_12_1m, volume_spike,
+                momentum_long_score, volume_attention_score,
+            )
         mktcap_from_quote = float(quote.get("marketCap", 0) or 0)
 
         # ── 2. News — sentiment + buzz ────────────────────────────────────────
-        news_sentiment_score = None  # None = API failure; 0.0 = no signal (genuine)
-        news_buzz_score = None
-        try:
-            articles = client.get_news_raw_articles(ticker)
-            if not articles and "." in ticker:
-                # FMP news/stock indexes by base symbol (e.g. ASML not ASML.AS)
-                articles = client.get_news_raw_articles(ticker.split(".")[0])
-            # API call succeeded — 0.0 if no articles = genuine zero signal
-            news_sentiment_score = 0.0
-            news_buzz_score = 0.0
-            if articles:
-                s = score_news_sentiment(articles)
-                if s > 0.0:
-                    news_sentiment_score = s
-                news_buzz_score = score_news_buzz(articles)
-        except Exception as exc:
+        news_sentiment_score: Optional[float] = None
+        news_buzz_score: Optional[float] = None
+        for _sym in _symbol_candidates(ticker):
+            try:
+                articles = client.get_news_raw_articles(_sym)
+                if articles is not None:
+                    news_sentiment_score = score_news_sentiment(articles) if articles else 0.0
+                    news_buzz_score = score_news_buzz(articles) if articles else 0.0
+                    break
+            except Exception as exc:
+                logger.warning(
+                    "FMPFetcher news ABSENT %s (%s): %s(%s) — will try next candidate",
+                    ticker, _sym, type(exc).__name__, str(exc)[:80],
+                )
+        if news_sentiment_score is None:
             logger.warning(
-                "FMPFetcher news ABSENT %s: %s(%s) — news_sentiment/buzz excluded from denominator",
-                ticker, type(exc).__name__, str(exc)[:80],
-            )
+                "FMPFetcher news ABSENT %s: all candidates failed — excluded from denominator", ticker)
 
         # ── 3. Insider — conviction + breadth ────────────────────────────────
-        insider_conviction_score = None  # None = API failure; 0.0 = no insider activity
-        insider_breadth_score = None
-        try:
-            # quote already fetched in coverage guard above
-            mktcap = mktcap_from_quote
-            total_usd, days_since = client.get_insider_purchases(
-                ticker, lookback_days=180)
-            btx = client.get_insider_transactions(ticker, lookback_days=90)
-            # All API calls succeeded — set defaults before scoring
-            insider_conviction_score = 0.0
-            insider_breadth_score = 0.0
-            if total_usd > 0 and mktcap > 0:
-                insider_conviction_score = score_insider_conviction(
-                    key_purchases_usd=total_usd,
-                    market_cap=mktcap,
-                    days_since_most_recent=days_since,
-                )
-            breadth_raw = score_insider_breadth(
-                btx.get("P", []), btx.get("S", []))
-            insider_conviction_score, insider_breadth_score = orthogonalize_insider_scores(
-                insider_conviction_score, breadth_raw
-            )
-        except Exception as exc:
-            logger.warning(
-                "FMPFetcher insider ABSENT %s: %s(%s) — insider_conviction/breadth excluded from denominator",
-                ticker, type(exc).__name__, str(exc)[:80],
-            )
+        # FMP insider-trading/search is SEC Form 4 (US STOCK Act) ONLY.
+        # EU/Asia companies file under MAR Art.19 or local regimes — not in FMP.
+        # For non-US tickers, keep None so StrategyEngine excludes these from
+        # the denominator (not penalised as genuine zero-insider-buying signal).
+        is_us_ticker = "." not in ticker
+        insider_conviction_score: Optional[float] = None
+        insider_breadth_score: Optional[float] = None
 
-        # ── 4. Analyst consensus — bulk index lookup ──────────────────────────
-        analyst_consensus_score = None  # None = API failure; 0.0 = no analyst coverage
+        if is_us_ticker:
+            try:
+                mktcap = mktcap_from_quote
+                total_usd, days_since = client.get_insider_purchases(
+                    ticker, lookback_days=180)
+                btx = client.get_insider_transactions(ticker, lookback_days=90)
+                insider_conviction_score = 0.0
+                insider_breadth_score = 0.0
+                if total_usd > 0 and mktcap > 0:
+                    insider_conviction_score = score_insider_conviction(
+                        key_purchases_usd=total_usd,
+                        market_cap=mktcap,
+                        days_since_most_recent=days_since,
+                    )
+                breadth_raw = score_insider_breadth(
+                    btx.get("P", []), btx.get("S", []))
+                insider_conviction_score, insider_breadth_score = orthogonalize_insider_scores(
+                    insider_conviction_score, breadth_raw
+                )
+            except Exception as exc:
+                logger.warning(
+                    "FMPFetcher insider ABSENT %s: %s(%s) — excluded from denominator",
+                    ticker, type(exc).__name__, str(exc)[:80],
+                )
+                insider_conviction_score = None
+                insider_breadth_score = None
+        else:
+            logger.debug(
+                "FMPFetcher insider SKIP %s — non-US ticker, SEC Form 4 not applicable", ticker)
+
+        # ── 4. Analyst consensus — bulk index with symbol-candidate fallback ───
+        analyst_consensus_score: Optional[float] = None
         try:
             _base_sym = ticker.split(".")[0].upper()
             bulk_rec = self._bulk_consensus_idx.get(ticker.upper())
-            # Fallback to base symbol only if it's not ambiguous (multiple exchange variants)
             if not bulk_rec and _base_sym not in self._ambiguous_bases:
                 bulk_rec = self._bulk_consensus_idx.get(_base_sym)
             elif not bulk_rec and _base_sym in self._ambiguous_bases:
                 logger.debug(
                     "Skipping ambiguous base alias %s — multiple exchange variants present",
                     _base_sym)
-            analyst_consensus_score = 0.0  # API lookup succeeded
+            analyst_consensus_score = 0.0
             if bulk_rec:
                 analyst_consensus_score, _ = ac_score_record(ticker, bulk_rec)
             else:
-                ratings = client.get_analyst_ratings(ticker)
-                if ratings:
-                    analyst_consensus_score, _ = ac_score_record(
-                        ticker, ratings)
+                for _sym in _symbol_candidates(ticker):
+                    ratings = client.get_analyst_ratings(_sym)
+                    if ratings:
+                        analyst_consensus_score, _ = ac_score_record(ticker, ratings)
+                        break
         except Exception as exc:
             logger.warning(
-                "FMPFetcher analyst_consensus ABSENT %s: %s(%s) — analyst_consensus excluded from denominator",
+                "FMPFetcher analyst_consensus ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
 
@@ -328,27 +324,26 @@ class FMPFetcher(BaseMarketFetcher):
                 ticker, type(exc).__name__, str(exc)[:80],
             )
 
-        # ── 7. Price target upside ────────────────────────────────────────────
-        price_target_upside_score = None  # None = API failure; 0.0 = no PT signal
+        # ── 7. Price target upside — symbol-candidate fallback ────────────────
+        price_target_upside_score: Optional[float] = None
         raw_target_price = None
-        raw_current_price = None
+        raw_current_price = quote.get("price")
         try:
-            pt_data = client.get_price_target_consensus(ticker)
-            if not pt_data and "." in ticker:
-                pt_data = client.get_price_target_consensus(
-                    ticker.split(".")[0])
-            raw_target_price = pt_data.get(
-                "targetConsensus") if pt_data else None
-            raw_current_price = quote.get("price") if quote else None
-            price_target_upside_score = 0.0  # API call succeeded
-            upside = client.get_upside_to_target(ticker)
-            if upside is None and "." in ticker:
-                upside = client.get_upside_to_target(ticker.split(".")[0])
-            if upside is not None:
-                price_target_upside_score = upside
+            pt_data = None
+            for _sym in _symbol_candidates(ticker):
+                pt_data = client.get_price_target_consensus(_sym)
+                if pt_data:
+                    break
+            price_target_upside_score = 0.0
+            raw_target_price = pt_data.get("targetConsensus") if pt_data else None
+            for _sym in _symbol_candidates(ticker):
+                upside = client.get_upside_to_target(_sym)
+                if upside is not None:
+                    price_target_upside_score = upside
+                    break
         except Exception as exc:
             logger.warning(
-                "FMPFetcher price_target ABSENT %s: %s(%s) — price_target_upside excluded from denominator",
+                "FMPFetcher price_target ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
 
@@ -380,3 +375,59 @@ class FMPFetcher(BaseMarketFetcher):
             "analyst_consensus_source":  "bulk" if (analyst_consensus_score or 0) > 0 else "none",
             "insider_source":            "fmp" if (insider_conviction_score or 0) > 0 else "none",
         }
+
+
+def _symbol_candidates(ticker: str) -> list[str]:
+    """Ordered list of symbol formats to try against FMP endpoints.
+
+    FMP indexes EU/Asia tickers inconsistently across endpoints:
+    - Some accept the exchange-suffixed form (ASML.AS, SAP.DE)
+    - Others only respond to the base symbol (ASML, SAP)
+    Always try the most specific form first, fall back to base.
+    """
+    candidates = [ticker]
+    if "." in ticker:
+        base = ticker.split(".")[0]
+        if base != ticker:
+            candidates.append(base)
+    return candidates
+
+
+def _build_price_only_factors(
+    closes: list,
+    volumes: list,
+    return_12_1m: Optional[float],
+    volume_spike: float,
+    momentum_long_score: float,
+    volume_attention_score: float,
+) -> dict:
+    """Factor dict with only price-derived scores; all FMP-sourced factors are None.
+
+    Used when FMP has no quote coverage for a ticker — we still have price history
+    from the historical-prices endpoint, so momentum and volume are valid.
+    All other factors are None so StrategyEngine excludes them from the denominator.
+    """
+    return {
+        "momentum_long_score":       momentum_long_score,
+        "volume_attention_score":    volume_attention_score,
+        "news_sentiment_score":      None,
+        "news_buzz_score":           None,
+        "insider_conviction_score":  None,
+        "insider_breadth_score":     None,
+        "analyst_consensus_score":   None,
+        "analyst_revision_score":    None,
+        "quality_piotroski_score":   None,
+        "price_target_upside_score": None,
+        "congress_score":            0.0,
+        "transcript_tone_score":     0.0,
+        "return_12_1m":              return_12_1m,
+        "volume_spike":              volume_spike,
+        "market_cap":                0.0,
+        "target_price":              None,
+        "current_price":             None,
+        "quality_piotroski_raw":     None,
+        "news_sentiment_source":     "none",
+        "news_buzz_source":          "none",
+        "analyst_consensus_source":  "none",
+        "insider_source":            "none",
+    }

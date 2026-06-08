@@ -72,6 +72,20 @@ class StrategyEngine:
                 else 0.0
             )
 
+            none_factors = [f for f, v in factor_breakdown.items() if v is None]
+            zero_factors = [f for f, v in factor_breakdown.items()
+                            if v is not None and float(v) == 0.0]
+            if none_factors:
+                logger.info(
+                    "%s: %d factors absent (None/no coverage): %s",
+                    ticker, len(none_factors), none_factors,
+                )
+            if zero_factors:
+                logger.debug(
+                    "%s: %d factors zero signal (covered, no activity): %s",
+                    ticker, len(zero_factors), zero_factors,
+                )
+
             processed_rankings.append({
                 "ticker": ticker,
                 "composite_score": composite_score,

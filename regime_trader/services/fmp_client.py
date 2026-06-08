@@ -584,50 +584,50 @@ class FMPClient:
             return tuple(cached)  # type: ignore[return-value]
 
         _null = [None, 0]
-        try:
-            data = self._get(
-                "analyst-estimates",
-                {"symbol": ticker, "period": "quarter", "limit": 4},
-                bucket="ratings",
-            ) or []
-            if not isinstance(data, list) or len(data) < 3:
+        symbols_to_try = [ticker]
+        if "." in ticker:
+            symbols_to_try.append(ticker.split(".")[0])
+
+        for sym in symbols_to_try:
+            try:
+                data = self._get(
+                    "analyst-estimates",
+                    {"symbol": sym, "period": "quarter", "limit": 4},
+                    bucket="ratings",
+                ) or []
+                if not isinstance(data, list) or len(data) < 3:
+                    continue  # try next symbol
+
+                recent = data[0]
+                base_est = data[2]
+
+                recent_eps = recent.get("estimatedEpsAvg")
+                base_eps = base_est.get("estimatedEpsAvg")
+
+                if recent_eps is None or base_eps is None:
+                    continue
+
+                recent_eps = float(recent_eps)
+                base_eps = float(base_eps)
+
+                if abs(base_eps) < 1e-6:
+                    continue
+
+                revision_pct = (recent_eps - base_eps) / abs(base_eps)
+                n_analysts = int(recent.get("numberAnalystEstimatedEps") or 0)
+                result = [round(revision_pct, 6), n_analysts]
+                self._cache_write("ratings", cache_key, result)
+                return tuple(result)  # type: ignore[return-value]
+
+            except FMPEndpointError:
                 self._cache_write("ratings", cache_key, _null)
                 return None, 0
+            except Exception as exc:
+                log.debug("get_analyst_estimate_revision %s (%s) failed: %s", ticker, sym, exc)
+                continue
 
-            # FMP returns newest-first; [0] = most recent, [2] = ~3 quarters ago.
-            recent = data[0]
-            base = data[2]
-
-            recent_eps = recent.get("estimatedEpsAvg")
-            base_eps = base.get("estimatedEpsAvg")
-
-            if recent_eps is None or base_eps is None:
-                self._cache_write("ratings", cache_key, _null)
-                return None, 0
-
-            recent_eps = float(recent_eps)
-            base_eps = float(base_eps)
-
-            # Guard against pre-revenue or near-zero base (undefined revision %)
-            if abs(base_eps) < 1e-6:
-                self._cache_write("ratings", cache_key, _null)
-                return None, 0
-
-            revision_pct = (recent_eps - base_eps) / abs(base_eps)
-
-            n_analysts = int(recent.get("numberAnalystEstimatedEps") or 0)
-
-            result = [round(revision_pct, 6), n_analysts]
-            self._cache_write("ratings", cache_key, result)
-            return tuple(result)  # type: ignore[return-value]
-
-        except FMPEndpointError:
-            # Structural failure already logged by _get(); do not propagate —
-            # a dead estimates route should not abort the broader scoring run.
-            return None, 0
-        except Exception as exc:
-            log.debug("get_analyst_estimate_revision %s failed: %s", ticker, exc)
-            return None, 0
+        self._cache_write("ratings", cache_key, _null)
+        return None, 0
 
     # ── Quote (stable/quote) ───────────────────────────────────────────────────
 
@@ -752,7 +752,7 @@ class FMPClient:
         return result
 
     def get_ratios_ttm(self, ticker: str) -> Dict:
-        """TTM financial ratios (stable/ratios-ttm). PASS in smoke-test."""
+        """TTM financial ratios (stable/ratios-ttm). Falls back to base symbol for EU/Asia."""
         if not self._api_key:
             return {}
         cached = self._cache_read("ratios", ticker)
@@ -761,7 +761,17 @@ class FMPClient:
         data = self._get(
             "ratios-ttm", {"symbol": ticker}, bucket="ratios") or []
         result = data[0] if isinstance(data, list) and data else {}
-        self._cache_write("ratios", ticker, result)
+        if not result and "." in ticker:
+            base = ticker.split(".")[0]
+            cached_base = self._cache_read("ratios", base)
+            if cached_base is not None:
+                return cached_base
+            data2 = self._get("ratios-ttm", {"symbol": base}, bucket="ratios") or []
+            result = data2[0] if isinstance(data2, list) and data2 else {}
+            if result:
+                self._cache_write("ratios", base, result)
+        if result:
+            self._cache_write("ratios", ticker, result)
         return result
 
     def get_quality_score(self, ticker: str) -> tuple[float, int]:
