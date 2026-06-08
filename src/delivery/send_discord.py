@@ -1210,16 +1210,20 @@ def build_payload(
         vix_val = status.get("vix")
         kill_switch = status.get("kill_switch", False)
 
-        top_buys = status.get("top_buys") or []
-        us_entries = top_buys[:5]
-        eu_entries = list(status.get("top_buys_europe") or [])[:5]
+        top_buys = (
+            status.get("top_buys_usa")
+            or status.get("top_buys")
+            or []
+        )
+        us_entries   = top_buys[:5]
+        eu_entries   = list(status.get("top_buys_europe") or [])[:5]
         asia_entries = list(status.get("top_buys_asia") or [])[:5]
+        mid_caps     = list(status.get("mid_caps") or [])[:5]
         all_scores = sorted([
             float(e.get("final_score", 0))
-            for e in top_buys
+            for e in top_buys + eu_entries + asia_entries + mid_caps
             if e.get("final_score") is not None
         ])
-        mid_caps = list(status.get("mid_caps") or [])[:5]
 
     # ── Timing ───────────────────────────────────────────────────────────────
     age_h = _data_age_hours(generated_at)

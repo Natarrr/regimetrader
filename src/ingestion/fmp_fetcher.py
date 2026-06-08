@@ -184,6 +184,41 @@ class FMPFetcher(BaseMarketFetcher):
             return_12_1m, spy_return_12_1m=0.0)
         volume_attention_score = score_volume_attention(volume_spike)
 
+        # ── 1b. FMP coverage guard ────────────────────────────────────────────
+        # Fetch quote early. If FMP has no quote for this ticker it has no
+        # coverage — return None for all FMP-sourced factors so StrategyEngine
+        # excludes them from the score denominator entirely.
+        quote = client.get_quote(ticker)
+        if not quote and "." in ticker:
+            quote = client.get_quote(ticker.split(".")[0])
+        if not quote:
+            logger.warning(
+                "FMPFetcher: no quote for %s — all FMP factors absent from denominator", ticker)
+            return {
+                "momentum_long_score":       momentum_long_score,
+                "volume_attention_score":    volume_attention_score,
+                "news_sentiment_score":      None,
+                "news_buzz_score":           None,
+                "insider_conviction_score":  None,
+                "insider_breadth_score":     None,
+                "analyst_consensus_score":   None,
+                "analyst_revision_score":    None,
+                "quality_piotroski_score":   None,
+                "price_target_upside_score": None,
+                "congress_score":            0.0,
+                "transcript_tone_score":     0.0,
+                "return_12_1m":              return_12_1m,
+                "volume_spike":              volume_spike,
+                "market_cap":                0.0,
+                "target_price":              None,
+                "current_price":             None,
+                "news_sentiment_source":     "none",
+                "news_buzz_source":          "none",
+                "analyst_consensus_source":  "none",
+                "insider_source":            "none",
+            }
+        mktcap_from_quote = float(quote.get("marketCap", 0) or 0)
+
         # ── 2. News — sentiment + buzz ────────────────────────────────────────
         news_sentiment_score = None  # None = API failure; 0.0 = no signal (genuine)
         news_buzz_score = None
@@ -210,8 +245,8 @@ class FMPFetcher(BaseMarketFetcher):
         insider_conviction_score = None  # None = API failure; 0.0 = no insider activity
         insider_breadth_score = None
         try:
-            quote = client.get_quote(ticker)
-            mktcap = float(quote.get("marketCap", 0) or 0)
+            # quote already fetched in coverage guard above
+            mktcap = mktcap_from_quote
             total_usd, days_since = client.get_insider_purchases(
                 ticker, lookback_days=180)
             btx = client.get_insider_transactions(ticker, lookback_days=90)
@@ -302,8 +337,6 @@ class FMPFetcher(BaseMarketFetcher):
             if not pt_data and "." in ticker:
                 pt_data = client.get_price_target_consensus(
                     ticker.split(".")[0])
-            if not locals().get("quote"):
-                quote = client.get_quote(ticker)
             raw_target_price = pt_data.get(
                 "targetConsensus") if pt_data else None
             raw_current_price = quote.get("price") if quote else None
@@ -320,13 +353,7 @@ class FMPFetcher(BaseMarketFetcher):
             )
 
         # ── 8. Market cap ─────────────────────────────────────────────────────
-        mktcap_final = 0.0
-        try:
-            if not locals().get("quote"):
-                quote = client.get_quote(ticker)
-            mktcap_final = float(quote.get("marketCap", 0) or 0)
-        except Exception:
-            pass
+        mktcap_final = mktcap_from_quote
 
         return {
             "momentum_long_score":       momentum_long_score,

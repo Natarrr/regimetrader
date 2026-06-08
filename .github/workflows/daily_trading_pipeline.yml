@@ -39,7 +39,7 @@ on:
         options: ["true", "false"]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: daily_trading_pipeline
@@ -53,6 +53,8 @@ jobs:
     name: US — EDGAR + FMP 9-Factor Scoring
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
     env:
       PYTHONPATH: ${{ github.workspace }}
 
@@ -327,6 +329,8 @@ jobs:
     name: INTL — FMP 10-Factor Scoring (EU + Asia)
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    permissions:
+      contents: read
     env:
       PYTHONPATH: ${{ github.workspace }}
 
@@ -549,6 +553,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [run_us_pipeline, run_intl_pipeline]
+    permissions:
+      contents: write
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -556,6 +562,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # ── 2. Python 3.11 ───────────────────────────────────────────────────────
       - name: Set up Python 3.11
@@ -618,6 +625,30 @@ jobs:
             --intl-input  logs/top_lists_intl.json \
             --registry    config/ticker_registry.json \
             --output      logs/top_lists.json
+
+      # ── 8b. Archive combined snapshot (first run of day only) ───────────────
+      # Writes logs/archive/YYYY-MM-DD_top_lists.json to git so send_discord.py
+      # can load yesterday's EU/Asia scores for ▲/▼ delta display (not [NEW]).
+      - name: Archive combined snapshot
+        run: |
+          TODAY=$(date -u '+%Y-%m-%d')
+          DEST="logs/archive/${TODAY}_top_lists.json"
+          if [ ! -f logs/top_lists.json ]; then
+            echo "top_lists.json not found — skipping archive"
+            exit 0
+          fi
+          if git ls-files --error-unmatch "$DEST" 2>/dev/null; then
+            echo "Archive already exists for $TODAY — skipping"
+            exit 0
+          fi
+          mkdir -p logs/archive
+          cp logs/top_lists.json "$DEST"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          git add "$DEST"
+          git commit -m "chore(archive): combined snapshot $TODAY"
+          git push
 
       # ── 9. Combined pre-flight audit (RT-QA-2026-REV5) ──────────────────────
       # Validates the combined top_lists.json across all seven checks:
