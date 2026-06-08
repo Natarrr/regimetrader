@@ -56,11 +56,14 @@ def test_export_metrics_duration_override_wins(tmp_path: Path) -> None:
     assert metrics["run_duration_seconds"] == 42.5
 
 
-def test_export_metrics_missing_status_raises(tmp_path: Path) -> None:
-    """Fama: in an efficient pipeline, absence of input is itself a signal —
-    fail loudly rather than emit zeroed metrics that look healthy."""
-    with pytest.raises(FileNotFoundError):
-        me.export_metrics(tmp_path)
+def test_export_metrics_missing_status_writes_tombstone(tmp_path: Path) -> None:
+    """When intel_source_status.json is absent (pipeline aborted), export_metrics writes
+    a tombstone metrics.json with pipeline_failed=True so the if:always() CI step
+    doesn't cascade-fail on top of the real pipeline failure."""
+    result = me.export_metrics(tmp_path)
+    assert result["pipeline_failed"] is True
+    assert result["ticker_count"] == 0
+    assert (tmp_path / "metrics.json").exists()
 
 
 def test_export_metrics_missing_meta_yields_zeros(tmp_path: Path) -> None:

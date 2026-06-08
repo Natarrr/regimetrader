@@ -349,6 +349,10 @@ def main(argv: list[str] | None = None) -> int:
         log.error("could not parse metrics.json: %s", exc)
         return 2
 
+    if metrics.get("pipeline_failed"):
+        log.error("ALERT — pipeline aborted before intel_source_status.json was written")
+        return 2
+
     ok, reasons = evaluate(metrics, min_coverage=args.min_coverage, max_errors=args.max_errors)
 
     # ── FMP structural-failure gate ────────────────────────────────────────────

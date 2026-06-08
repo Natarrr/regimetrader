@@ -119,6 +119,7 @@ jobs:
           EDGAR_FIRST: "true"
           BULK_CACHE_DIR: ".cache/bulk_snapshots"
         run: |
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/universe.csv' }}"
           LOG_DIR="logs"
           mkdir -p "$LOG_DIR" .monitoring
