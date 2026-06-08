@@ -1,9 +1,11 @@
 {
+    "_note": "weights.py is canonical; sync manually on weight changes",
     "region": "INTL",
-    "expected_factors": 10,
+    "expected_factors": 12,
     "active_factors": {
         "insider_conviction":  0.28,
         "insider_breadth":     0.14,
+        "congress":            0.00,
         "news_sentiment":      0.13,
         "news_buzz":           0.04,
         "momentum_long":       0.17,
@@ -11,7 +13,8 @@
         "analyst_consensus":   0.10,
         "quality_piotroski":   0.05,
         "analyst_revision":    0.02,
-        "price_target_upside": 0.03
+        "price_target_upside": 0.03,
+        "transcript_tone":     0.00
     },
     "output_filename": "top_lists_intl.json"
 }
