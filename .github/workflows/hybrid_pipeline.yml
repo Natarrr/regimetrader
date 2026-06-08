@@ -42,28 +42,11 @@ on:
         default: "false"
         type: choice
         options: ["true", "false"]
-      cost_cap_usd:
-        description: "Claude cost cap per run (USD)"
-        required: false
-        default: "2.00"
-        type: string
       shortlist_floor:
         description: "Min quant score for shortlist (0–100)"
         required: false
         default: "80"
         type: string
-      dry_run:
-        description: "Print payloads without executing trades"
-        required: false
-        default: "true"
-        type: choice
-        options: ["true", "false"]
-      include_transcripts:
-        description: "Include earnings call transcripts in Claude prompt"
-        required: false
-        default: "true"
-        type: choice
-        options: ["true", "false"]
 
 permissions:
   contents: read
@@ -75,10 +58,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
-  CLAUDE_MODEL: "claude-sonnet-4-6"
-  CLAUDE_COST_CAP_USD: ${{ github.event.inputs.cost_cap_usd || '2.00' }}
   SHORTLIST_QUINTILE_FLOOR: ${{ github.event.inputs.shortlist_floor || '80' }}
-  INCLUDE_TRANSCRIPTS: ${{ github.event.inputs.include_transcripts || 'true' }}
 
 jobs:
   # ── 1. Load & reshape quant data ────────────────────────────────────────────
@@ -270,281 +250,7 @@ jobs:
           path: data/pipeline/
           retention-days: 7
 
-  # ── 2. Preflight cost gate (transcript-aware) ────────────────────────────────
-  preflight_cost_gate:
-    name: Preflight Cost Gate
-    needs: quant
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    # Skip Claude if kill-switch is active — no point running analysis on suppressed BUYs
-    if: needs.quant.outputs.kill_switch != 'true'
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Download shortlist artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.quant.outputs.shortlist_artifact }}
-          path: data/pipeline/
-
-      # Transcript-aware cost model:
-      # With transcripts (default): 8000 token transcript + 600 quant context = 8600 input
-      # Without transcripts: 600 input tokens only
-      # Output: 450 tokens (structured JSON analysis)
-      # claude-sonnet-4-6: $3/Mtoken input, $15/Mtoken output
-      - name: Evaluate cost surface (transcript-aware)
-        env:
-          CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
-          INCLUDE_TRANSCRIPTS: ${{ env.INCLUDE_TRANSCRIPTS }}
-        run: |
-          python3 - <<'EOF'
-          import json, os, sys
-
-          with open('data/pipeline/shortlist.json') as f:
-              pipeline_data = json.load(f)
-
-          shortlist = pipeline_data.get('shortlist', [])
-          include_transcripts = os.getenv('INCLUDE_TRANSCRIPTS', 'true').lower() == 'true'
-
-          # Token model — blended large/small-cap transcript sizes (F6.1)
-          # Small-cap calls: ~5,000 tokens  (shorter, fewer analysts)
-          # Large-cap calls: ~15,000 tokens (NVDA/MSFT/META full Q&A)
-          # Universe is ~50% large-cap → blended median = 10,000 tokens
-          TRANSCRIPT_TOKENS_SMALL = 5_000
-          TRANSCRIPT_TOKENS_LARGE = 15_000
-          LARGE_CAP_FRACTION = 0.50
-          TRANSCRIPT_TOKENS_BLENDED = int(
-              LARGE_CAP_FRACTION * TRANSCRIPT_TOKENS_LARGE +
-              (1 - LARGE_CAP_FRACTION) * TRANSCRIPT_TOKENS_SMALL
-          )  # = 10,000
-          QUANT_CONTEXT_TOKENS = 600  # 9-factor scores + metadata
-          OUTPUT_TOKENS = 450
-
-          if include_transcripts:
-              input_tokens_per_symbol = TRANSCRIPT_TOKENS_BLENDED + QUANT_CONTEXT_TOKENS
-          else:
-              input_tokens_per_symbol = QUANT_CONTEXT_TOKENS
-
-          # claude-sonnet-4-6 pricing
-          input_cost  = len(shortlist) * input_tokens_per_symbol * 3.00  / 1_000_000
-          output_cost = len(shortlist) * OUTPUT_TOKENS             * 15.00 / 1_000_000
-          estimated_cost = round(input_cost + output_cost, 4)
-          cost_per_symbol = round((input_cost + output_cost) / max(len(shortlist), 1), 5)
-
-          cap = float(os.getenv('CLAUDE_COST_CAP_USD', '2.00'))
-          max_symbols = int(cap / cost_per_symbol) if cost_per_symbol > 0 else 999
-
-          print(f"Shortlist size: {len(shortlist)} symbols")
-          print(f"Mode: {'with transcripts' if include_transcripts else 'quant only'}")
-          print(f"Tokens/symbol: {input_tokens_per_symbol} input + {OUTPUT_TOKENS} output")
-          print(f"  (blended transcript: {TRANSCRIPT_TOKENS_BLENDED} tokens — 50% large/small cap)")
-          print(f"Cost/symbol: ${cost_per_symbol:.5f}")
-          print(f"Estimated total: ${estimated_cost:.4f} (cap: ${cap:.2f})")
-          print(f"Max symbols at cap: {max_symbols}")
-
-          if estimated_cost > cap:
-              print(f"CRITICAL: ${estimated_cost:.4f} exceeds cap ${cap:.2f}.")
-              print(f"Trim shortlist to {max_symbols} symbols or raise cost_cap_usd.")
-              sys.exit(1)
-
-          print('Preflight cost validation cleared.')
-          EOF
-
-  # ── 3. Claude analysis ──────────────────────────────────────────────────────
-  claude:
-    name: Claude Analysis
-    needs: [quant, preflight_cost_gate]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      PYTHONPATH: ${{ github.workspace }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: Install analysis deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install anthropic>=0.28.0 requests>=2.31.0 python-dotenv>=1.0.0 \
-                      numpy>=1.26.0 pandas>=2.2.0 scikit-learn>=1.4.0
-
-      - name: Download shortlist artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.quant.outputs.shortlist_artifact }}
-          path: data/pipeline/
-
-      - name: Run Claude analysis on shortlist
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || '' }}
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
-          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
-          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
-          CLAUDE_COST_CAP_USD: ${{ env.CLAUDE_COST_CAP_USD }}
-          REGIME: ${{ needs.quant.outputs.regime }}
-          VIX: ${{ needs.quant.outputs.vix }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
-          INCLUDE_TRANSCRIPTS: ${{ env.INCLUDE_TRANSCRIPTS }}
-        run: |
-          python - <<'EOF'
-          import json, sys, os, logging
-          logging.basicConfig(level=logging.INFO)
-          sys.path.insert(0, ".")
-
-          from analysis.claude_client import ClaudeClient, validate_analysis_schema
-          from analysis.earnings_analyzer import (
-              build_prompt, cross_check_citations, should_auto_execute,
-              fetch_transcript,   # NEW: Ultimate-tier earning-call-transcript-latest
-          )
-
-          regime = os.getenv("REGIME", "Unknown")
-          vix = os.getenv("VIX", "0.0")
-          dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
-          include_transcripts = os.getenv("INCLUDE_TRANSCRIPTS", "true").lower() == "true"
-          run_id = f"gh-{os.getenv('GITHUB_RUN_ID', 'local')}"
-          fmp_key = os.getenv("FMP_API_KEY", "")
-
-          with open("data/pipeline/shortlist.json") as f:
-              pipeline_data = json.load(f)
-
-          shortlist = pipeline_data["shortlist"]
-          quant_map = {r["symbol"]: r for r in pipeline_data.get("candidates", [])}
-
-          if not shortlist:
-              print("Empty shortlist — nothing to analyse")
-              sys.exit(0)
-
-          client = ClaudeClient(run_id=run_id)
-          results = []
-
-          for symbol in shortlist:
-              quant_data = quant_map.get(symbol, {})
-
-              # Fetch transcript if enabled (FMP Ultimate: earning-call-transcript-latest)
-              # Cycle time 4-6h — safe at 12:30 UTC for prior-session transcripts
-              transcript_text = ""
-              if include_transcripts and fmp_key and not dry_run:
-                  try:
-                      transcript_text = fetch_transcript(symbol, fmp_key)
-                  except Exception as e:
-                      logging.warning(f"{symbol}: transcript fetch failed ({e}) — proceeding without")
-
-              # build_prompt now accepts transcript kwarg and 9-factor quant_data
-              prompt = build_prompt(
-                  symbol,
-                  quant_data,
-                  [],
-                  regime,
-                  vix=vix,
-                  transcript=transcript_text,
-              )
-
-              if dry_run:
-                  print(f"[DRY RUN] Would analyse {symbol} — skipping API call")
-                  results.append({
-                      "symbol": symbol,
-                      "dry_run": True,
-                      "prompt_preview": prompt[:300] + "...",
-                      "has_transcript": bool(transcript_text),
-                  })
-                  continue
-
-              try:
-                  analysis = client.analyze(
-                      symbol=symbol,
-                      prompt=prompt,
-                      prompt_version="v1.3",   # bumped: 9-factor + transcript context
-                  )
-                  violations = cross_check_citations(analysis, [])
-                  auto_exec = should_auto_execute(
-                      quant_data.get("smart_money_score", 0) * 100,
-                      analysis,
-                      violations,
-                  )
-                  results.append({
-                      "symbol": symbol,
-                      "analysis": analysis,
-                      "citation_violations": violations,
-                      "auto_execute": auto_exec,
-                      "has_transcript": bool(transcript_text),
-                      "regime": regime,
-                      "vix": vix,
-                  })
-                  print(
-                      f"{symbol}: score={analysis['score']} conf={analysis['confidence']:.2f} "
-                      f"action={analysis['recommended_action']} auto_exec={auto_exec} "
-                      f"transcript={'Y' if transcript_text else 'N'}"
-                  )
-              except Exception as exc:
-                  print(f"ERROR {symbol}: {exc}")
-                  results.append({"symbol": symbol, "error": str(exc)})
-
-          os.makedirs("data/pipeline", exist_ok=True)
-          with open("data/pipeline/claude_results.json", "w") as f:
-              json.dump(results, f, indent=2, default=str)
-
-          cost = client.cost_summary()
-          print(f"\nCost summary: {json.dumps(cost, indent=2)}")
-          with open("data/pipeline/cost_summary.json", "w") as f:
-              json.dump(cost, f, indent=2)
-          EOF
-
-      - name: Validate Claude JSON schema
-        run: |
-          python - <<'EOF'
-          import json, sys
-          sys.path.insert(0, ".")
-          from analysis.claude_client import validate_analysis_schema, SchemaValidationError
-
-          try:
-              with open("data/pipeline/claude_results.json") as f:
-                  results = json.load(f)
-          except FileNotFoundError:
-              print("No claude_results.json (dry run) — schema validation skipped")
-              sys.exit(0)
-
-          errors = []
-          for r in results:
-              if r.get("dry_run") or r.get("error"):
-                  continue
-              try:
-                  validate_analysis_schema(r["analysis"])
-              except (SchemaValidationError, Exception) as exc:
-                  errors.append(f"{r['symbol']}: {exc}")
-
-          if errors:
-              print(f"SCHEMA FAILURES ({len(errors)}):")
-              for e in errors:
-                  print(f"  {e}")
-              sys.exit(1)
-
-          print(f"Schema validation passed for {len(results)} results")
-          EOF
-
-      - name: Upload Claude audit bundle
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: claude-audit-${{ github.run_id }}
-          path: |
-            data/pipeline/claude_results.json
-            data/pipeline/cost_summary.json
-            logs/claude_audit.ndjson
-          retention-days: 30
-          if-no-files-found: ignore
-
-  # ── 4. Kill-switch bypass summary ────────────────────────────────────────────
+  # ── 3. Kill-switch bypass summary ────────────────────────────────────────────
   kill_switch_notice:
     name: Kill-Switch Active Notice
     needs: quant
@@ -561,18 +267,11 @@ jobs:
   # ── 5. Gate & human review summary ──────────────────────────────────────────
   gate:
     name: Gate & Audit Summary
-    needs: [quant, claude]
+    needs: [quant]
     runs-on: ubuntu-latest
     if: always()
 
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: claude-audit-${{ github.run_id }}
-          path: data/pipeline/
-        continue-on-error: true
-
       - name: Print audit summary
         run: |
           echo "## Hybrid Pipeline Run ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
@@ -581,30 +280,3 @@ jobs:
           echo "| Regime | ${{ needs.quant.outputs.regime }} |" >> $GITHUB_STEP_SUMMARY
           echo "| VIX | ${{ needs.quant.outputs.vix }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Kill-switch | ${{ needs.quant.outputs.kill_switch }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cost cap | \$${CLAUDE_COST_CAP_USD} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Shortlist floor | ${SHORTLIST_QUINTILE_FLOOR} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Transcripts | ${INCLUDE_TRANSCRIPTS} |" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f data/pipeline/claude_results.json ]; then
-            python3 - <<'EOF'
-          import json
-          with open("data/pipeline/claude_results.json") as f:
-              results = json.load(f)
-          approved   = [r for r in results if r.get("auto_execute")]
-          violations = [r for r in results if r.get("citation_violations")]
-          with_tx    = [r for r in results if r.get("has_transcript")]
-          errors     = [r for r in results if r.get("error")]
-          print(f"- Analysed: {len(results)}")
-          print(f"- With transcripts: {len(with_tx)}")
-          print(f"- Auto-execute approved: {len(approved)}")
-          print(f"- Citation violations: {len(violations)}")
-          print(f"- Errors: {len(errors)}")
-          if approved:
-              print("### Auto-execute candidates")
-              for r in approved:
-                  a = r.get("analysis", {})
-                  print(f"| {r['symbol']} | {a.get('score')} | {a.get('recommended_action')} |")
-          EOF
-          else
-            echo "No Claude results (dry run, kill-switch, or skipped)"
-          fi
