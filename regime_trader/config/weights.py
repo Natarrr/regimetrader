@@ -136,6 +136,24 @@ PIOTROSKI_GATE: dict[str, float] = {
     "missing_score":   3,
 }
 
+
+def _piotroski_gate_multiplier(raw: int | None) -> float:
+    """Multiplicative gate applied to final_score based on Piotroski F-score.
+
+    F-score < suppress_below → 0.0 (BUY suppressed — financially distressed)
+    F-score < discount_below → discount_factor (discounted)
+    F-score >= discount_below → 1.0 (full weight)
+    None → missing_score/9 sentinel (conservative)
+    """
+    if raw is None:
+        return PIOTROSKI_GATE["missing_score"] / 9.0
+    if raw < PIOTROSKI_GATE["suppress_below"]:
+        return 0.0
+    if raw < PIOTROSKI_GATE["discount_below"]:
+        return PIOTROSKI_GATE["discount_factor"]
+    return 1.0
+
+
 # ── Region classifier ─────────────────────────────────────────────────────────
 _EU_SUFFIXES: frozenset[str] = frozenset({
     ".PA", ".DE", ".L", ".AS", ".MI", ".MC", ".BR",

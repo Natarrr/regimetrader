@@ -126,8 +126,8 @@ def score_price_target_upside(
     return round((clipped + 0.50) / 1.00, 4)
 
 
-def score_quality_piotroski(ratios: dict) -> float:
-    """Simplified 8-point Piotroski F-score, in [0, 1].
+def score_quality_piotroski(ratios: dict) -> tuple[float, int]:
+    """Simplified 8-point Piotroski F-score, in [0, 1], with raw count.
 
     Captures fundamental quality as a value-trap gate: high-conviction insider
     buying in a deteriorating business is a false signal. Piotroski (2000)
@@ -149,6 +149,11 @@ def score_quality_piotroski(ratios: dict) -> float:
 
     score = round(points_earned / 8.0, 4)
 
+    Returns:
+        (score, raw_count): score in [0, 1] and the raw integer point count
+        (0–8). The raw count is used by _piotroski_gate_multiplier to apply
+        the suppress/discount gate independently of the normalised score.
+
     Partial-data handling: a missing or None field contributes 0 for its
     point(s) but does not collapse the entire score. A company with 6 of 8
     fields and 5 passing scores 5/8 = 0.625.
@@ -156,7 +161,7 @@ def score_quality_piotroski(ratios: dict) -> float:
     Negative D/E (negative book equity) fails both leverage points — it
     signals structural distress, not low debt.
 
-    Returns 0.0 (dead signal) when ratios is None, not a dict, or every
+    Returns (0.0, 0) (dead signal) when ratios is None, not a dict, or every
     relevant field is None/missing. Consistent with score_momentum_long:
     missing input is penalised, not granted a neutral pass.
 
@@ -169,7 +174,7 @@ def score_quality_piotroski(ratios: dict) -> float:
     Source: FMPClient.get_ratios_ttm() → stable/ratios-ttm (24h cache).
     """
     if not isinstance(ratios, dict) or not ratios:
-        return 0.0
+        return 0.0, 0
 
     def _get(field: str) -> float | None:
         v = ratios.get(field)
@@ -190,7 +195,7 @@ def score_quality_piotroski(ratios: dict) -> float:
 
     # Guard: all fields missing → dead signal
     if all(v is None for v in (roa, opm, de, cr, gpm, npm)):
-        return 0.0
+        return 0.0, 0
 
     points = 0
     if roa is not None and roa > 0:
@@ -210,4 +215,4 @@ def score_quality_piotroski(ratios: dict) -> float:
     if npm is not None and npm > 0.05:
         points += 1
 
-    return round(points / 8.0, 4)
+    return round(points / 8.0, 4), points
