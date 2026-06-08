@@ -1283,8 +1283,17 @@ def build_payload(
     # get a prior-day score and show ▲/▼ instead of always showing [NEW].
     _yesterday_scores: Dict[str, float] = {}
     try:
-        _archive_root = Path(__file__).resolve().parent.parent / "logs" / "archive"
+        # Three parent hops: send_discord.py → delivery/ → src/ → repo_root
+        _archive_root = Path(__file__).resolve().parent.parent.parent / "logs" / "archive"
+        log.debug("Archive root resolved to: %s (exists=%s)", _archive_root, _archive_root.exists())
         _archive_files = sorted(_archive_root.glob("*_top_lists.json"))
+        log.info("Archive files found: %d", len(_archive_files))
+        if not _archive_files:
+            log.warning(
+                "No archive files at %s — all tickers will show [NEW]. "
+                "Confirm edgar_3x archive-snapshot job is committing to this path.",
+                _archive_root,
+            )
         if len(_archive_files) >= 2:
             _prev_data = json.loads(_archive_files[-2].read_text(encoding="utf-8"))
             _all_prev = (

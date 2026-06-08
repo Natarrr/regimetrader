@@ -500,8 +500,8 @@ jobs:
           if [ -f logs/top_lists_intl.json ]; then
             echo "### Top 5 International Buys" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo '| # | Ticker | Score | Region | NS | Mom | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
-            echo '|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
+            echo '| # | Ticker | Score | Cov% | Region | NS | Mom | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
+            echo '|---|---|---|---|---|---|---|---|---|' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json
           try:
@@ -509,14 +509,16 @@ jobs:
                   d = json.load(f)
               for i, t in enumerate(d[:5], 1):
                   fac = t.get("factor_snapshots", {})
-                  print(f"| {i} | **{t['ticker']}** | {t['composite_score']:.4f} | "
+                  cov = t.get("weight_coverage", 0.0)
+                  def _f(v): return f"{v:.2f}" if isinstance(v, float) else "—"
+                  print(f"| {i} | **{t['ticker']}** | {t['composite_score']:.4f} | {cov:.0%} | "
                         f"{t.get('region_applied', '—')} | "
-                        f"{fac.get('news_sentiment', 0):.2f} | "
-                        f"{fac.get('momentum_long', 0):.2f} | "
-                        f"{fac.get('analyst_consensus', 0):.2f} | "
-                        f"{fac.get('quality_piotroski', 0):.2f} |")
+                        f"{_f(fac.get('news_sentiment'))} | "
+                        f"{_f(fac.get('momentum_long'))} | "
+                        f"{_f(fac.get('analyst_consensus'))} | "
+                        f"{_f(fac.get('quality_piotroski'))} |")
           except Exception as e:
-              print(f"| — | _summary unavailable: {e}_ | | | | | | |")
+              print(f"| — | _summary unavailable: {e}_ | | | | | | | |")
           EOF
           else
             echo "⚠️ _top_lists_intl.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"

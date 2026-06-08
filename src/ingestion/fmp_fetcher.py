@@ -201,7 +201,10 @@ class FMPFetcher(BaseMarketFetcher):
                     news_sentiment_score = s
                 news_buzz_score = score_news_buzz(articles)
         except Exception as exc:
-            logger.debug("FMPFetcher news %s: %s", ticker, exc)
+            logger.warning(
+                "FMPFetcher news ABSENT %s: %s(%s) — news_sentiment/buzz excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
 
         # ── 3. Insider — conviction + breadth ────────────────────────────────
         insider_conviction_score = None  # None = API failure; 0.0 = no insider activity
@@ -227,7 +230,10 @@ class FMPFetcher(BaseMarketFetcher):
                 insider_conviction_score, breadth_raw
             )
         except Exception as exc:
-            logger.debug("FMPFetcher insider %s: %s", ticker, exc)
+            logger.warning(
+                "FMPFetcher insider ABSENT %s: %s(%s) — insider_conviction/breadth excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
 
         # ── 4. Analyst consensus — bulk index lookup ──────────────────────────
         analyst_consensus_score = None  # None = API failure; 0.0 = no analyst coverage
@@ -250,16 +256,26 @@ class FMPFetcher(BaseMarketFetcher):
                     analyst_consensus_score, _ = ac_score_record(
                         ticker, ratings)
         except Exception as exc:
-            logger.debug("FMPFetcher analyst_consensus %s: %s", ticker, exc)
+            logger.warning(
+                "FMPFetcher analyst_consensus ABSENT %s: %s(%s) — analyst_consensus excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
 
         # ── 5. Analyst revision momentum ──────────────────────────────────────
         analyst_revision_score = None  # None = API failure; 0.0 = no revision signal
         try:
-            from src.ingestion.run_pipeline import score_analyst_revision  # noqa: PLC0415
             rev_pct, rev_n = client.get_analyst_estimate_revision(ticker)
-            analyst_revision_score = score_analyst_revision(rev_pct, rev_n)
+            analyst_revision_score = 0.0
+            if rev_pct is not None and rev_n >= 3:
+                clipped = max(-0.30, min(0.30, rev_pct))
+                analyst_revision_score = round(
+                    ((clipped + 0.30) / 0.60) * min(1.0, rev_n / 10.0), 4
+                )
         except Exception as exc:
-            logger.debug("FMPFetcher analyst_revision %s: %s", ticker, exc)
+            logger.warning(
+                "FMPFetcher analyst_revision ABSENT %s: %s(%s) — analyst_revision excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
 
         # ── 6. Quality — Piotroski F-Score ────────────────────────────────────
         quality_piotroski_score = None  # None = API failure; 0.0 = no quality signal
@@ -272,7 +288,10 @@ class FMPFetcher(BaseMarketFetcher):
             if ratios:
                 quality_piotroski_score, _quality_piotroski_raw = score_quality_piotroski(ratios)
         except Exception as exc:
-            logger.debug("FMPFetcher piotroski %s: %s", ticker, exc)
+            logger.warning(
+                "FMPFetcher piotroski ABSENT %s: %s(%s) — quality_piotroski excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
 
         # ── 7. Price target upside ────────────────────────────────────────────
         price_target_upside_score = None  # None = API failure; 0.0 = no PT signal
@@ -295,7 +314,10 @@ class FMPFetcher(BaseMarketFetcher):
             if upside is not None:
                 price_target_upside_score = upside
         except Exception as exc:
-            logger.debug("FMPFetcher price_target %s: %s", ticker, exc)
+            logger.warning(
+                "FMPFetcher price_target ABSENT %s: %s(%s) — price_target_upside excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
 
         # ── 8. Market cap ─────────────────────────────────────────────────────
         mktcap_final = 0.0

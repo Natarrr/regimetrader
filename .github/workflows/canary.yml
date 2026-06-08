@@ -190,6 +190,15 @@ jobs:
                       print(f'::error::CROSS-CONTAMINATION: EU/Asia congress != 0: {contaminated}')
                       sys.exit(1)
                   print(f'9-factor schema OK. {len(eu_tickers)} EU/Asia tickers, congress=0.0 confirmed.')
+
+          tl_intl = Path('logs/top_lists_intl.json')
+          if tl_intl.exists():
+              intl = json.loads(tl_intl.read_text())
+              low_cov = [t for t in intl if t.get('weight_coverage', 1.0) < 0.50]
+              if len(low_cov) > len(intl) * 0.5:
+                  print(f'::error::INTL weight_coverage < 50% on {len(low_cov)}/{len(intl)} tickers — FMP endpoints failing for EU/Asia')
+                  sys.exit(1)
+              print(f'INTL coverage OK: {len(low_cov)} tickers below 50% threshold out of {len(intl)}')
           EOF
 
       - name: Upload canary artifacts
