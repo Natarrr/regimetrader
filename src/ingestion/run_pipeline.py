@@ -1162,15 +1162,17 @@ def run(
     # ── Bulk cache indexes (loaded once, shared across all threads) ───────────
     _bulk_piotroski_idx: Dict[str, Any] = {}
     _bulk_consensus_idx: Dict[str, Any] = {}
+    _ambiguous_bases: set = set()
     if bulk_cache is not None:
         try:
-            from src.ingestion.fmp_bulk_prefetch import build_ticker_index as _bti  # noqa: PLC0415
+            from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous as _bti_ambig  # noqa: PLC0415
             # financial-scores-bulk has no FMP stable/ route; piotroski is per-ticker.
             # _bulk_piotroski_idx stays {} — scoring falls back to FMPClient.get_quality_score().
-            _bulk_consensus_idx = _bti(bulk_cache, "upgrades-downgrades-consensus-bulk")
+            _bulk_consensus_idx, _ambiguous_bases = _bti_ambig(bulk_cache, "upgrades-downgrades-consensus-bulk")
             log.info(
-                "Bulk cache loaded: consensus=%d symbols (piotroski: per-ticker FMP)",
+                "Bulk cache loaded: consensus=%d symbols, ambiguous_bases=%d (piotroski: per-ticker FMP)",
                 len(_bulk_consensus_idx),
+                len(_ambiguous_bases),
             )
         except Exception as _bexc:
             log.warning("Bulk cache load failed (%s) — falling back to per-ticker FMP", _bexc)
