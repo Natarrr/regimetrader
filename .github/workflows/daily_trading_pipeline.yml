@@ -471,6 +471,41 @@ jobs:
             --raw-data logs/raw_intl_fetcher_output.json \
             --out-dir  logs/
 
+      # ── 7b. INTL factor coverage gate ────────────────────────────────────────
+      - name: Validate INTL factor coverage
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+
+          p = Path("logs/top_lists_intl.json")
+          if not p.exists():
+              print("top_lists_intl.json not found — skipping coverage check")
+              sys.exit(0)
+
+          data = json.loads(p.read_text())
+          if not isinstance(data, list) or not data:
+              sys.exit(0)
+
+          momentum_only = [
+              t for t in data
+              if float(t.get("weight_coverage", 1.0)) < 0.30
+          ]
+          pct = len(momentum_only) / len(data) * 100
+          print(f"INTL coverage check: {len(momentum_only)}/{len(data)} tickers "
+                f"({pct:.0f}%) have weight_coverage < 30%")
+
+          if pct > 60:
+              print(f"::error::INTL factor starvation: {pct:.0f}% of tickers are "
+                    f"momentum-only. FMP EU/Asia news/analyst/insider feeds may be down. "
+                    f"Run: python scripts/fmp_eu_asia_smoke_test.py --all")
+              sys.exit(1)
+
+          if pct > 30:
+              print(f"::warning::INTL partial coverage degradation: {pct:.0f}% of tickers "
+                    f"below 30% weight coverage. Check FMP EU/Asia endpoint health.")
+          EOF
+
       # ── 8. Validate output ───────────────────────────────────────────────────
       - name: Validate top_lists_intl.json
         run: |
@@ -565,6 +600,12 @@ jobs:
         with:
           fetch-depth: 1
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch archive history for score deltas
+        run: |
+          git fetch origin main --depth=20
+          git checkout origin/main -- logs/archive/ 2>/dev/null \
+            || echo "No archive directory in git yet — [NEW] tags expected on first run"
 
       # ── 2. Python 3.11 ───────────────────────────────────────────────────────
       - name: Set up Python 3.11

@@ -228,43 +228,76 @@ class FMPFetcher(BaseMarketFetcher):
                 "FMPFetcher news ABSENT %s: all candidates failed — excluded from denominator", ticker)
 
         # ── 3. Insider — conviction + breadth ────────────────────────────────
-        # FMP insider-trading/search is SEC Form 4 (US STOCK Act) ONLY.
-        # EU/Asia companies file under MAR Art.19 or local regimes — not in FMP.
-        # For non-US tickers, keep None so StrategyEngine excludes these from
-        # the denominator (not penalised as genuine zero-insider-buying signal).
-        is_us_ticker = "." not in ticker
+        # FMP stable/insider-trading/search covers:
+        #   US:   SEC Form 4 (STOCK Act) — full coverage
+        #   EU:   MAR Art.19 mandatory disclosures — good large-cap coverage
+        #   Asia: EDINET (JP partial), KRX (KR partial), HKEX (HK partial) — sparse
+        #
+        # The previous `"." not in ticker` gate was incorrect. market_config.py
+        # explicitly lists insider_conviction_score as available for EUROPE and ASIA.
+        # It has been removed.
+        #
+        # Return semantics:
+        #   None → excluded from StrategyEngine denominator
+        #          (API failure, or suffixed ticker with zero transactions —
+        #           cannot distinguish "no coverage" from "no buying")
+        #   0.0  → included in denominator as genuine zero signal
+        #          (confirmed endpoint response, legitimately no purchases)
         insider_conviction_score: Optional[float] = None
         insider_breadth_score: Optional[float] = None
+        is_suffixed = "." in ticker
+        total_usd: float = 0.0
 
-        if is_us_ticker:
-            try:
-                mktcap = mktcap_from_quote
-                total_usd, days_since = client.get_insider_purchases(
-                    ticker, lookback_days=180)
-                btx = client.get_insider_transactions(ticker, lookback_days=90)
-                insider_conviction_score = 0.0
-                insider_breadth_score = 0.0
-                if total_usd > 0 and mktcap > 0:
-                    insider_conviction_score = score_insider_conviction(
-                        key_purchases_usd=total_usd,
-                        market_cap=mktcap,
-                        days_since_most_recent=days_since,
-                    )
-                breadth_raw = score_insider_breadth(
-                    btx.get("P", []), btx.get("S", []))
-                insider_conviction_score, insider_breadth_score = orthogonalize_insider_scores(
-                    insider_conviction_score, breadth_raw
+        try:
+            mktcap = mktcap_from_quote
+            total_usd, days_since = client.get_insider_purchases(
+                ticker, lookback_days=180)
+            btx = client.get_insider_transactions(ticker, lookback_days=90)
+
+            # Endpoint responded → 0.0 (genuine zero, not absent)
+            insider_conviction_score = 0.0
+            insider_breadth_score = 0.0
+
+            if total_usd > 0 and mktcap > 0:
+                insider_conviction_score = score_insider_conviction(
+                    key_purchases_usd=total_usd,
+                    market_cap=mktcap,
+                    days_since_most_recent=days_since,
                 )
-            except Exception as exc:
-                logger.warning(
-                    "FMPFetcher insider ABSENT %s: %s(%s) — excluded from denominator",
-                    ticker, type(exc).__name__, str(exc)[:80],
+                logger.info(
+                    "FMPFetcher: insider $%.0f for %s (%s)",
+                    total_usd, ticker,
+                    "MAR Art.19 / local disclosure" if is_suffixed else "SEC Form 4",
                 )
+
+            breadth_raw = score_insider_breadth(
+                btx.get("P", []), btx.get("S", []))
+            insider_conviction_score, insider_breadth_score = \
+                orthogonalize_insider_scores(insider_conviction_score, breadth_raw)
+
+            # Sparse coverage guard for EU/Asia:
+            # Zero transactions for a suffixed ticker → downgrade to None.
+            # StrategyEngine will redistribute insider weight to live factors
+            # (news, momentum, analyst) rather than scoring a forced 0.0.
+            if is_suffixed \
+                    and total_usd == 0 \
+                    and not btx.get("P") \
+                    and not btx.get("S"):
                 insider_conviction_score = None
                 insider_breadth_score = None
-        else:
-            logger.debug(
-                "FMPFetcher insider SKIP %s — non-US ticker, SEC Form 4 not applicable", ticker)
+                logger.debug(
+                    "FMPFetcher: zero insider transactions for %s — "
+                    "returning None (sparse EU/Asia coverage, not confirmed zero signal)",
+                    ticker,
+                )
+
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher insider ABSENT %s: %s(%s) — excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+            insider_conviction_score = None
+            insider_breadth_score = None
 
         # ── 4. Analyst consensus — bulk index with symbol-candidate fallback ───
         analyst_consensus_score: Optional[float] = None
@@ -350,6 +383,14 @@ class FMPFetcher(BaseMarketFetcher):
         # ── 8. Market cap ─────────────────────────────────────────────────────
         mktcap_final = mktcap_from_quote
 
+        # ── 8b. Earnings surprise (for Discord PEAD badge on EU/Asia) ────────
+        _eps_pct_intl: Optional[float] = None
+        _eps_days_intl: int = 0
+        try:
+            _eps_pct_intl, _eps_days_intl = client.get_earnings_surprise(ticker)
+        except Exception:
+            pass  # non-critical — PEAD badge just won't show
+
         return {
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
@@ -374,6 +415,10 @@ class FMPFetcher(BaseMarketFetcher):
             "news_buzz_source":          "fmp" if (news_buzz_score or 0) > 0 else "none",
             "analyst_consensus_source":  "bulk" if (analyst_consensus_score or 0) > 0 else "none",
             "insider_source":            "fmp" if (insider_conviction_score or 0) > 0 else "none",
+            # Raw values for Discord display (not scoring inputs)
+            "insider_usd":               float(total_usd) if total_usd else 0.0,
+            "earnings_surprise_pct":     _eps_pct_intl,
+            "earnings_surprise_days":    _eps_days_intl,
         }
 
 

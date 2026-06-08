@@ -109,12 +109,27 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     factors = {k: v for k, v in factor_snapshots.items() if k != "congress"}
     factors["congress"] = 0.0
     return {
-        "ticker": ticker,
-        "final_score": composite_score,
-        "badge": _badge(composite_score),
-        "market": market,
-        "factors": factors,
-        "pipeline": raw.get("pipeline", "INTL"),
+        "ticker":          ticker,
+        "final_score":     composite_score,
+        "badge":           _badge(composite_score),
+        "market":          market,
+        "factors":         factors,
+        "pipeline":        raw.get("pipeline", "INTL"),
+        "weight_coverage": raw.get("weight_coverage", 0.0),
+        # Forward raw prices for PT badge display in send_discord.py
+        "target_price":    raw.get("target_price"),
+        "current_price":   raw.get("current_price"),
+        # Forward analyst meta for badge lines
+        "analyst_consensus_source":    raw.get("analyst_consensus_source", "none"),
+        "analyst_revision_score":      float(raw.get("analyst_revision_score") or 0.0),
+        "analyst_revision_n_analysts": int(raw.get("analyst_revision_n_analysts") or 0),
+        "price_target_upside_score":   float(raw.get("price_target_upside_score") or 0.0),
+        "quality_piotroski_score":     float(raw.get("quality_piotroski_score") or 0.0),
+        "earnings_surprise_pct":       raw.get("earnings_surprise_pct"),
+        "earnings_surprise_days":      int(raw.get("earnings_surprise_days") or 0),
+        "insider_usd":                 float(raw.get("insider_usd") or 0.0),
+        "market_cap":                  float(raw.get("market_cap") or 0.0),
+        "momentum_spy_relative":       float(raw.get("return_12_1m") or 0.0),
     }
 
 

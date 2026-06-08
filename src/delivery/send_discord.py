@@ -240,37 +240,60 @@ def _fmt_transcript_badge(entry: Dict[str, Any]) -> str:
 
 def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
     market_norm = (market or "US").upper()
+    is_intl = market_norm in ("EUROPE", "ASIA", "EU")
+
     factors = entry.get("factors") or {}
-    raw_values: Dict[str, float] = {
-        "analyst_revision": float(entry.get("analyst_revision_score") or 0.0),
+    raw_values = {
+        "analyst_revision":    float(entry.get("analyst_revision_score") or 0.0),
         "price_target_upside": float(entry.get("price_target_upside_score") or 0.0),
     }
-    labels = [
-        ("insider_conviction", "IC"),
-        ("insider_breadth", "IB"),
-        ("congress", "CG"),
-        ("news_sentiment", "NS"),
-        ("news_buzz", "NB"),
-        ("momentum_long", "MO"),
-        ("volume_attention", "VA"),
-        ("analyst_revision", "AR"),
-        ("price_target_upside", "PT"),
-    ]
-    parts: List[str] = []
+
+    if is_intl:
+        # EU / Asia: congress structurally absent — omit entirely
+        # AC (analyst_consensus) carries redistributed weight — include
+        labels = [
+            ("insider_conviction",  "IC"),
+            ("insider_breadth",     "IB"),
+            ("news_sentiment",      "NS"),
+            ("news_buzz",           "NB"),
+            ("momentum_long",       "MO"),
+            ("volume_attention",    "VA"),
+            ("analyst_consensus",   "AC"),
+            ("analyst_revision",    "AR"),
+            ("price_target_upside", "PT"),
+        ]
+    else:
+        # US: full 9-factor display including congress
+        labels = [
+            ("insider_conviction",  "IC"),
+            ("insider_breadth",     "IB"),
+            ("congress",            "CG"),
+            ("news_sentiment",      "NS"),
+            ("news_buzz",           "NB"),
+            ("momentum_long",       "MO"),
+            ("volume_attention",    "VA"),
+            ("analyst_consensus",   "AC"),
+            ("analyst_revision",    "AR"),
+            ("price_target_upside", "PT"),
+        ]
+
+    parts = []
     for key, label in labels:
-        # v2.2-global: FMP Ultimate confirmed for EU/Asia — read factors dict as-is.
-        # congress (0.0) and transcript_tone (0.0) render as "—" via value <= 0 below.
         value = raw_values.get(key) if key in raw_values else float(
             factors.get(key, 0) or 0)
         parts.append(f"{label}:—" if value <= 0 else f"{label}:{value:.2f}")
+
     qf = float(entry.get("quality_piotroski_score") or 0.0)
     if qf > 0:
         parts.append(f"QF:{qf:.2f}")
-    suffix = ""
-    if market_norm.startswith("EU"):
+
+    if market_norm in ("EUROPE", "EU"):
         suffix = " [EU]"
     elif market_norm == "ASIA":
-        suffix = " [Asia]"
+        suffix = " [ASIA]"
+    else:
+        suffix = ""
+
     return " ".join(parts) + suffix
 
 
@@ -302,7 +325,17 @@ def _build_ticker_card(
         _fmt_transcript_badge(entry),
     ]
     badge_line = " ".join([b for b in badge_texts if b])
-    name = f"#{rank} {ticker} | {badge} | p{pct} | {score:.4f}{mktcap_str}"
+    coverage_warn = ""
+    mkt_upper = (entry.get("market") or market or "US").upper()
+    if mkt_upper in ("EUROPE", "ASIA", "EU"):
+        cov = float(entry.get("weight_coverage", 1.0) or 1.0)
+        if cov < 0.40:
+            coverage_warn = f" ⚠COV:{cov:.0%}"
+        elif cov < 0.70:
+            coverage_warn = f" COV:{cov:.0%}"
+        # If coverage >= 70% don't clutter the name line
+
+    name = f"#{rank} {ticker} | {badge} | p{pct} | {score:.4f}{mktcap_str}{coverage_warn}"
     if entry.get("esg_flag"):
         name = f"{name} | ESG!"
     # Add position annotation for Revolut context
@@ -723,7 +756,24 @@ def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
     if congress_detail.get("dead") and congress_detail.get("dead_days", 0) > 0:
         dead_str = f"congress (dead {congress_detail['dead_days']}d)"
 
-    lines = df_lines + [
+    eu_entries   = status.get("top_buys_europe", [])
+    asia_entries = status.get("top_buys_asia", [])
+    coverage_lines = []
+    for region_label, region_entries in [("EU", eu_entries), ("ASIA", asia_entries)]:
+        if region_entries:
+            coverages = [
+                float(e.get("weight_coverage", 0) or 0)
+                for e in region_entries
+            ]
+            avg_cov = sum(coverages) / len(coverages) if coverages else 0.0
+            low_n = sum(1 for c in coverages if c < 0.50)
+            icon = "⚠️" if avg_cov < 0.50 else "✅"
+            coverage_lines.append(
+                f"{icon} {region_label} factor coverage: "
+                f"avg={avg_cov:.0%} | {low_n}/{len(coverages)} tickers <50%"
+            )
+
+    lines = df_lines + coverage_lines + [
         orth_line,
         f"Dead factors: {dead_str}",
         f"CEO tiers: {ceo_str}",
@@ -798,6 +848,9 @@ def _load_top_lists_overlay(log_dir: Path, input_path: Optional[Path] = None) ->
             "kill_switch":     data.get("kill_switch", False),
             "vix_multiplier":  data.get("vix_multiplier", 1.0),
             "shadow_top_buys": data.get("shadow_top_buys", []),
+            "mvo_pools":       data.get("mvo_pools", {}),
+            "top_buys_europe": data.get("top_buys_europe", []),
+            "top_buys_asia":   data.get("top_buys_asia", []),
         }
     except Exception as exc:
         log.warning("top_lists.json unreadable: %s", exc)
@@ -1268,6 +1321,14 @@ def build_payload(
     if any(flag == "STALE_SOURCE" for flags in anomaly_map.values() for flag in flags):
         alerts.append("STALE DATA SOURCE — scores may be unreliable.")
 
+    congress_detail = (status.get("dead_factors_detail") or {}).get("congress", {})
+    if congress_detail.get("dead") and int(congress_detail.get("dead_days", 0)) >= 3:
+        dead_days = congress_detail["dead_days"]
+        alerts.append(
+            f"CONGRESS FEED DEAD {dead_days}d — CG=0.0 for all US tickers. "
+            f"5% weight budget lost. S3 Stock Watcher / FMP congress unreachable."
+        )
+
     alert_block = (
         "\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)
     ) if alerts else ""
@@ -1287,35 +1348,59 @@ def build_payload(
     # get a prior-day score and show ▲/▼ instead of always showing [NEW].
     _yesterday_scores: Dict[str, float] = {}
     try:
-        # Three parent hops: send_discord.py → delivery/ → src/ → repo_root
         _archive_root = Path(__file__).resolve().parent.parent.parent / "logs" / "archive"
-        log.debug("Archive root resolved to: %s (exists=%s)", _archive_root, _archive_root.exists())
         _archive_files = sorted(_archive_root.glob("*_top_lists.json"))
-        log.info("Archive files found: %d", len(_archive_files))
-        if not _archive_files:
-            log.warning(
-                "No archive files at %s — all tickers will show [NEW]. "
-                "Confirm edgar_3x archive-snapshot job is committing to this path.",
-                _archive_root,
-            )
+        log.info(
+            "Archive root: %s | files found: %d",
+            _archive_root, len(_archive_files),
+        )
+
         if len(_archive_files) >= 2:
-            _prev_data = json.loads(_archive_files[-2].read_text(encoding="utf-8"))
-            _all_prev = (
+            _prev_file = _archive_files[-2]
+            log.info("Loading archive delta from: %s", _prev_file.name)
+            _prev_data = json.loads(_prev_file.read_text(encoding="utf-8"))
+
+            # Support both archive schemas:
+            #   combined top_lists.json  → top_buys_usa/europe/asia keys
+            #   top_lists_us.json        → top_buys + results keys
+            _all_prev_entries = (
                 _prev_data.get("top_buys", [])
+                + _prev_data.get("top_buys_usa", [])
                 + _prev_data.get("top_buys_europe", [])
                 + _prev_data.get("top_buys_asia", [])
                 + _prev_data.get("mid_caps", [])
+                + _prev_data.get("small_caps", [])
             )
-            for _prev_e in _all_prev:
+            # intel_source_status.json archive (results list)
+            for _prev_e in _prev_data.get("results", []):
                 _prev_t = _prev_e.get("ticker", "")
                 if _prev_t and _prev_t not in _yesterday_scores:
-                    _yesterday_scores[_prev_t] = float(_prev_e.get("final_score", 0))
-        else:
-            log.debug(
-                "Only %d archive file(s) found — score delta not available", len(_archive_files)
+                    _yesterday_scores[_prev_t] = float(
+                        _prev_e.get("final_score", 0))
+
+            for _prev_e in _all_prev_entries:
+                _prev_t = _prev_e.get("ticker", "")
+                if _prev_t and _prev_t not in _yesterday_scores:
+                    _yesterday_scores[_prev_t] = float(
+                        _prev_e.get("final_score", 0))
+
+            log.info(
+                "Archive delta loaded: %d ticker scores from %s",
+                len(_yesterday_scores), _prev_file.name,
             )
-    except Exception:
-        pass  # archive not available — score delta not shown
+        elif len(_archive_files) == 1:
+            log.info(
+                "Only 1 archive file found — first run with history. "
+                "All tickers will show [NEW] until a second archive exists."
+            )
+        else:
+            log.warning(
+                "No archive files at %s — all tickers will show [NEW]. "
+                "edgar_3x archive-snapshot job must commit at least one file.",
+                _archive_root,
+            )
+    except Exception as _arc_exc:
+        log.warning("Archive delta load failed: %s", _arc_exc)
 
     # Load Revolut positions for hold/add context
     _held_tickers: set[str] = set()
@@ -1414,6 +1499,38 @@ def build_payload(
     action = _action_section(all_top, all_scores)
     if action:
         fields.append(action)
+
+    # ── MVO portfolio allocation ──────────────────────────────────────────────
+    mvo_pools = status.get("mvo_pools", {})
+    if mvo_pools and len(fields) < 23:
+        mvo_lines = []
+        pool_order = ["large_cap_anchors", "mid_cap", "small_cap"]
+        pool_labels = {
+            "large_cap_anchors": "🔵 LARGE (>$10B, equal-weight)",
+            "mid_cap":           "🟡 MID ($2B–$10B, Sharpe-max)",
+            "small_cap":         "🔴 SMALL ($300M–$2B, min-variance)",
+        }
+        for pool_key in pool_order:
+            pool = mvo_pools.get(pool_key)
+            if not pool:
+                continue
+            positions = pool.get("positions", [])
+            if not positions:
+                continue
+            label = pool_labels.get(pool_key, pool_key)
+            pos_strs = [
+                f"`{p['ticker']}` {p.get('allocation', 0) * 100:.1f}%"
+                for p in positions[:6]
+                if (p.get("allocation") or 0) > 0.001
+            ]
+            if pos_strs:
+                mvo_lines.append(f"{label}: {' · '.join(pos_strs)}")
+        if mvo_lines:
+            fields.append({
+                "name":   "⚖️ MVO PORTFOLIO ALLOCATION",
+                "value":  _truncate("\n".join(mvo_lines), 1024),
+                "inline": False,
+            })
 
     # ── Sector exposure ───────────────────────────────────────────────────────
     all_entries = all_top + mid_caps[:5]

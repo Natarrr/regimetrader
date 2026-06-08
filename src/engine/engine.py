@@ -86,16 +86,37 @@ class StrategyEngine:
                     ticker, len(zero_factors), zero_factors,
                 )
 
+            weight_coverage = (
+                round(available_weight / total_declared_weight, 4)
+                if total_declared_weight > 1e-9 else 0.0
+            )
+
+            # Coverage penalty: prevents momentum-only tickers from scoring
+            # as high as fully-covered tickers cross-sectionally.
+            # Full score at coverage >= 70%; linear penalty below that floor.
+            # This stops a ticker with only MO:1.00 from outranking a ticker
+            # with MO:0.80 + NS:0.60 + AC:0.70 + AR:0.40 + PT:0.55.
+            coverage_penalty = min(1.0, weight_coverage / 0.70)
+            penalized_score = round(composite_score * coverage_penalty, 4)
+
+            low_coverage = weight_coverage < 0.40
+            if low_coverage:
+                logger.warning(
+                    "%s: weight_coverage=%.2f < 0.40 — score unreliable "
+                    "(only %s factors active). Marking _low_coverage=True.",
+                    ticker, weight_coverage,
+                    [f for f, v in factor_breakdown.items() if v is not None and float(v or 0) > 0],
+                )
+
             processed_rankings.append({
-                "ticker": ticker,
-                "composite_score": composite_score,
-                "region_applied": self.region,
+                "ticker":           ticker,
+                "composite_score":  penalized_score,
+                "raw_composite_score": composite_score,  # pre-penalty, for diagnostics
+                "region_applied":   self.region,
                 "factor_snapshots": factor_breakdown,
-                "pipeline": "INTL",
-                "weight_coverage": (
-                    round(available_weight / total_declared_weight, 4)
-                    if total_declared_weight > 1e-9 else 0.0
-                ),
+                "pipeline":         "INTL",
+                "weight_coverage":  weight_coverage,
+                "_low_coverage":    low_coverage,
             })
 
         # Sort universe descending by final quantitative output ranking
