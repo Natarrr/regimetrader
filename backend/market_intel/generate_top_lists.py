@@ -121,9 +121,16 @@ _MID_FLOOR = 2_000_000_000   # $2B–$10B → mid cap
 _TARGET_SECTORS = [
     "Energy",
     "Materials",
-    "Communication Services",
+    "Industrials",
+    "Consumer Discretionary",
+    "Consumer Staples",
+    "Health Care",
     "Healthcare",
+    "Financials",
     "Information Technology",
+    "Communication Services",
+    "Real Estate",
+    "Utilities",
 ]
 
 

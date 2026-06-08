@@ -428,12 +428,20 @@ class FMPClient:
 
         score_insider_breadth needs P vs S by distinct insider_id.
         Uses the same stable/insider-trading/search route as get_insider_purchases.
+        Falls back to base symbol for EU/Asia tickers.
         """
         if not self._api_key:
             return {"P": [], "S": []}
-        data = self._get("insider-trading/search",
-                         {"symbol": ticker, "page": 0, "limit": 500},
-                         bucket="insider") or []
+        symbols_to_try = [ticker]
+        if "." in ticker:
+            symbols_to_try.append(ticker.split(".")[0])
+        data: List[Dict] = []
+        for sym in symbols_to_try:
+            data = self._get("insider-trading/search",
+                             {"symbol": sym, "page": 0, "limit": 500},
+                             bucket="insider") or []
+            if data:
+                break
         cutoff = (datetime.now(timezone.utc) -
                   timedelta(days=lookback_days)).date().isoformat()
         out: Dict[str, List[Dict]] = {"P": [], "S": []}
@@ -457,7 +465,11 @@ class FMPClient:
     # ── News (stable/news/stock) ───────────────────────────────────────────────
 
     def get_news_raw_articles(self, ticker: str) -> List[Dict]:
-        """Return raw news articles for sentiment+buzz scoring (cached 2h)."""
+        """Return raw news articles for sentiment+buzz scoring (cached 2h).
+
+        Falls back to base symbol (strips exchange suffix) when dotted ticker
+        returns no results — FMP news API may not index EU/Asia suffixed tickers.
+        """
         if not self._api_key:
             return []
         cached = self._cache_read("news", ticker)
@@ -466,7 +478,18 @@ class FMPClient:
         data = self._get("news/stock", {"symbols": ticker, "limit": 50},
                          bucket="news") or []
         result: List[Dict] = data if isinstance(data, list) else []
-        self._cache_write("news", ticker, result)
+        if not result and "." in ticker:
+            base = ticker.split(".")[0]
+            cached_base = self._cache_read("news", base)
+            if cached_base is not None:
+                return cached_base
+            data2 = self._get("news/stock", {"symbols": base, "limit": 50},
+                              bucket="news") or []
+            result = data2 if isinstance(data2, list) else []
+            if result:
+                self._cache_write("news", base, result)
+        if result:
+            self._cache_write("news", ticker, result)
         return result
 
     def get_earnings_surprise(self, ticker: str) -> Tuple[Optional[float], int]:
@@ -841,12 +864,21 @@ class FMPClient:
         return result
 
     def get_price_target_consensus(self, ticker: str) -> Dict:
-        """Price target consensus (stable/price-target-consensus). PASS in smoke-test."""
+        """Price target consensus (stable/price-target-consensus).
+
+        Falls back to base symbol for EU/Asia tickers (e.g. ASML.AS → ASML).
+        """
         if not self._api_key:
             return {}
         data = self._get("price-target-consensus", {"symbol": ticker},
                          bucket="ratings") or []
-        return data[0] if isinstance(data, list) and data else {}
+        result = data[0] if isinstance(data, list) and data else {}
+        if not result and "." in ticker:
+            base = ticker.split(".")[0]
+            data2 = self._get("price-target-consensus", {"symbol": base},
+                              bucket="ratings") or []
+            result = data2[0] if isinstance(data2, list) and data2 else {}
+        return result
 
     def get_upside_to_target(self, ticker: str, max_age_days: int = 90) -> Optional[float]:
         """Analyst consensus price target upside score in [0, 1], or None.

@@ -1355,7 +1355,9 @@ def run(
                     ticker, _bulk_cons_rec
                 )
             else:
-                analyst_consensus_score, analyst_consensus_source = 0.0, "no_coverage"
+                # None = absent from bulk index → _ticker_effective_weights()
+                # redistributes the weight rather than penalizing with 0.0.
+                analyst_consensus_score, analyst_consensus_source = None, "no_coverage"
 
             # Recent upgrade/downgrade (FMP) — useful catalyst signal
             recent_upg = _fmp_client.get_recent_upgrades_downgrades(ticker)
@@ -1389,7 +1391,10 @@ def run(
             analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
 
             # ── Price target upside ───────────────────────────────────────
-            price_target_upside_score = _fmp_client.get_upside_to_target(ticker) or 0.0
+            # None = absent analyst coverage (no price target filed).
+            # _ticker_effective_weights() treats None as absent signal and
+            # redistributes the weight pro-rata — do NOT coerce to 0.0 here.
+            price_target_upside_score = _fmp_client.get_upside_to_target(ticker)
 
             # Store raw PT and current price for Discord display
             _pt_data         = _fmp_client.get_price_target_consensus(ticker)

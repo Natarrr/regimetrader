@@ -60,6 +60,17 @@ try:
 except ImportError:
     _HAS_SCORE_BAR = False
 
+try:
+    from regime_trader.risk.regime import (  # noqa: E402
+        RiskRegime as _RiskRegime,
+        get_regime as _get_regime,
+        score_multiplier as _score_multiplier,
+        strategy_label as _strategy_label,
+    )
+    _HAS_REGIME = True
+except ImportError:
+    _HAS_REGIME = False
+
 log = logging.getLogger("discord.send_toplists")
 
 # ── Color palette (severity-driven) ───────────────────────────────────────────
@@ -117,6 +128,17 @@ _MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸",
 
 _STALE_HOURS = 25
 _NO_CATALYST = "no primary catalyst detected"
+
+# ── Ticker display names (EU/Asia from registry) ──────────────────────────────
+_TICKER_NAMES: Dict[str, str] = {}
+try:
+    _reg_path = Path(__file__).resolve().parent.parent.parent / "config" / "ticker_registry.json"
+    _reg_data = json.loads(_reg_path.read_text(encoding="utf-8"))
+    for _reg_entry in _reg_data.get("europe", []) + _reg_data.get("asia", []):
+        if _reg_entry.get("ticker") and _reg_entry.get("name"):
+            _TICKER_NAMES[_reg_entry["ticker"]] = _reg_entry["name"]
+except Exception:
+    pass
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -192,7 +214,10 @@ def _fmt_pt_badge(entry: Dict[str, Any]) -> str:
         return f"PT ${target_val:.0f} ({sign}{upside:.0f}%)"
 
     # No raw prices — qualitative fallback only (no fake % from score)
-    score_val = float(entry.get("price_target_upside_score") or 0.0)
+    _pt_raw = entry.get("price_target_upside_score")
+    if _pt_raw is None:
+        return "PT None"
+    score_val = float(_pt_raw)
     if score_val >= 0.60:
         return "PT ↑ above target"
     if score_val >= 0.40:
@@ -243,9 +268,11 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
     is_intl = market_norm in ("EUROPE", "ASIA", "EU")
 
     factors = entry.get("factors") or {}
-    raw_values = {
-        "analyst_revision":    float(entry.get("analyst_revision_score") or 0.0),
-        "price_target_upside": float(entry.get("price_target_upside_score") or 0.0),
+    _ar_raw = entry.get("analyst_revision_score")
+    _pt_raw = entry.get("price_target_upside_score")
+    raw_values: Dict[str, Optional[float]] = {
+        "analyst_revision":    (float(_ar_raw) if _ar_raw is not None else None),
+        "price_target_upside": (float(_pt_raw) if _pt_raw is not None else None),
     }
 
     if is_intl:
@@ -277,15 +304,26 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
             ("price_target_upside", "PT"),
         ]
 
+    # Add QF into the displayed factor list — dominant factor for EU (w=0.28)
+    labels = list(labels) + [("quality_piotroski", "QF")]
+
     parts = []
     for key, label in labels:
-        value = raw_values.get(key) if key in raw_values else float(
-            factors.get(key, 0) or 0)
-        parts.append(f"{label}:—" if value <= 0 else f"{label}:{value:.2f}")
+        if key in raw_values:
+            raw = raw_values[key]
+        elif key == "quality_piotroski":
+            _qf = entry.get("quality_piotroski_score")
+            raw = float(_qf) if _qf is not None else None
+        else:
+            raw = factors.get(key)  # normalized float or absent (0.0)
+            raw = float(raw) if raw is not None else None
 
-    qf = float(entry.get("quality_piotroski_score") or 0.0)
-    if qf > 0:
-        parts.append(f"QF:{qf:.2f}")
+        if raw is None:
+            parts.append(f"{label}:None")
+        elif raw <= 0:
+            parts.append(f"{label}:—")
+        else:
+            parts.append(f"{label}:{raw:.2f}")
 
     if market_norm in ("EUROPE", "EU"):
         suffix = " [EU]"
@@ -306,6 +344,7 @@ def _build_ticker_card(
     held_context: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     ticker = entry.get("ticker", "?")
+    display_ticker = f"{ticker} ({_TICKER_NAMES[ticker]})" if ticker in _TICKER_NAMES else ticker
     score = float(entry.get("final_score", 0) or 0)
     pct = int(entry.get("percentile", 0) or 0)
     badge = _badge_from_score(score)
@@ -335,7 +374,7 @@ def _build_ticker_card(
             coverage_warn = f" COV:{cov:.0%}"
         # If coverage >= 70% don't clutter the name line
 
-    name = f"#{rank} {ticker} | {badge} | p{pct} | {score:.4f}{mktcap_str}{coverage_warn}"
+    name = f"#{rank} {display_ticker} | {badge} | p{pct} | {score:.4f}{mktcap_str}{coverage_warn}"
     if entry.get("esg_flag"):
         name = f"{name} | ESG!"
     # Add position annotation for Revolut context
@@ -364,12 +403,22 @@ def _truncate(text: str, max_chars: int = 1024) -> str:
 # ── Domain logic ───────────────────────────────────────────────────────────────
 
 def get_market_regime(vix: float) -> str:
+    if _HAS_REGIME:
+        regime = _get_regime(vix)
+        _emoji_map = {
+            "NORMAL":       "🟢",
+            "BEAR":         "🟡",
+            "CAPITULATION": "🔴",
+        }
+        emoji = _emoji_map.get(regime.value, "⚪")
+        return f"VIX `{vix:.1f}` {emoji} **{regime.value}**"
+    # Fallback: legacy 3-state display
     if vix > _VIX_BEARISH:
-        label, emoji = "BEARISH", "🔴"
+        label, emoji = "BEAR", "🔴"
     elif vix > _VIX_STABLE:
-        label, emoji = "STABLE",  "🟡"
+        label, emoji = "NORMAL", "🟡"
     else:
-        label, emoji = "BULLISH", "🟢"
+        label, emoji = "NORMAL", "🟢"
     return f"VIX `{vix:.1f}` {emoji} **{label}**"
 
 
@@ -888,11 +937,11 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
         "market":                    raw.get("market", "USA"),
         "factors":                   factors,
         # Fix #2: analyst + quality fields read by _fmt_factor_matrix / _fmt_analyst_badge / _fmt_pt_badge
-        "analyst_consensus_score":   float(raw.get("analyst_consensus_score") or 0.0),
+        "analyst_consensus_score":   raw.get("analyst_consensus_score"),  # None = no coverage
         "analyst_consensus_source":  raw.get("analyst_consensus_source", "none"),
         "analyst_revision_score":    float(raw.get("analyst_revision_score") or 0.0),
         "analyst_revision_n_analysts": int(raw.get("analyst_revision_n") or 0),
-        "price_target_upside_score": float(raw.get("price_target_upside_score") or 0.0),
+        "price_target_upside_score": raw.get("price_target_upside_score"),  # None = no analyst target
         "quality_piotroski_score":   float(raw.get("quality_piotroski_score") or 0.0),
         "company_name":              raw.get("company_name", ""),
         "earnings_surprise_pct":     eps_pct,
@@ -1329,6 +1378,16 @@ def build_payload(
             f"5% weight budget lost. S3 Stock Watcher / FMP congress unreachable."
         )
 
+    # PATCH 10: SPY momentum regime alert — VIX may not yet signal bear but price action does
+    _spy_mom_regime = status.get("spy_momentum_regime", "NORMAL")
+    if _spy_mom_regime in ("BEAR_CRASH", "BEAR_MOMENTUM"):
+        _spy_ret_63d = status.get("spy_return_63d")
+        _spy_note = f"  SPY 63d: {_spy_ret_63d * 100:.1f}%" if _spy_ret_63d is not None else ""
+        alerts.append(
+            f"SPY MOMENTUM REGIME: {_spy_mom_regime}{_spy_note} — "
+            "price action signals bear market (PATCH 10). VIX may lag. Consider risk reduction."
+        )
+
     alert_block = (
         "\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)
     ) if alerts else ""
@@ -1473,6 +1532,32 @@ def build_payload(
         ),
         "inline": False,
     })
+
+    # ── Regime prediction panel ───────────────────────────────────────────────
+    if vix_val is not None and _HAS_REGIME:
+        try:
+            _regime = _get_regime(float(vix_val))
+            _mult = _score_multiplier(_regime)
+            _slabel = _strategy_label(_regime)
+            if _regime.value == "NORMAL":
+                _dist_bear = 25.0 - float(vix_val)
+                _dist_cap  = 30.0 - float(vix_val)
+                _thresholds = f"→ BEAR: VIX +{_dist_bear:.1f} | → CAPITULATION: VIX +{_dist_cap:.1f}"
+            elif _regime.value == "BEAR":
+                _dist_cap = 30.0 - float(vix_val)
+                _thresholds = f"→ CAPITULATION: VIX +{_dist_cap:.1f} | ↓ NORMAL: VIX -{float(vix_val) - 25.0:.1f}"
+            else:  # CAPITULATION
+                _thresholds = "Survivor criteria: beta ≤ 1.2 AND (Piotroski ≥ 0.70 OR D/E ≤ 0.30)"
+            _spy_mom = status.get("spy_momentum_regime", "NORMAL")
+            _spy_suffix = f" | SPY: {_spy_mom}" if _spy_mom != "NORMAL" else ""
+            _regime_val = f"{_slabel}\nMultiplier: ×{_mult:.2f}{_spy_suffix}\n{_thresholds}"
+            fields.append({
+                "name": "📊 REGIME PREDICTION",
+                "value": _truncate(_regime_val, 1024),
+                "inline": False,
+            })
+        except Exception as _reg_exc:
+            log.debug("Regime prediction field failed: %s", _reg_exc)
 
     _MARKET_SECTIONS = [
         ("🇺🇸 Top 3 — USA", us_entries),

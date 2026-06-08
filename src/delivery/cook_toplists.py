@@ -123,7 +123,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         "analyst_consensus_source":    raw.get("analyst_consensus_source", "none"),
         "analyst_revision_score":      float(raw.get("analyst_revision_score") or 0.0),
         "analyst_revision_n_analysts": int(raw.get("analyst_revision_n_analysts") or 0),
-        "price_target_upside_score":   float(raw.get("price_target_upside_score") or 0.0),
+        "price_target_upside_score":   raw.get("price_target_upside_score"),  # None = no analyst target
         "quality_piotroski_score":     float(raw.get("quality_piotroski_score") or 0.0),
         "earnings_surprise_pct":       raw.get("earnings_surprise_pct"),
         "earnings_surprise_days":      int(raw.get("earnings_surprise_days") or 0),
