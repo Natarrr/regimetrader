@@ -45,6 +45,8 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 try:
     from dotenv import load_dotenv
@@ -190,6 +192,16 @@ def prefetch(
     results: dict[str, bool] = {}
 
     session = requests.Session()
+    _retry = Retry(
+        total=4,
+        backoff_factor=2.0,
+        status_forcelist={429, 500, 502, 503, 504},
+        allowed_methods={"GET"},
+        raise_on_status=False,
+    )
+    _adapter = HTTPAdapter(max_retries=_retry)
+    session.mount("https://", _adapter)
+    session.mount("http://", _adapter)
     session.headers.update({"User-Agent": "regime-trader/1.0"})
 
     for endpoint in endpoints:
@@ -214,6 +226,24 @@ def prefetch(
 
         except Exception as exc:
             logger.error("FAILED %s: %s", endpoint, exc)
+            # Fallback: use stale cache if it exists rather than hard-failing.
+            # 429 "updated once every few hours" — stale data is still valid.
+            stale = _cache_path(cache_dir, endpoint)
+            if stale.exists():
+                try:
+                    payload = json.loads(stale.read_text(encoding="utf-8"))
+                    age_h = (
+                        datetime.now(timezone.utc)
+                        - datetime.fromisoformat(payload.get("_cached_at", "2000-01-01T00:00:00+00:00"))
+                    ).total_seconds() / 3600
+                    logger.warning(
+                        "Using stale cache for %s (age=%.1fh) — fetch failed: %s",
+                        endpoint, age_h, exc,
+                    )
+                    results[endpoint] = True
+                    continue
+                except Exception:
+                    pass
             results[endpoint] = False
 
     return results
@@ -411,8 +441,14 @@ def main() -> None:
 
     failures = [ep for ep, ok in results.items() if not ok]
     if failures:
-        logger.error("Failed endpoints: %s", failures)
-        sys.exit(1)
+        # Only hard-fail if a failed endpoint has NO cache file at all.
+        # Stale-cache fallbacks already set results[ep]=True, so reaching here
+        # means the endpoint failed AND no cache exists.
+        missing = [ep for ep in failures if not _cache_path(Path(args.cache_dir), ep).exists()]
+        if missing:
+            logger.error("Failed endpoints with no cache fallback: %s", missing)
+            sys.exit(1)
+        logger.warning("Failed endpoints covered by stale cache: %s", failures)
 
     logger.info(
         "Bulk pre-fetch complete: %d/%d endpoints OK",

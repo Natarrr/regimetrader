@@ -95,7 +95,10 @@ jobs:
         run: pip install -r requirements.txt
 
       # ── 5. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
+      # continue-on-error: script retries 429s internally (urllib3.Retry x4)
+      # and falls back to stale cache; only hard-fails when no cache exists at all.
       - name: FMP bulk pre-fetch (Ultimate)
+        continue-on-error: true
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
@@ -366,7 +369,9 @@ jobs:
       # ── 5. Bulk FMP pre-fetch (Ultimate tier: 50 req/s) ─────────────────────
       # upgrades-downgrades-consensus-bulk is global — covers EU/Asia symbols.
       # ratios-ttm-bulk provides quality_piotroski inputs for non-US tickers.
+      # continue-on-error: same stale-cache fallback as US job.
       - name: FMP bulk pre-fetch (Ultimate)
+        continue-on-error: true
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
