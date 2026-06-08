@@ -374,6 +374,7 @@ def _to_entry(
 ) -> Dict[str, Any]:
     w = weights if weights is not None else WEIGHTS
     effective_w = _ticker_effective_weights(row, w)
+    # Authoritative for Discord and Claude analysis outputs. See run_pipeline.py for intel_source_status.json.
     raw_score = round(
         sum(effective_w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in effective_w),
         4,

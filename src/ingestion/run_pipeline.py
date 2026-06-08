@@ -691,10 +691,10 @@ def score_news_sentiment_combined(
     headline_score = 0.0
     base_source = "none"
     if articles:
+        base_source = "fmp"  # Set as soon as articles non-empty, before scoring
         s = score_news_sentiment(articles)
         if s > 0.0:
             headline_score = s
-            base_source = "fmp"
 
     # PEAD boost — FMP /stable/earnings-surprises (Bernard & Thomas 1989)
     # PATCH 04: Apply exponential decay with half-life = 20 days.
@@ -1768,6 +1768,7 @@ def run(
             _renorm_cache[market] = renormalize_weights_for_market(ticker_weights, market)
         market_weights = _renorm_cache[market]
 
+        # Authoritative for intel_source_status.json. Discord/Claude use scores from generate_top_lists.py.
         final_score = 0.0
         weight_sum_applied = 0.0
         for factor_short, w in market_weights.items():
