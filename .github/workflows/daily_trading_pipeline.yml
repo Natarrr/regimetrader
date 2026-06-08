@@ -599,6 +599,7 @@ jobs:
       #    region->market, congress:0.0). stdlib-only.
       - name: Cook (merge US + INTL)
         run: |
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
           python src/delivery/cook_toplists.py \
             --us-input    logs/top_lists_us.json \
             --intl-input  logs/top_lists_intl.json \

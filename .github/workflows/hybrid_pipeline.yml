@@ -357,6 +357,8 @@ jobs:
     needs: [quant, preflight_cost_gate]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PYTHONPATH: "${{ github.workspace }}:${{ env.PYTHONPATH }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
