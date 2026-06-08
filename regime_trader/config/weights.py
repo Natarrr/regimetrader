@@ -143,10 +143,10 @@ def _piotroski_gate_multiplier(raw: int | None) -> float:
     F-score < suppress_below → 0.0 (BUY suppressed — financially distressed)
     F-score < discount_below → discount_factor (discounted)
     F-score >= discount_below → 1.0 (full weight)
-    None → missing_score/9 sentinel (conservative)
+    None → missing_score/8 sentinel (conservative)
     """
     if raw is None:
-        return PIOTROSKI_GATE["missing_score"] / 9.0
+        return PIOTROSKI_GATE["missing_score"] / 8.0
     if raw < PIOTROSKI_GATE["suppress_below"]:
         return 0.0
     if raw < PIOTROSKI_GATE["discount_below"]:

@@ -263,7 +263,7 @@ class FMPFetcher(BaseMarketFetcher):
                 ratios = client.get_ratios_ttm(ticker.split(".")[0])
             quality_piotroski_score = 0.0  # API call succeeded
             if ratios:
-                quality_piotroski_score = score_quality_piotroski(ratios)
+                quality_piotroski_score, _quality_piotroski_raw = score_quality_piotroski(ratios)
         except Exception as exc:
             logger.debug("FMPFetcher piotroski %s: %s", ticker, exc)
 
