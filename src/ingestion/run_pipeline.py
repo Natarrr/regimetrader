@@ -1643,7 +1643,7 @@ def run(
     # Fix #3: momentum_long ⊥ volume_attention (expect ρ < 0.3)
     # Fix #3: momentum_long ⊥ momentum_score_legacy (expect ρ < 0.2 — temporal disjoint)
     def _pearson(xs: list[float], ys: list[float], label: str, warn_threshold: float) -> None:
-        pairs = [(x, y) for x, y in zip(xs, ys) if x > 0.0 and y > 0.0]
+        pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None and x > 0.0 and y > 0.0]
         if len(pairs) < 5:
             log.info("ρ(%s): insufficient pairs (%d)", label, len(pairs))
             return
