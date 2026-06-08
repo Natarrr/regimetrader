@@ -23,6 +23,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Inject a stub anthropic module so ClaudeClient.__init__ does not raise
+# ImportError in environments where the real package is not installed.
+# Tests in TestClaudeClientMocked replace client._client with a MagicMock
+# anyway, so the stub Anthropic() instance is never actually called.
+if "anthropic" not in sys.modules:
+    _stub_anthropic = MagicMock()
+    _stub_anthropic.Anthropic.return_value = MagicMock()
+    sys.modules["anthropic"] = _stub_anthropic
+
 from analysis.claude_client import (
     CostBudgetExceeded,
     CostTracker,

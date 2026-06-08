@@ -89,18 +89,46 @@ def test_fmp_fetcher_source_reliability():
     assert f.source_reliability("SAP.DE") == pytest.approx(1.0)
 
 
+def _make_fmp_mock(rows, *, ticker_rows_map=None):
+    """Return a MagicMock FMPClient whose get_historical_prices returns rows.
+
+    ticker_rows_map overrides per-ticker return values for the fallback tests.
+    All other HTTP-hitting methods return safe empty defaults so no real network
+    calls escape into the test suite.
+    """
+    mock = MagicMock()
+    if ticker_rows_map is not None:
+        def _side_effect(ticker, limit=280):
+            return ticker_rows_map.get(ticker, [])
+        mock.get_historical_prices.side_effect = _side_effect
+    else:
+        mock.get_historical_prices.return_value = rows
+    mock.get_quote.return_value = {"marketCap": 100_000_000_000, "price": 150.0}
+    mock.get_news_raw_articles.return_value = []
+    mock.get_insider_purchases.return_value = (0.0, 999)
+    mock.get_insider_transactions.return_value = {"P": [], "S": []}
+    mock.get_analyst_ratings.return_value = {}
+    mock.get_analyst_estimate_revision.return_value = (None, 0)
+    mock.get_ratios_ttm.return_value = {}
+    mock.get_price_target_consensus.return_value = {}
+    mock.get_upside_to_target.return_value = None
+    mock.get_earnings_surprise.return_value = (None, 0)
+    return mock
+
+
 def test_fmp_fetcher_prepare_empty_on_fmp_error():
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               side_effect=Exception("network")):
+    mock = _make_fmp_mock([])
+    mock.get_historical_prices.side_effect = Exception("network")
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["SAP.DE"])
     assert result == []
 
 
 def test_fmp_fetcher_prepare_empty_on_no_data():
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               return_value=[]):
+    mock = _make_fmp_mock([])
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["SAP.DE"])
     assert result == []
 
@@ -108,8 +136,8 @@ def test_fmp_fetcher_prepare_empty_on_no_data():
 def test_fmp_fetcher_prepare_returns_entry_with_fmp_data():
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
     rows = _fmp_price_rows(275, last_vol=4_000_000)   # last-day volume spike
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               return_value=rows):
+    mock = _make_fmp_mock(rows)
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["SAP.DE"])
     assert len(result) == 1
     assert result[0].ticker == "SAP.DE"
@@ -123,8 +151,8 @@ def test_fmp_fetcher_prepare_returns_entry_with_fmp_data():
 def test_fmp_fetcher_prepare_asia_market():
     f = FMPFetcher(api_key="test", market=MarketEnum.ASIA)
     rows = _fmp_price_rows(275, start=2800.0, end=3100.0, vol=16_000_000)
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               return_value=rows):
+    mock = _make_fmp_mock(rows)
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["7203.T"])
     assert len(result) == 1
     assert result[0].market == MarketEnum.ASIA
@@ -135,8 +163,8 @@ def test_fmp_fetcher_prepare_asia_market():
 def test_fmp_fetcher_no_quota_logic():
     """FMPFetcher uses FMP price feed — empty data is skipped, no quota check."""
     f = FMPFetcher(api_key="test", market=MarketEnum.EUROPE)
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               return_value=[]):
+    mock = _make_fmp_mock([])
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["SAP.DE", "ASML.AS"])
     assert result == []
 
@@ -151,8 +179,10 @@ def test_fmp_fetcher_historical_price_falls_back_to_base_symbol():
         call_args.append(ticker)
         return [] if ticker == "ASML.AS" else rows
 
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               side_effect=fake_history):
+    mock = _make_fmp_mock(rows)
+    mock.get_historical_prices.side_effect = fake_history
+
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["ASML.AS"])
 
     assert len(result) == 1
@@ -170,8 +200,10 @@ def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
         call_count[0] += 1
         return rows
 
-    with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
-               side_effect=fake_prices):
+    mock = _make_fmp_mock(rows)
+    mock.get_historical_prices.side_effect = fake_prices
+
+    with patch("regime_trader.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["SAP.DE", "SIE.DE"])
     assert len(result) == 2
     assert call_count[0] == 2
