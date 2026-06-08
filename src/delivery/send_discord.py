@@ -269,9 +269,14 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
     factors = entry.get("factors") or {}
     _ar_raw = entry.get("analyst_revision_score")
     _pt_raw = entry.get("price_target_upside_score")
+    _ac_raw = entry.get("analyst_consensus_score")
     raw_values: Dict[str, Optional[float]] = {
         "analyst_revision":    (float(_ar_raw) if _ar_raw is not None else None),
         "price_target_upside": (float(_pt_raw) if _pt_raw is not None else None),
+        # AC preserved separately: factors["analyst_consensus"] is always 0.0 when
+        # source is "no_coverage" (normalizer coerces None→0.0); this raw field
+        # carries the original None so the display can show AC:None vs AC:—
+        "analyst_consensus":   (float(_ac_raw) if _ac_raw is not None else None),
     }
 
     if is_intl:
@@ -955,6 +960,7 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
         "recent_upgrade_downgrade":  raw.get("recent_upgrade_downgrade", {}),
         "target_price":              raw.get("target_price"),
         "current_price":             raw.get("current_price"),
+        "weight_coverage":           float(raw.get("weight_coverage", 1.0) or 1.0),
     }
 
     for key in ("esg_score", "esg_e_score", "esg_flag"):

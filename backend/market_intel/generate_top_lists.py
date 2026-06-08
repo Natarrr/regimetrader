@@ -124,7 +124,6 @@ _TARGET_SECTORS = [
     "Industrials",
     "Consumer Discretionary",
     "Consumer Staples",
-    "Health Care",
     "Healthcare",
     "Financials",
     "Information Technology",
@@ -132,6 +131,16 @@ _TARGET_SECTORS = [
     "Real Estate",
     "Utilities",
 ]
+
+# FMP returns "Health Care" for EU/LSE tickers; universe.csv uses "Healthcare".
+# Canonicalize before sector matching so both map to the same bucket.
+_SECTOR_CANON: Dict[str, str] = {
+    "Health Care": "Healthcare",
+}
+
+
+def _canon_sector(sector: str) -> str:
+    return _SECTOR_CANON.get(sector, sector)
 
 
 def _badge(score: float) -> str:
@@ -420,7 +429,7 @@ def _to_entry(
 
     return {
         "ticker":          row.get("ticker", "?"),
-        "sector":          row.get("sector", "Unknown"),
+        "sector":          _canon_sector(row.get("sector", "Unknown")),
         "cap_tier":        row.get("cap_tier", "large"),
         "market_cap":      float(row.get("market_cap", 0.0)),
         "raw_score":       raw_score,
@@ -613,7 +622,7 @@ def _sector_picks(entries: List[Dict[str, Any]], n: int = 3) -> Dict[str, List[D
     """Select top n tickers per target sector, ranked by final_score descending."""
     result: Dict[str, List[Dict[str, Any]]] = {}
     for sector in _TARGET_SECTORS:
-        candidates = [e for e in entries if e.get("sector") == sector]
+        candidates = [e for e in entries if _canon_sector(e.get("sector", "")) == sector]
         result[sector] = sorted(
             candidates, key=lambda e: e["final_score"], reverse=True)[:n]
     return result

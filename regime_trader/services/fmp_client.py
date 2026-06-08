@@ -63,7 +63,7 @@ _DEAD_ENDPOINTS: frozenset[str] = frozenset({
 _TTL: Dict[str, int] = {
     "congress":     12 * 3600,   # stub — nothing fetched, but preserved for compatibility
     "insider":      12 * 3600,
-    "news":          2 * 3600,
+    "news":          8 * 3600,   # pipeline runs 3× daily (8h interval) — 2h caused cache miss every run
     "quote":             5 * 60,
     "ratings":       6 * 3600,
     "key_metrics":  24 * 3600,
