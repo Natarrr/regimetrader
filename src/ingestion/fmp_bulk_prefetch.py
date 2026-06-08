@@ -305,6 +305,9 @@ def build_ticker_index(
 ) -> dict[str, dict[str, Any]]:
     """Load bulk cache and return a dict keyed by ticker symbol.
     Handles both 'symbol' and 'ticker' field names across endpoints.
+
+    Returns: index dict. Ambiguous base symbols are excluded (deleted from index).
+    For access to the ambiguous_bases set, use build_ticker_index_with_ambiguous().
     """
     records = load_bulk(cache_dir, endpoint)
     index: dict[str, dict[str, Any]] = {}
@@ -327,6 +330,42 @@ def build_ticker_index(
                 del index[base_sym]
                 ambiguous_bases.add(base_sym)
     return index
+
+
+def build_ticker_index_with_ambiguous(
+    cache_dir: Path,
+    endpoint: str,
+    key_field: str = "symbol",
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """Load bulk cache and return (index, ambiguous_bases).
+
+    The index maps ticker symbols (and unambiguous base symbols) to records.
+    The ambiguous_bases set contains base symbols with multiple exchange variants
+    that were removed from the index to prevent incorrect fallback lookups.
+
+    Use this when you need to guard against base-symbol fallback for ambiguous bases.
+    """
+    records = load_bulk(cache_dir, endpoint)
+    index: dict[str, dict[str, Any]] = {}
+    ambiguous_bases: set[str] = set()
+    for rec in records:
+        sym = rec.get(key_field) or rec.get(
+            "symbol") or rec.get("ticker") or ""
+        if not sym:
+            continue
+        sym = sym.upper().strip()
+        index[sym] = rec
+        base_sym = normalize_ticker_key(sym)
+        if base_sym and base_sym != sym:
+            if base_sym in ambiguous_bases:
+                pass  # already known ambiguous — never re-insert
+            elif base_sym not in index:
+                index[base_sym] = rec
+            else:
+                # Second record for this base: mark ambiguous, remove alias.
+                del index[base_sym]
+                ambiguous_bases.add(base_sym)
+    return index, ambiguous_bases
 
 
 def main() -> None:

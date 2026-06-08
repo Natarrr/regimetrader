@@ -950,7 +950,10 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
         return []
     try:
         root = ET.fromstring(resp.text)
-    except ET.ParseError:
+    except ET.ParseError as e:
+        log.warning(
+            "Form4 XML parse failed for %s: %s — returning []",
+            url, e)
         return []   # .htm or plain-text filing — not XML-parseable
 
     # Strip namespace prefixes so findall() works regardless of xmlns= declaration

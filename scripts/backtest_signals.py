@@ -1025,7 +1025,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     if not _HAS_YF and not args.dry_run:
-        log.error("yfinance not installed. Install it or use --dry-run.")
+        log.error("yfinance not installed. Use --dry-run for CI or: pip install yfinance")
         return 1
 
     # ── 1. Load all signals ────────────────────────────────────────────────────
