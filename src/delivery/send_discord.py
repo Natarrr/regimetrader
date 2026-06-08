@@ -62,7 +62,6 @@ except ImportError:
 
 try:
     from regime_trader.risk.regime import (  # noqa: E402
-        RiskRegime as _RiskRegime,
         get_regime as _get_regime,
         score_multiplier as _score_multiplier,
         strategy_label as _strategy_label,
