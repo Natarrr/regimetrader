@@ -555,6 +555,8 @@ jobs:
     needs: [run_us_pipeline, run_intl_pipeline]
     permissions:
       contents: write
+    env:
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -619,7 +621,7 @@ jobs:
       #    region->market, congress:0.0). stdlib-only.
       - name: Cook (merge US + INTL)
         run: |
-          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH:-}"
           python src/delivery/cook_toplists.py \
             --us-input    logs/top_lists_us.json \
             --intl-input  logs/top_lists_intl.json \
