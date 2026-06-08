@@ -41,10 +41,27 @@ def export_metrics(
 
     duration_override_s wins over `_edgar_meta.run_duration_seconds` when set —
     use this when timing the run from a CI step that wraps run_pipeline.
+
+    When intel_source_status.json is absent (pipeline aborted before writing it),
+    a tombstone metrics.json is written with pipeline_failed=True so downstream
+    check_metrics can report the failure without this step itself erroring.
     """
     src_path = log_dir / "intel_source_status.json"
     if not src_path.exists():
-        raise FileNotFoundError(f"intel_source_status.json not found at {src_path}")
+        tombstone: Dict[str, Any] = {
+            "last_run":             datetime.now(timezone.utc).isoformat(),
+            "run_duration_seconds": round(float(duration_override_s or 0.0), 2),
+            "ticker_count":         0,
+            "edgar_count":          0,
+            "fmp_count":            0,
+            "error_count":          0,
+            "pipeline_failed":      True,
+        }
+        out_path = log_dir / "metrics.json"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(out_path, tombstone)
+        log.warning("intel_source_status.json not found — wrote tombstone metrics.json")
+        return tombstone
 
     raw = json.loads(src_path.read_text(encoding="utf-8"))
     meta = raw.get("_edgar_meta") or {}
@@ -80,9 +97,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         export_metrics(args.log_dir, duration_override_s=args.duration_seconds)
         return 0
-    except FileNotFoundError as exc:
-        log.error("%s", exc)
-        return 2
     except Exception as exc:
         log.exception("metrics export failed: %s", exc)
         return 2
