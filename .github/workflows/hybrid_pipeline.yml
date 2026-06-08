@@ -115,6 +115,9 @@ jobs:
           workflow_conclusion: success
           if_no_artifact_found: warn
 
+      # Note: edgar_3x artifact now contains top_lists_us.json (not top_lists.json)
+      # See hybrid_pipeline reshape step for path handling.
+
       - name: Validate edgar_3x artifact freshness
         run: |
           python3 - <<'PYEOF'
@@ -170,14 +173,15 @@ jobs:
           PYEOF
 
       # Reshape to 9-factor schema — includes analyst_consensus and quality_piotroski
-      - name: Reshape top_lists → shortlist.json (9-factor schema)
+      # Note: edgar_3x artifact now contains top_lists_us.json (not top_lists.json)
+      - name: Reshape top_lists_us → shortlist.json (9-factor schema)
         run: |
           python - <<'PYEOF'
           import json, os, pathlib
 
-          src = pathlib.Path("logs/top_lists.json")
+          src = pathlib.Path("logs/top_lists_us.json")
           if not src.exists():
-              print("top_lists.json not found — writing empty shortlist")
+              print("top_lists_us.json not found — writing empty shortlist")
               payload = {"shortlist": [], "candidates": []}
           else:
               data = json.loads(src.read_text())
@@ -226,7 +230,7 @@ jobs:
           python - <<'PYEOF'
           import json, pathlib, os
 
-          src = pathlib.Path("logs/top_lists.json")
+          src = pathlib.Path("logs/top_lists_us.json")
           if not src.exists():
               regime = "Normal"
               vix_val = 0.0

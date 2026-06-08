@@ -619,6 +619,12 @@ jobs:
       # Artifacts from the same workflow run are always fresh (<1h old).
       # Still validate the timestamp to catch silent pipeline failures that
       # produce a stale intel_source_status.json from a previous cache hit.
+      #
+      # Threshold rationale (18h):
+      # edgar_3x runs 7×/week at 00:00, 08:00, 16:00 UTC.
+      # daily_trading_pipeline runs 5×/week at 00:30, 08:30, 16:30 UTC.
+      # Monday 00:30 UTC: most recent edgar_3x artifact is Sunday 16:00 UTC (16.5h ago).
+      # 18h threshold covers this exact case.
       - name: Verify intel_source_status.json freshness
         run: |
           python3 - <<'EOF'
@@ -644,8 +650,9 @@ jobs:
               ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
               age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
 
-              # Same-workflow artifacts: threshold is 6h (matching workflow_run threshold).
-              max_age_h = 6.0
+              # Threshold: 18h covers Monday 00:30 UTC case where most recent
+              # edgar_3x artifact is from Sunday 16:00 UTC (16.5h older).
+              max_age_h = 18.0
               print(f"Artifact age: {age_h:.1f}h | Threshold: {max_age_h}h")
 
               if age_h > max_age_h:

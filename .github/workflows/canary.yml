@@ -138,6 +138,7 @@ jobs:
       # Validates non-degenerate scores for all 9 factors including the two
       # new ones (analyst_consensus, quality_piotroski).
       # Also asserts EU/Asia congress contamination = 0.
+      # Additionally checks that weights_us has non-zero values for the sprint factors.
       - name: Check score distribution (9-factor)
         run: |
           set -euo pipefail
@@ -170,6 +171,15 @@ jobs:
                       if key not in sample_fac:
                           print(f'::error::Factor {key!r} missing from top_buys schema')
                           sys.exit(1)
+
+                  # Check weights_us has non-zero values for sprint factors (M-3)
+                  weights_us = d.get('weights_us', {})
+                  for key in ('analyst_consensus', 'quality_piotroski'):
+                      w = weights_us.get(key, 0.0)
+                      if w == 0.0:
+                          print(f'::error::WEIGHTS_US[{key!r}] is zero in artifact — sprint factor not active')
+                          sys.exit(1)
+
                   # Check EU/Asia congress contamination
                   eu_tickers = [t for t in d.get('top_buys', [])
                                 if '.' in t['ticker']]  # .PA, .DE, .L etc.
