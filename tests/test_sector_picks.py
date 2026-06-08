@@ -22,7 +22,8 @@ _ENTRIES = [
 
 def test_returns_dict_with_target_sectors():
     result = _sector_picks(_ENTRIES)
-    for sector in ["Energy", "Materials", "Communication Services", "Healthcare", "Information Technology"]:
+    for sector in ["Energy", "Materials", "Communication Services", "Healthcare",
+                   "Information Technology", "Financials"]:
         assert sector in result
 
 
@@ -41,9 +42,19 @@ def test_sector_with_fewer_than_n_tickers():
 
 
 def test_non_target_sector_excluded():
+    # All 11 GICS sectors are now in _TARGET_SECTORS — NEM (Financials) is included.
     result = _sector_picks(_ENTRIES, n=3)
     all_tickers = [e["ticker"] for picks in result.values() for e in picks]
-    assert "NEM" not in all_tickers  # Financials is not a target sector
+    assert "NEM" in all_tickers  # Financials is a target sector; NEM scores 0.91
+
+    # Tickers with unrecognised sectors (not in _TARGET_SECTORS) must be excluded.
+    entries_with_unknown = _ENTRIES + [
+        {"ticker": "FAKE", "sector": "Crypto", "final_score": 0.99,
+         "cap_tier": "large", "market_cap": 1e12}
+    ]
+    result2 = _sector_picks(entries_with_unknown, n=3)
+    all_tickers2 = [e["ticker"] for picks in result2.values() for e in picks]
+    assert "FAKE" not in all_tickers2  # "Crypto" is not a recognised GICS sector
 
 
 def test_empty_entries_returns_empty_lists():
