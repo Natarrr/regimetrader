@@ -31,34 +31,35 @@ def test_weights_global_congress_zero():
 def test_weights_us_congress_nonzero():
     assert WEIGHTS_US["congress"] > 0.0
 
-def test_weights_us_unchanged():
-    """US weights must be identical to the pre-patch WEIGHTS dict."""
+def test_weights_us_sprint_v23():
+    """US weights must reflect v2.3 sprint allocation (analyst_consensus + quality_piotroski activated)."""
     expected = {
         "insider_conviction": 0.30,
         "insider_breadth":    0.15,
-        "congress":           0.22,
+        "congress":           0.04,
         "news_sentiment":     0.10,
         "news_buzz":          0.05,
         "momentum_long":      0.15,
         "volume_attention":   0.03,
-        "analyst_consensus":  0.00,
-        "quality_piotroski":  0.00,
+        "analyst_consensus":  0.10,
+        "quality_piotroski":  0.08,
     }
     assert WEIGHTS_US == expected
 
 def test_weights_global_redistribution_correct():
-    """The 0.22 freed from congress must be redistributed correctly (v2.3-global)."""
+    """WEIGHTS_GLOBAL vs WEIGHTS_US deltas (v2.3-global: congress absent + quality/momentum tilt)."""
     delta = {k: WEIGHTS_GLOBAL[k] - WEIGHTS_US[k] for k in WEIGHTS_US}
-    assert delta["congress"]           == pytest.approx(-0.22)
-    assert delta["insider_conviction"] == pytest.approx(-0.02)   # −0.02 — MAR parity maintained
+    # congress fully absent outside US (WEIGHTS_US now 0.04 after sprint; WEIGHTS_GLOBAL 0.00)
+    assert delta["congress"]           == pytest.approx(-0.04)
+    assert delta["insider_conviction"] == pytest.approx(-0.02)   # −0.02 — MAR Art.19 parity
     assert delta["insider_breadth"]    == pytest.approx(-0.01)   # −0.01 donor
     assert delta["news_buzz"]          == pytest.approx(-0.01)   # −0.01 donor
-    assert delta["volume_attention"]   == pytest.approx(+0.01)   # −0.01 donor + net redistrib
-    assert delta["analyst_consensus"]  == pytest.approx(+0.10)
-    assert delta["momentum_long"]      == pytest.approx(+0.02)
-    assert delta["quality_piotroski"]  == pytest.approx(+0.05)
-    assert delta["news_sentiment"]     == pytest.approx(+0.03)
-    # New factors activated
+    assert delta["volume_attention"]   == pytest.approx(+0.01)   # net +0.01 vs US
+    assert delta["analyst_consensus"]  == pytest.approx(0.00)    # same in both (0.10)
+    assert delta["momentum_long"]      == pytest.approx(+0.02)   # Rouwenhorst EU premium
+    assert delta["quality_piotroski"]  == pytest.approx(-0.03)   # GLOBAL 0.05 < US 0.08
+    assert delta["news_sentiment"]     == pytest.approx(+0.03)   # Tetlock 2007 global corpus
+    # New factors present in GLOBAL only
     assert WEIGHTS_GLOBAL["analyst_revision"]    == pytest.approx(0.02)
     assert WEIGHTS_GLOBAL["price_target_upside"] == pytest.approx(0.03)
 
@@ -96,7 +97,7 @@ def test_congress_not_eligible_asia():
 def test_get_weights_us_returns_copy():
     w = get_weights("AAPL")
     w["congress"] = 999.0
-    assert WEIGHTS_US["congress"] == 0.22   # original not mutated
+    assert WEIGHTS_US["congress"] == 0.04   # original not mutated
 
 def test_get_weights_eu_returns_copy():
     from regime_trader.config.weights import WEIGHTS_EU
@@ -167,7 +168,7 @@ def test_us_score_unaffected_by_patch():
 
 def test_eu_score_higher_than_penalty_score():
     """An EU ticker must score higher with WEIGHTS_EU (proper redistribution)
-    than it would with WEIGHTS_US where congress=0.22 is dead weight."""
+    than it would with WEIGHTS_US where congress is present but absent for EU."""
     from regime_trader.config.weights import WEIGHTS_EU
     factors = {k: 0.6 for k in WEIGHTS_EU}
     factors["congress"] = 0.0   # absent

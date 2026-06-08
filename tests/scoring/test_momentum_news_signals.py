@@ -248,8 +248,9 @@ class TestQualityPiotroski:
         }
 
     def test_perfect_score_all_8_points(self):
-        score = score_quality_piotroski(self._full_quality_ratios())
+        score, raw = score_quality_piotroski(self._full_quality_ratios())
         assert score == 1.0000
+        assert raw == 8
 
     def test_zero_score_all_8_points_fail(self):
         ratios = {
@@ -260,7 +261,9 @@ class TestQualityPiotroski:
             "grossProfitMarginTTM":      0.10,  # fails point 7
             "netProfitMarginTTM":       -0.02,  # fails point 8
         }
-        assert score_quality_piotroski(ratios) == 0.0000
+        score, raw = score_quality_piotroski(ratios)
+        assert score == 0.0000
+        assert raw == 0
 
     def test_partial_score_5_of_8_points(self):
         """ROA > 0 only (not > 0.05), opMargin OK, D/E < 1 only (not < 0.5),
@@ -273,13 +276,19 @@ class TestQualityPiotroski:
             "grossProfitMarginTTM":     0.40,   # passes point 7
             "netProfitMarginTTM":       0.02,   # fails point 8
         }
-        assert score_quality_piotroski(ratios) == round(5 / 8, 4)
+        score, raw = score_quality_piotroski(ratios)
+        assert score == round(5 / 8, 4)
+        assert raw == 5
 
     def test_empty_dict_returns_dead_signal(self):
-        assert score_quality_piotroski({}) == 0.0
+        score, raw = score_quality_piotroski({})
+        assert score == 0.0
+        assert raw == 0
 
     def test_none_returns_dead_signal(self):
-        assert score_quality_piotroski(None) == 0.0
+        score, raw = score_quality_piotroski(None)
+        assert score == 0.0
+        assert raw == 0
 
     def test_all_none_fields_returns_dead_signal(self):
         ratios = {
@@ -290,7 +299,9 @@ class TestQualityPiotroski:
             "grossProfitMarginTTM":     None,
             "netProfitMarginTTM":       None,
         }
-        assert score_quality_piotroski(ratios) == 0.0
+        score, raw = score_quality_piotroski(ratios)
+        assert score == 0.0
+        assert raw == 0
 
     def test_missing_individual_fields_score_zero_for_that_point(self):
         """A company with 5 of 8 fields present and all passing scores 5/8."""
@@ -302,35 +313,45 @@ class TestQualityPiotroski:
             "grossProfitMarginTTM":     0.40,   # point 7 passes
             # netProfitMarginTTM missing — point 8 scores 0
         }
-        assert score_quality_piotroski(ratios) == round(5 / 8, 4)
+        score, raw = score_quality_piotroski(ratios)
+        assert score == round(5 / 8, 4)
+        assert raw == 5
 
     def test_negative_debt_equity_fails_both_leverage_points(self):
         """Negative D/E (negative book equity) is worse than high D/E — fails points 4 and 5."""
         ratios = {**self._full_quality_ratios(), "debtEquityRatioTTM": -0.5}
         # Loses 2 leverage points: 8 - 2 = 6 → 6/8
-        assert score_quality_piotroski(ratios) == round(6 / 8, 4)
+        score, raw = score_quality_piotroski(ratios)
+        assert score == round(6 / 8, 4)
+        assert raw == 6
 
     def test_roa_exactly_at_5pct_threshold(self):
         """ROA == 0.05 fails point 2 (must be strictly greater than 0.05)."""
         ratios = {**self._full_quality_ratios(), "returnOnAssetsTTM": 0.05}
         # Loses point 2: 8 - 1 = 7 → 7/8
-        assert score_quality_piotroski(ratios) == round(7 / 8, 4)
+        score, raw = score_quality_piotroski(ratios)
+        assert score == round(7 / 8, 4)
+        assert raw == 7
 
     def test_gross_margin_exactly_at_threshold(self):
         """grossProfitMarginTTM == 0.30 fails point 7 (must be strictly greater)."""
         ratios = {**self._full_quality_ratios(), "grossProfitMarginTTM": 0.30}
-        assert score_quality_piotroski(ratios) == round(7 / 8, 4)
+        score, raw = score_quality_piotroski(ratios)
+        assert score == round(7 / 8, 4)
+        assert raw == 7
 
     def test_returns_float_in_range_0_to_1(self):
-        score = score_quality_piotroski(self._full_quality_ratios())
+        score, raw = score_quality_piotroski(self._full_quality_ratios())
         assert isinstance(score, float)
         assert 0.0 <= score <= 1.0
 
     def test_score_rounded_to_4_decimal_places(self):
         ratios = {**self._full_quality_ratios(), "returnOnAssetsTTM": 0.02}
-        score = score_quality_piotroski(ratios)
+        score, raw = score_quality_piotroski(ratios)
         assert score == round(score, 4)
 
     def test_non_dict_input_returns_dead_signal(self):
-        assert score_quality_piotroski("not a dict") == 0.0
-        assert score_quality_piotroski(42) == 0.0
+        score1, raw1 = score_quality_piotroski("not a dict")
+        score2, raw2 = score_quality_piotroski(42)
+        assert score1 == 0.0
+        assert score2 == 0.0

@@ -26,6 +26,7 @@ def _raw_row(
     cap_tier: str = "large",
     market_cap: float = 3e12,
     sector: str = "Technology",
+    quality_piotroski_raw: int | None = 6,
 ) -> Dict[str, Any]:
     """Minimal intel_source_status.json result row for use in tests.
 
@@ -54,6 +55,7 @@ def _raw_row(
         "analyst_revision_score":    round(momentum * 0.40, 4),
         "price_target_upside_score": round(momentum * 0.30, 4),
         "quality_piotroski_score":   round(edgar * 0.60, 4),
+        "quality_piotroski_raw":     quality_piotroski_raw,
         "transcript_tone_score":     round(news * 0.20, 4),
         "ceo_buy":                   False,
         "form4_count":               3,

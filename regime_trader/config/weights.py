@@ -27,17 +27,20 @@
 
 WEIGHTS_VERSION = "v2.2-global"
 
-# ── US universe (unchanged from v2.1) ─────────────────────────────────────────
+# ── US universe (Sprint v2.3: analyst_consensus and quality_piotroski activated) ────
+# analyst_consensus (0.10) and quality_piotroski (0.08) funded from congress:
+# Congress weight reduced 0.22 → 0.04 (congress is US-structural; IC/breadth/quality
+# decay faster than quality/consensus signals at this allocation).
 WEIGHTS_US: dict[str, float] = {
     "insider_conviction": 0.30,
     "insider_breadth":    0.15,
-    "congress":           0.22,
+    "congress":           0.04,
     "news_sentiment":     0.10,
     "news_buzz":          0.05,
     "momentum_long":      0.15,
     "volume_attention":   0.03,
-    "analyst_consensus":  0.00,   # wired sprint step 2
-    "quality_piotroski":  0.00,   # wired sprint step 6
+    "analyst_consensus":  0.10,
+    "quality_piotroski":  0.08,
 }
 assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_US sums to {sum(WEIGHTS_US.values()):.8f}, not 1.0"
@@ -132,6 +135,24 @@ PIOTROSKI_GATE: dict[str, float] = {
     "discount_factor": 0.6,
     "missing_score":   3,
 }
+
+
+def _piotroski_gate_multiplier(raw: int | None) -> float:
+    """Multiplicative gate applied to final_score based on Piotroski F-score.
+
+    F-score < suppress_below → 0.0 (BUY suppressed — financially distressed)
+    F-score < discount_below → discount_factor (discounted)
+    F-score >= discount_below → 1.0 (full weight)
+    None → missing_score/8 sentinel (conservative)
+    """
+    if raw is None:
+        return PIOTROSKI_GATE["missing_score"] / 8.0
+    if raw < PIOTROSKI_GATE["suppress_below"]:
+        return 0.0
+    if raw < PIOTROSKI_GATE["discount_below"]:
+        return PIOTROSKI_GATE["discount_factor"]
+    return 1.0
+
 
 # ── Region classifier ─────────────────────────────────────────────────────────
 _EU_SUFFIXES: frozenset[str] = frozenset({

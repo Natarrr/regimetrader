@@ -408,10 +408,11 @@ jobs:
 
           # Inject bulk consensus index to avoid per-ticker analyst_consensus calls
           bulk_idx: dict = {}
+          ambiguous_bases: set = set()
           try:
-              from src.ingestion.fmp_bulk_prefetch import build_ticker_index
-              bulk_idx = build_ticker_index(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
-              log.info("Bulk consensus index: %d symbols loaded", len(bulk_idx))
+              from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous
+              bulk_idx, ambiguous_bases = build_ticker_index_with_ambiguous(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
+              log.info("Bulk consensus index: %d symbols loaded, %d ambiguous bases", len(bulk_idx), len(ambiguous_bases))
           except Exception as exc:
               log.warning("Bulk index load failed: %s — falling back to per-ticker FMP", exc)
 
@@ -435,6 +436,7 @@ jobs:
                   api_key=api_key,
                   market=market_enum,
                   bulk_consensus_idx=bulk_idx,
+                  ambiguous_bases=ambiguous_bases,
               )
               entries = fetcher.prepare(tickers)
               for entry in entries:
@@ -599,6 +601,7 @@ jobs:
       #    region->market, congress:0.0). stdlib-only.
       - name: Cook (merge US + INTL)
         run: |
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
           python src/delivery/cook_toplists.py \
             --us-input    logs/top_lists_us.json \
             --intl-input  logs/top_lists_intl.json \
@@ -618,6 +621,12 @@ jobs:
       # Artifacts from the same workflow run are always fresh (<1h old).
       # Still validate the timestamp to catch silent pipeline failures that
       # produce a stale intel_source_status.json from a previous cache hit.
+      #
+      # Threshold rationale (18h):
+      # edgar_3x runs 7×/week at 00:00, 08:00, 16:00 UTC.
+      # daily_trading_pipeline runs 5×/week at 00:30, 08:30, 16:30 UTC.
+      # Monday 00:30 UTC: most recent edgar_3x artifact is Sunday 16:00 UTC (16.5h ago).
+      # 18h threshold covers this exact case.
       - name: Verify intel_source_status.json freshness
         run: |
           python3 - <<'EOF'
@@ -643,8 +652,9 @@ jobs:
               ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
               age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
 
-              # Same-workflow artifacts: threshold is 6h (matching workflow_run threshold).
-              max_age_h = 6.0
+              # Threshold: 18h covers Monday 00:30 UTC case where most recent
+              # edgar_3x artifact is from Sunday 16:00 UTC (16.5h older).
+              max_age_h = 18.0
               print(f"Artifact age: {age_h:.1f}h | Threshold: {max_age_h}h")
 
               if age_h > max_age_h:

@@ -59,12 +59,15 @@ class FMPFetcher(BaseMarketFetcher):
         api_key: str = "",
         market: MarketEnum = MarketEnum.EUROPE,
         bulk_consensus_idx: Optional[dict] = None,
+        ambiguous_bases: Optional[set] = None,
     ) -> None:
         self._api_key = api_key
         self._market = market
         # Bulk consensus index: {SYMBOL_UPPER: record_dict}
         # Injected from fmp_bulk_prefetch cache to avoid per-ticker API calls.
         self._bulk_consensus_idx: dict = bulk_consensus_idx or {}
+        # Ambiguous base symbols (multiple exchange variants) — guard fallback lookups
+        self._ambiguous_bases: set = ambiguous_bases or set()
 
     @property
     def market(self) -> MarketEnum:
@@ -230,10 +233,14 @@ class FMPFetcher(BaseMarketFetcher):
         analyst_consensus_score = None  # None = API failure; 0.0 = no analyst coverage
         try:
             _base_sym = ticker.split(".")[0].upper()
-            bulk_rec = (
-                self._bulk_consensus_idx.get(ticker.upper())
-                or self._bulk_consensus_idx.get(_base_sym)
-            )
+            bulk_rec = self._bulk_consensus_idx.get(ticker.upper())
+            # Fallback to base symbol only if it's not ambiguous (multiple exchange variants)
+            if not bulk_rec and _base_sym not in self._ambiguous_bases:
+                bulk_rec = self._bulk_consensus_idx.get(_base_sym)
+            elif not bulk_rec and _base_sym in self._ambiguous_bases:
+                logger.debug(
+                    "Skipping ambiguous base alias %s — multiple exchange variants present",
+                    _base_sym)
             analyst_consensus_score = 0.0  # API lookup succeeded
             if bulk_rec:
                 analyst_consensus_score, _ = ac_score_record(ticker, bulk_rec)
@@ -263,7 +270,7 @@ class FMPFetcher(BaseMarketFetcher):
                 ratios = client.get_ratios_ttm(ticker.split(".")[0])
             quality_piotroski_score = 0.0  # API call succeeded
             if ratios:
-                quality_piotroski_score = score_quality_piotroski(ratios)
+                quality_piotroski_score, _quality_piotroski_raw = score_quality_piotroski(ratios)
         except Exception as exc:
             logger.debug("FMPFetcher piotroski %s: %s", ticker, exc)
 

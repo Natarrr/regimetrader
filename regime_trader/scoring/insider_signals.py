@@ -224,6 +224,13 @@ def score_insider_breadth(
     return round(base, 4)
 
 
+# CALIBRATION NOTE: r=0.75 is a static prior (Lakonishok & Lee 2001).
+# Actual cross-sectional Pearson r is logged each run via
+# log_conviction_breadth_correlation() in run_pipeline.py.
+# If logged r deviates from 0.75 by >0.15 for 3+ consecutive runs,
+# update this constant manually.
+# DO NOT wire r dynamically from the live run output — the same run's
+# scores are used to compute r, creating a self-referential loop.
 def orthogonalize_insider_scores(
     conviction: float,
     breadth: float,

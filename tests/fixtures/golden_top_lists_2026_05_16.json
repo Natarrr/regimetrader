@@ -1,17 +1,17 @@
 {
-  "generated_at": "2026-06-04T19:31:15.847267+00:00",
+  "generated_at": "2026-06-08T09:28:41.788352+00:00",
   "source_run_id": "golden-regression",
   "ticker_count": 83,
   "weights": {
     "insider_conviction": 0.3,
     "insider_breadth": 0.15,
-    "congress": 0.22,
+    "congress": 0.04,
     "news_sentiment": 0.1,
     "news_buzz": 0.05,
     "momentum_long": 0.15,
     "volume_attention": 0.03,
-    "analyst_consensus": 0.0,
-    "quality_piotroski": 0.0
+    "analyst_consensus": 0.1,
+    "quality_piotroski": 0.08
   },
   "weights_version": "v2.2-global",
   "schema_version": "9f-piog-eu",
@@ -28,8 +28,8 @@
       "cap_tier": "large",
       "market_cap": 300000000000.0,
       "raw_score": 0.6837,
-      "final_score": 0.6837,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.4102,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -62,7 +62,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "CRWV",
@@ -70,8 +74,8 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.65,
-      "final_score": 0.65,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.39,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -104,7 +108,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "ARM",
@@ -112,8 +120,8 @@
       "cap_tier": "large",
       "market_cap": 140000000000.0,
       "raw_score": 0.6485,
-      "final_score": 0.6485,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3891,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -146,7 +154,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "QCOM",
@@ -154,8 +166,8 @@
       "cap_tier": "large",
       "market_cap": 180000000000.0,
       "raw_score": 0.6328,
-      "final_score": 0.6328,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3797,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -188,7 +200,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "MU",
@@ -196,8 +212,8 @@
       "cap_tier": "large",
       "market_cap": 130000000000.0,
       "raw_score": 0.6209,
-      "final_score": 0.6209,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3725,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -230,7 +246,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     }
   ],
   "top_buys_usa": [
@@ -240,8 +260,8 @@
       "cap_tier": "large",
       "market_cap": 300000000000.0,
       "raw_score": 0.6837,
-      "final_score": 0.6837,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.4102,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -274,7 +294,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "CRWV",
@@ -282,8 +306,8 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.65,
-      "final_score": 0.65,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.39,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -316,7 +340,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "ARM",
@@ -324,8 +352,8 @@
       "cap_tier": "large",
       "market_cap": 140000000000.0,
       "raw_score": 0.6485,
-      "final_score": 0.6485,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3891,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -358,7 +386,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "QCOM",
@@ -366,8 +398,8 @@
       "cap_tier": "large",
       "market_cap": 180000000000.0,
       "raw_score": 0.6328,
-      "final_score": 0.6328,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3797,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -400,7 +432,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "MU",
@@ -408,8 +444,8 @@
       "cap_tier": "large",
       "market_cap": 130000000000.0,
       "raw_score": 0.6209,
-      "final_score": 0.6209,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3725,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -442,7 +478,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     }
   ],
   "top_buys_europe": [],
@@ -454,8 +494,8 @@
       "cap_tier": "large",
       "market_cap": 300000000000.0,
       "raw_score": 0.6837,
-      "final_score": 0.6837,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.4102,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -488,7 +528,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "CRWV",
@@ -496,8 +540,8 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.65,
-      "final_score": 0.65,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.39,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -530,7 +574,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "ARM",
@@ -538,8 +586,8 @@
       "cap_tier": "large",
       "market_cap": 140000000000.0,
       "raw_score": 0.6485,
-      "final_score": 0.6485,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3891,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -572,7 +620,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "QCOM",
@@ -580,8 +632,8 @@
       "cap_tier": "large",
       "market_cap": 180000000000.0,
       "raw_score": 0.6328,
-      "final_score": 0.6328,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3797,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -614,7 +666,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "MU",
@@ -622,8 +678,8 @@
       "cap_tier": "large",
       "market_cap": 130000000000.0,
       "raw_score": 0.6209,
-      "final_score": 0.6209,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3725,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -656,23 +712,38 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     }
   ],
   "top_buys_eu": [],
   "weights_global": {
-    "insider_conviction": 0.3,
-    "insider_breadth": 0.15,
+    "insider_conviction": 0.28,
+    "insider_breadth": 0.14,
     "congress": 0.0,
     "news_sentiment": 0.13,
-    "news_buzz": 0.05,
+    "news_buzz": 0.04,
     "momentum_long": 0.17,
-    "volume_attention": 0.05,
+    "volume_attention": 0.04,
     "analyst_consensus": 0.1,
     "quality_piotroski": 0.05,
-    "analyst_revision": 0.0,
-    "price_target_upside": 0.0,
+    "analyst_revision": 0.02,
+    "price_target_upside": 0.03,
     "transcript_tone": 0.0
+  },
+  "weights_us": {
+    "insider_conviction": 0.3,
+    "insider_breadth": 0.15,
+    "congress": 0.04,
+    "news_sentiment": 0.1,
+    "news_buzz": 0.05,
+    "momentum_long": 0.15,
+    "volume_attention": 0.03,
+    "analyst_consensus": 0.1,
+    "quality_piotroski": 0.08
   },
   "shadow_top_buys": [
     {
@@ -681,8 +752,8 @@
       "cap_tier": "large",
       "market_cap": 300000000000.0,
       "raw_score": 0.6837,
-      "final_score": 0.6837,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.4102,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -714,7 +785,8 @@
       "esg_score": null,
       "esg_e_score": null,
       "esg_flag": false,
-      "momentum_multiplier": 1.0
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
     },
     {
       "ticker": "CRWV",
@@ -722,8 +794,8 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.65,
-      "final_score": 0.65,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.39,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -755,7 +827,8 @@
       "esg_score": null,
       "esg_e_score": null,
       "esg_flag": false,
-      "momentum_multiplier": 1.0
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
     },
     {
       "ticker": "ARM",
@@ -763,8 +836,8 @@
       "cap_tier": "large",
       "market_cap": 140000000000.0,
       "raw_score": 0.6485,
-      "final_score": 0.6485,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3891,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -796,7 +869,8 @@
       "esg_score": null,
       "esg_e_score": null,
       "esg_flag": false,
-      "momentum_multiplier": 1.0
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
     },
     {
       "ticker": "QCOM",
@@ -804,8 +878,8 @@
       "cap_tier": "large",
       "market_cap": 180000000000.0,
       "raw_score": 0.6328,
-      "final_score": 0.6328,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3797,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -837,7 +911,8 @@
       "esg_score": null,
       "esg_e_score": null,
       "esg_flag": false,
-      "momentum_multiplier": 1.0
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
     },
     {
       "ticker": "MU",
@@ -845,8 +920,8 @@
       "cap_tier": "large",
       "market_cap": 130000000000.0,
       "raw_score": 0.6209,
-      "final_score": 0.6209,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3725,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -878,7 +953,8 @@
       "esg_score": null,
       "esg_e_score": null,
       "esg_flag": false,
-      "momentum_multiplier": 1.0
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
     }
   ],
   "mid_caps": [
@@ -888,8 +964,8 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.65,
-      "final_score": 0.65,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.39,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -922,7 +998,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "NBIS",
@@ -930,8 +1010,8 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.6101,
-      "final_score": 0.6101,
-      "badge": "TACTICAL BUY",
+      "final_score": 0.3661,
+      "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
       "ceo_buy": false,
@@ -964,7 +1044,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "IREN",
@@ -972,7 +1056,7 @@
       "cap_tier": "mid",
       "market_cap": 4000000000.0,
       "raw_score": 0.5698,
-      "final_score": 0.5698,
+      "final_score": 0.3419,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1006,7 +1090,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "BB",
@@ -1014,7 +1102,7 @@
       "cap_tier": "mid",
       "market_cap": 4000000000.0,
       "raw_score": 0.5393,
-      "final_score": 0.5393,
+      "final_score": 0.3236,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1048,7 +1136,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.021429,
+      "portfolio_weight_method": "risk_parity",
+      "sector_weight_contribution": 0.3
     },
     {
       "ticker": "RXT",
@@ -1056,7 +1148,7 @@
       "cap_tier": "mid",
       "market_cap": 5000000000.0,
       "raw_score": 0.5374,
-      "final_score": 0.5374,
+      "final_score": 0.3224,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1090,7 +1182,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
     }
   ],
   "small_caps": [
@@ -1100,7 +1196,7 @@
       "cap_tier": "small",
       "market_cap": 1000000000.0,
       "raw_score": 0.525,
-      "final_score": 0.525,
+      "final_score": 0.315,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1134,7 +1230,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
     },
     {
       "ticker": "UAE",
@@ -1142,7 +1242,7 @@
       "cap_tier": "small",
       "market_cap": 1000000000.0,
       "raw_score": 0.5113,
-      "final_score": 0.5113,
+      "final_score": 0.3068,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1176,7 +1276,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
     },
     {
       "ticker": "INOD",
@@ -1184,7 +1288,7 @@
       "cap_tier": "small",
       "market_cap": 1000000000.0,
       "raw_score": 0.4695,
-      "final_score": 0.4695,
+      "final_score": 0.2817,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1218,7 +1322,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
     },
     {
       "ticker": "POET",
@@ -1226,7 +1334,7 @@
       "cap_tier": "small",
       "market_cap": 1000000000.0,
       "raw_score": 0.4226,
-      "final_score": 0.4226,
+      "final_score": 0.2536,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1260,7 +1368,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
     },
     {
       "ticker": "AMZN",
@@ -1268,7 +1380,7 @@
       "cap_tier": "small",
       "market_cap": 1000000000.0,
       "raw_score": 0.3963,
-      "final_score": 0.3963,
+      "final_score": 0.2378,
       "badge": "WATCHLIST",
       "region": "US",
       "weights_set": "US",
@@ -1302,7 +1414,11 @@
       "esg_e_score": null,
       "esg_flag": false,
       "momentum_multiplier": 1.0,
-      "congress_boost": 0.0
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
     }
   ],
   "sector_picks": {
@@ -1313,7 +1429,7 @@
         "cap_tier": "large",
         "market_cap": 15000000000.0,
         "raw_score": 0.4995,
-        "final_score": 0.4995,
+        "final_score": 0.2997,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1347,7 +1463,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       },
       {
         "ticker": "XOM",
@@ -1355,7 +1475,7 @@
         "cap_tier": "large",
         "market_cap": 450000000000.0,
         "raw_score": 0.496,
-        "final_score": 0.496,
+        "final_score": 0.2976,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1389,7 +1509,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       },
       {
         "ticker": "CVX",
@@ -1397,7 +1521,7 @@
         "cap_tier": "large",
         "market_cap": 280000000000.0,
         "raw_score": 0.4691,
-        "final_score": 0.4691,
+        "final_score": 0.2815,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1431,7 +1555,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       }
     ],
     "Materials": [
@@ -1441,7 +1569,7 @@
         "cap_tier": "large",
         "market_cap": 40000000000.0,
         "raw_score": 0.5369,
-        "final_score": 0.5369,
+        "final_score": 0.3221,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1475,7 +1603,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       },
       {
         "ticker": "FCX",
@@ -1483,7 +1615,7 @@
         "cap_tier": "large",
         "market_cap": 70000000000.0,
         "raw_score": 0.4368,
-        "final_score": 0.4368,
+        "final_score": 0.2621,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1517,7 +1649,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       },
       {
         "ticker": "NEM",
@@ -1525,7 +1661,7 @@
         "cap_tier": "large",
         "market_cap": 50000000000.0,
         "raw_score": 0.4262,
-        "final_score": 0.4262,
+        "final_score": 0.2557,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1559,7 +1695,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       }
     ],
     "Communication Services": [
@@ -1569,7 +1709,7 @@
         "cap_tier": "large",
         "market_cap": 25000000000.0,
         "raw_score": 0.5004,
-        "final_score": 0.5004,
+        "final_score": 0.3002,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1603,7 +1743,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       },
       {
         "ticker": "SOUN",
@@ -1611,7 +1755,7 @@
         "cap_tier": "mid",
         "market_cap": 5000000000.0,
         "raw_score": 0.4777,
-        "final_score": 0.4777,
+        "final_score": 0.2866,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1645,7 +1789,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       },
       {
         "ticker": "NFLX",
@@ -1653,7 +1801,7 @@
         "cap_tier": "large",
         "market_cap": 450000000000.0,
         "raw_score": 0.4671,
-        "final_score": 0.4671,
+        "final_score": 0.2803,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1687,7 +1835,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
       }
     ],
     "Healthcare": [
@@ -1697,8 +1849,8 @@
         "cap_tier": "large",
         "market_cap": 520000000000.0,
         "raw_score": 0.6029,
-        "final_score": 0.6029,
-        "badge": "TACTICAL BUY",
+        "final_score": 0.3617,
+        "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
         "ceo_buy": false,
@@ -1731,7 +1883,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.05,
+        "portfolio_weight_method": "risk_parity",
+        "sector_weight_contribution": 0.15
       },
       {
         "ticker": "ABBV",
@@ -1739,7 +1895,7 @@
         "cap_tier": "large",
         "market_cap": 320000000000.0,
         "raw_score": 0.5932,
-        "final_score": 0.5932,
+        "final_score": 0.3559,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1773,7 +1929,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.05,
+        "portfolio_weight_method": "risk_parity",
+        "sector_weight_contribution": 0.15
       },
       {
         "ticker": "JNJ",
@@ -1781,7 +1941,7 @@
         "cap_tier": "large",
         "market_cap": 550000000000.0,
         "raw_score": 0.5383,
-        "final_score": 0.5383,
+        "final_score": 0.323,
         "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
@@ -1815,7 +1975,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.05,
+        "portfolio_weight_method": "risk_parity",
+        "sector_weight_contribution": 0.15
       }
     ],
     "Information Technology": [
@@ -1825,8 +1989,8 @@
         "cap_tier": "large",
         "market_cap": 300000000000.0,
         "raw_score": 0.6837,
-        "final_score": 0.6837,
-        "badge": "TACTICAL BUY",
+        "final_score": 0.4102,
+        "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
         "ceo_buy": false,
@@ -1859,7 +2023,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.021429,
+        "portfolio_weight_method": "risk_parity",
+        "sector_weight_contribution": 0.3
       },
       {
         "ticker": "CRWV",
@@ -1867,8 +2035,8 @@
         "cap_tier": "mid",
         "market_cap": 5000000000.0,
         "raw_score": 0.65,
-        "final_score": 0.65,
-        "badge": "TACTICAL BUY",
+        "final_score": 0.39,
+        "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
         "ceo_buy": false,
@@ -1901,7 +2069,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.021429,
+        "portfolio_weight_method": "risk_parity",
+        "sector_weight_contribution": 0.3
       },
       {
         "ticker": "ARM",
@@ -1909,8 +2081,8 @@
         "cap_tier": "large",
         "market_cap": 140000000000.0,
         "raw_score": 0.6485,
-        "final_score": 0.6485,
-        "badge": "TACTICAL BUY",
+        "final_score": 0.3891,
+        "badge": "WATCHLIST",
         "region": "US",
         "weights_set": "US",
         "ceo_buy": false,
@@ -1943,7 +2115,11 @@
         "esg_e_score": null,
         "esg_flag": false,
         "momentum_multiplier": 1.0,
-        "congress_boost": 0.0
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.021429,
+        "portfolio_weight_method": "risk_parity",
+        "sector_weight_contribution": 0.3
       }
     ]
   },

@@ -187,7 +187,7 @@ jobs:
 
       # ── 7b. Institutional audit ──────────────────────────────────────────────
       - name: Audit payload (RT-QA-2026-REV5)
-        run: python src/delivery/audit_payload.py --input logs/top_lists.json
+        run: python src/delivery/audit_payload.py --input logs/top_lists_us.json
 
       # ── 7c. Validate top_lists.json ──────────────────────────────────────────
       - name: Validate top_lists.json
@@ -195,13 +195,13 @@ jobs:
           python3 - <<'EOF'
           import json, sys
           from pathlib import Path
-          p = Path("logs/top_lists.json")
+          p = Path("logs/top_lists_us.json")
           if not p.exists():
-              print("::error::top_lists.json was not written — pipeline failed silently")
+              print("::error::top_lists_us.json was not written — pipeline failed silently")
               sys.exit(1)
           d = json.loads(p.read_text())
           if not d.get("top_buys"):
-              print("::error::top_lists.json exists but top_buys is empty")
+              print("::error::top_lists_us.json exists but top_buys is empty")
               sys.exit(1)
           count = d.get("ticker_count", 0)
           # Verify 9-factor schema is present
@@ -255,7 +255,7 @@ jobs:
         run: |
           echo "## EDGAR 3× Run — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f logs/top_lists.json ]; then
+          if [ -f logs/top_lists_us.json ]; then
             echo "### Pipeline Ranking Metrics (Top 5 Buys)" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo '| # | Ticker | Score | IC | IB | Cong | NS | NB | Mom | Vol | AC | PIO |' >> "$GITHUB_STEP_SUMMARY"
@@ -263,7 +263,7 @@ jobs:
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json
           try:
-              with open("logs/top_lists.json") as f:
+              with open("logs/top_lists_us.json") as f:
                   d = json.load(f)
               for i, t in enumerate(d.get('top_buys', [])[:5], 1):
                   fac = t.get('factors', {})
@@ -281,7 +281,7 @@ jobs:
               print(f"| — | _summary unavailable: {e}_ | | | | | | | | | | |")
           EOF
           else
-            echo "⚠️ _top_lists.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ _top_lists_us.json was not generated during this run._" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # ── 11. Upload artifacts ─────────────────────────────────────────────────
@@ -293,7 +293,7 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
           path: |
-            logs/top_lists.json
+            logs/top_lists_us.json
             logs/top5.csv
             logs/satellite_insights.json
             logs/intel_source_status.json
@@ -347,8 +347,8 @@ jobs:
         run: |
           TODAY=$(date -u '+%Y-%m-%d')
           DEST="logs/archive/${TODAY}_top_lists.json"
-          if [ ! -f logs/top_lists.json ]; then
-            echo "top_lists.json not found — skipping archive"
+          if [ ! -f logs/top_lists_us.json ]; then
+            echo "top_lists_us.json not found — skipping archive"
             exit 0
           fi
           if git ls-files --error-unmatch "$DEST" 2>/dev/null; then
@@ -356,7 +356,7 @@ jobs:
             exit 0
           fi
           mkdir -p logs/archive
-          cp logs/top_lists.json "$DEST"
+          cp logs/top_lists_us.json "$DEST"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$DEST"

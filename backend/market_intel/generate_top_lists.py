@@ -45,7 +45,7 @@ from backend.market_intel.validator import detect_anomalies, PipelineIntegrityEr
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
 from regime_trader.config.weights import (
     WEIGHTS, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
-    get_region,
+    get_region, _piotroski_gate_multiplier,
 )
 from backend.market_intel.portfolio_optimizer import run_optimizer
 
@@ -374,14 +374,17 @@ def _to_entry(
 ) -> Dict[str, Any]:
     w = weights if weights is not None else WEIGHTS
     effective_w = _ticker_effective_weights(row, w)
+    # Authoritative for Discord and Claude analysis outputs. See run_pipeline.py for intel_source_status.json.
     raw_score = round(
         sum(effective_w.get(f, 0.0) * norm_factors.get(f, 0.0) for f in effective_w),
         4,
     )
     # Apply VIX macro overlay first (absolute regime risk)
     score_after_vix = round(_apply_vix_overlay(raw_score, vix), 4)
+    # Apply Piotroski quality gate (suppress/discount financially distressed companies)
+    gate = _piotroski_gate_multiplier(row.get("quality_piotroski_raw"))
     # Apply momentum regime pre-dampening (early bear detection, avoids double-count)
-    score = round(score_after_vix * momentum_multiplier, 4)
+    score = round(score_after_vix * momentum_multiplier * gate, 4)
     # Carry schema-gate result into the entry so it appears in top_lists_us.json
     validation = row.get(
         "_validation", {"is_complete": True, "missing_sources": []})
@@ -954,6 +957,7 @@ def generate(
         "top_buys_us":     [e for e in top_buys if e.get("region") == "US"],
         "top_buys_eu":     [e for e in top_buys if e.get("region") == "EU"],
         "weights_global":  WEIGHTS_GLOBAL,
+        "weights_us":      dict(WEIGHTS),
         "shadow_top_buys": shadow_top_buys,
         "mid_caps":        mid_caps,
         "small_caps":      small_caps,

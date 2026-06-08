@@ -1916,6 +1916,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Side-load macro overlay (VIX, kill_switch) from top_lists.json — these
     # live in the sibling artifact, not in intel_source_status.json.
+    # NOTE (A-3): _load_top_lists_overlay reads top_lists.json, which is a
+    # *different* file from --input (intel_source_status.json).  There is no
+    # redundant re-read here.  If the pipeline ever merges both artifacts into
+    # a single file, refactor this to accept the pre-loaded dict instead of
+    # reading from disk again.
+    # TODO(A-3): when top_lists.json is loaded by the caller before this point,
+    # pass it as a pre-loaded dict to avoid the extra file I/O.
     if input_path.name == "intel_source_status.json":
         overlay = _load_top_lists_overlay(args.log_dir, input_path=input_path)
         for k, v in overlay.items():

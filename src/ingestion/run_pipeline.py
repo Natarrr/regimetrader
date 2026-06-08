@@ -691,10 +691,10 @@ def score_news_sentiment_combined(
     headline_score = 0.0
     base_source = "none"
     if articles:
+        base_source = "fmp"  # Set as soon as articles non-empty, before scoring
         s = score_news_sentiment(articles)
         if s > 0.0:
             headline_score = s
-            base_source = "fmp"
 
     # PEAD boost — FMP /stable/earnings-surprises (Bernard & Thomas 1989)
     # PATCH 04: Apply exponential decay with half-life = 20 days.
@@ -950,7 +950,10 @@ def _parse_form4_xml(cik: str, accession: str, primary_doc: str) -> List[Dict]:
         return []
     try:
         root = ET.fromstring(resp.text)
-    except ET.ParseError:
+    except ET.ParseError as e:
+        log.warning(
+            "Form4 XML parse failed for %s: %s — returning []",
+            url, e)
         return []   # .htm or plain-text filing — not XML-parseable
 
     # Strip namespace prefixes so findall() works regardless of xmlns= declaration
@@ -1159,15 +1162,17 @@ def run(
     # ── Bulk cache indexes (loaded once, shared across all threads) ───────────
     _bulk_piotroski_idx: Dict[str, Any] = {}
     _bulk_consensus_idx: Dict[str, Any] = {}
+    _ambiguous_bases: set = set()
     if bulk_cache is not None:
         try:
-            from src.ingestion.fmp_bulk_prefetch import build_ticker_index as _bti  # noqa: PLC0415
+            from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous as _bti_ambig  # noqa: PLC0415
             # financial-scores-bulk has no FMP stable/ route; piotroski is per-ticker.
             # _bulk_piotroski_idx stays {} — scoring falls back to FMPClient.get_quality_score().
-            _bulk_consensus_idx = _bti(bulk_cache, "upgrades-downgrades-consensus-bulk")
+            _bulk_consensus_idx, _ambiguous_bases = _bti_ambig(bulk_cache, "upgrades-downgrades-consensus-bulk")
             log.info(
-                "Bulk cache loaded: consensus=%d symbols (piotroski: per-ticker FMP)",
+                "Bulk cache loaded: consensus=%d symbols, ambiguous_bases=%d (piotroski: per-ticker FMP)",
                 len(_bulk_consensus_idx),
+                len(_ambiguous_bases),
             )
         except Exception as _bexc:
             log.warning("Bulk cache load failed (%s) — falling back to per-ticker FMP", _bexc)
@@ -1370,13 +1375,14 @@ def run(
                         _dfact   = PIOTROSKI_GATE["discount_factor"]
                         _base = round(_pio_int / 9.0, 4)
                         quality_piotroski_score = _base
+                        quality_piotroski_raw = _pio_int
                     except (TypeError, ValueError):
-                        quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+                        quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
                     log.debug("Piotroski bulk %s: raw=%s score=%.4f", ticker, _pio_raw, quality_piotroski_score)
                 else:
-                    quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+                    quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
             else:
-                quality_piotroski_score = _fmp_client.get_quality_score(ticker)
+                quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
 
             # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
             _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
@@ -1447,6 +1453,7 @@ def run(
                 "analyst_revision_n":        _rev_n,
                 "price_target_upside_score": price_target_upside_score,
                 "quality_piotroski_score":   quality_piotroski_score,
+                "quality_piotroski_raw":     quality_piotroski_raw,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":            c_score,
                 "transcript_tone_score":     transcript_tone_score,
@@ -1516,6 +1523,7 @@ def run(
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
                 "quality_piotroski_score":  0.0,
+                "quality_piotroski_raw":    None,
                 "congress_score":           0.0,
                 "recent_upgrade_downgrade": {},
                 "ceo_buy":                 ceo_buy,
@@ -1550,6 +1558,7 @@ def run(
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
                 "quality_piotroski_score":  0.0,
+                "quality_piotroski_raw":    None,
                 "congress_score":           0.0,
                 "recent_upgrade_downgrade": {},
                 "ceo_buy":                 ceo_buy,
@@ -1764,6 +1773,7 @@ def run(
             _renorm_cache[market] = renormalize_weights_for_market(ticker_weights, market)
         market_weights = _renorm_cache[market]
 
+        # Authoritative for intel_source_status.json. Discord/Claude use scores from generate_top_lists.py.
         final_score = 0.0
         weight_sum_applied = 0.0
         for factor_short, w in market_weights.items():
