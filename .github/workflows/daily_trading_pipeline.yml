@@ -408,10 +408,11 @@ jobs:
 
           # Inject bulk consensus index to avoid per-ticker analyst_consensus calls
           bulk_idx: dict = {}
+          ambiguous_bases: set = set()
           try:
-              from src.ingestion.fmp_bulk_prefetch import build_ticker_index
-              bulk_idx = build_ticker_index(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
-              log.info("Bulk consensus index: %d symbols loaded", len(bulk_idx))
+              from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous
+              bulk_idx, ambiguous_bases = build_ticker_index_with_ambiguous(bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
+              log.info("Bulk consensus index: %d symbols loaded, %d ambiguous bases", len(bulk_idx), len(ambiguous_bases))
           except Exception as exc:
               log.warning("Bulk index load failed: %s — falling back to per-ticker FMP", exc)
 
@@ -435,6 +436,7 @@ jobs:
                   api_key=api_key,
                   market=market_enum,
                   bulk_consensus_idx=bulk_idx,
+                  ambiguous_bases=ambiguous_bases,
               )
               entries = fetcher.prepare(tickers)
               for entry in entries:
