@@ -53,6 +53,8 @@ jobs:
     name: US — EDGAR + FMP 9-Factor Scoring
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -325,6 +327,8 @@ jobs:
     name: INTL — FMP 10-Factor Scoring (EU + Asia)
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
