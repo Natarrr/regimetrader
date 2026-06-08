@@ -1,6 +1,7 @@
 {
     "region": "US",
     "expected_factors": 9,
+    "_note": "weights.py is canonical; sync manually on weight changes",
     "active_factors": {
         "insider_conviction": 0.10,
         "insider_breadth": 0.10,
@@ -10,7 +11,7 @@
         "momentum_long": 0.15,
         "volume_attention": 0.10,
         "analyst_consensus": 0.10,
-        "quality_piotroski": 0.15
+        "quality_piotroski": 0.08
     },
     "output_filename": "top_lists_us.json"
 }

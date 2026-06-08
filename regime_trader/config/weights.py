@@ -27,17 +27,20 @@
 
 WEIGHTS_VERSION = "v2.2-global"
 
-# ── US universe (unchanged from v2.1) ─────────────────────────────────────────
+# ── US universe (Sprint v2.3: analyst_consensus and quality_piotroski activated) ────
+# analyst_consensus (0.10) and quality_piotroski (0.08) funded from congress:
+# Congress weight reduced 0.22 → 0.04 (congress is US-structural; IC/breadth/quality
+# decay faster than quality/consensus signals at this allocation).
 WEIGHTS_US: dict[str, float] = {
     "insider_conviction": 0.30,
     "insider_breadth":    0.15,
-    "congress":           0.22,
+    "congress":           0.04,
     "news_sentiment":     0.10,
     "news_buzz":          0.05,
     "momentum_long":      0.15,
     "volume_attention":   0.03,
-    "analyst_consensus":  0.00,   # wired sprint step 2
-    "quality_piotroski":  0.00,   # wired sprint step 6
+    "analyst_consensus":  0.10,
+    "quality_piotroski":  0.08,
 }
 assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_US sums to {sum(WEIGHTS_US.values()):.8f}, not 1.0"
