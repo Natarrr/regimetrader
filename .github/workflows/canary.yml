@@ -97,7 +97,7 @@ jobs:
           BULK_CACHE_DIR: ".cache/bulk_snapshots"
         run: |
           set -euo pipefail
-          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH:-}"
           TICKERS_FILE="${{ github.event.inputs.tickers_file || 'config/canary_top10.csv' }}"
           START=$(date +%s)
           python src/ingestion/run_pipeline.py \
