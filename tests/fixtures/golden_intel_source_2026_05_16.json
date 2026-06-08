@@ -64,7 +64,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "RKLB",
@@ -94,7 +95,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "INTC",
@@ -124,7 +126,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SNDK",
@@ -154,7 +157,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "CRWV",
@@ -184,7 +188,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "ARM",
@@ -214,7 +219,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "IREN",
@@ -244,7 +250,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "VALE",
@@ -274,7 +281,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "QCOM",
@@ -304,7 +312,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "FIG",
@@ -334,7 +343,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NOW",
@@ -364,7 +374,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SOXS",
@@ -394,7 +405,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SOXX",
@@ -424,7 +436,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "YOU",
@@ -454,7 +467,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SGOV",
@@ -484,7 +498,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "TQQQ",
@@ -514,7 +529,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "TSLA",
@@ -544,7 +560,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NBIS",
@@ -574,7 +591,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "IT",
@@ -604,7 +622,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "UNH",
@@ -634,7 +653,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NET",
@@ -664,7 +684,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "BB",
@@ -694,7 +715,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SOUN",
@@ -724,7 +746,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "TSM",
@@ -754,7 +777,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SMCI",
@@ -784,7 +808,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "RXT",
@@ -814,7 +839,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "VOO",
@@ -844,7 +870,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SOXL",
@@ -874,7 +901,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "GRPN",
@@ -904,7 +932,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "UAE",
@@ -934,7 +963,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "DTE",
@@ -964,7 +994,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "RDDT",
@@ -994,7 +1025,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "AM",
@@ -1024,7 +1056,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "UFO",
@@ -1054,7 +1087,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "PFE",
@@ -1084,7 +1118,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "ASTS",
@@ -1114,7 +1149,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "HOOD",
@@ -1144,7 +1180,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SPY",
@@ -1174,7 +1211,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "INOD",
@@ -1204,7 +1242,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "QQQ",
@@ -1234,7 +1273,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "PLTR",
@@ -1264,7 +1304,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "USO",
@@ -1294,7 +1335,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "POET",
@@ -1324,7 +1366,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NVDA",
@@ -1354,7 +1397,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "AAPL",
@@ -1384,7 +1428,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "TTD",
@@ -1414,7 +1459,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "META",
@@ -1444,7 +1490,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "PYPL",
@@ -1474,7 +1521,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "JPM",
@@ -1504,7 +1552,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "MSFT",
@@ -1534,7 +1583,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "GDX",
@@ -1564,7 +1614,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "AMZN",
@@ -1594,7 +1645,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XLK",
@@ -1624,7 +1676,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "AMD",
@@ -1654,7 +1707,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "GLD",
@@ -1684,7 +1738,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "JNJ",
@@ -1714,7 +1769,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XLP",
@@ -1744,7 +1800,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "V",
@@ -1774,7 +1831,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "ABBV",
@@ -1804,7 +1862,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "CRM",
@@ -1834,7 +1893,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XLV",
@@ -1864,7 +1924,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "TLT",
@@ -1894,7 +1955,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SQ",
@@ -1924,7 +1986,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NFLX",
@@ -1954,7 +2017,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XLU",
@@ -1984,7 +2048,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XOM",
@@ -2014,7 +2079,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "GOOGL",
@@ -2044,7 +2110,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "LMT",
@@ -2074,7 +2141,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "COIN",
@@ -2104,7 +2172,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "GOOG",
@@ -2134,7 +2203,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NEM",
@@ -2164,7 +2234,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XLE",
@@ -2194,7 +2265,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "CVX",
@@ -2224,7 +2296,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "XLF",
@@ -2254,7 +2327,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "ORCL",
@@ -2284,7 +2358,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "BAC",
@@ -2314,7 +2389,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "AVGO",
@@ -2344,7 +2420,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "NOC",
@@ -2374,7 +2451,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "FCX",
@@ -2404,7 +2482,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "GS",
@@ -2434,7 +2513,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "SNOW",
@@ -2464,7 +2544,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "RTX",
@@ -2494,7 +2575,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     },
     {
       "ticker": "MA",
@@ -2524,7 +2606,8 @@
       "analyst_revision_score": 0.5,
       "price_target_upside_score": 0.5,
       "quality_piotroski_score": 0.5,
-      "transcript_tone_score": 0.5
+      "transcript_tone_score": 0.5,
+      "quality_piotroski_raw": 4
     }
   ],
   "computed_at": "2026-05-16T15:38:30.064462+00:00"

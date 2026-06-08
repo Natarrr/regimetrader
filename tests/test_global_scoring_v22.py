@@ -14,9 +14,12 @@ from unittest.mock import MagicMock, patch
 
 # ── 1. WEIGHTS structure ──────────────────────────────────────────────────────
 
-def test_weights_us_unchanged():
+def test_weights_us_sprint_v23():
+    """congress reduced to 0.04 in v2.3 sprint to fund analyst_consensus + quality_piotroski."""
     from regime_trader.config.weights import WEIGHTS_US
-    assert WEIGHTS_US["congress"] == 0.22
+    assert WEIGHTS_US["congress"] == 0.04
+    assert WEIGHTS_US["analyst_consensus"] == 0.10
+    assert WEIGHTS_US["quality_piotroski"] == 0.08
     assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6
 
 
@@ -136,8 +139,9 @@ def test_eu_score_vs_old_penalty():
     score_new, _ = compute_composite_score("SAP.DE", factors)
     score_old = sum(WEIGHTS_US[f] * factors.get(f, 0.0) for f in WEIGHTS_US)
 
-    assert score_new > score_old + 0.05, (
-        f"New score {score_new:.4f} should be >0.05 higher than old {score_old:.4f}"
+    assert score_new > score_old, (
+        f"EU score {score_new:.4f} should exceed naive US score {score_old:.4f} "
+        "(EU weights redistribute congress/quality factors correctly)"
     )
 
 

@@ -151,13 +151,13 @@ class TestWeightsValues:
             f"Full WEIGHTS: {weights}"
         )
 
-    def test_congress_weight_is_22_percent(self):
-        """congress weight = 0.22 in WEIGHTS_US (redistributed to WEIGHTS_GLOBAL for EU/Asia)."""
+    def test_congress_weight_is_04_percent(self):
+        """congress weight = 0.04 in WEIGHTS_US (v2.3 sprint: reduced from 0.22 to fund analyst_consensus + quality_piotroski)."""
         weights = _load_run_pipeline_weights()
         if "congress" not in weights:
             pytest.skip("congress not in WEIGHTS")
-        assert abs(weights["congress"] - 0.22) < 1e-6, (
-            f"congress weight={weights['congress']} — expected 0.22 per v2.2-global WEIGHTS_US spec."
+        assert abs(weights["congress"] - 0.04) < 1e-6, (
+            f"congress weight={weights['congress']} — expected 0.04 per v2.3 sprint WEIGHTS_US spec."
         )
 
     def test_volume_attention_is_tilt_only(self):
@@ -171,11 +171,12 @@ class TestWeightsValues:
         )
 
     def test_config_congress_weight_is_intentional(self):
-        """config/weights.py congress=0.22 per v2.1-global (WEIGHTS_US).
-        The 0.22 is redistributed to WEIGHTS_GLOBAL for EU/Asia where congress is absent.
+        """config/weights.py congress=0.04 per v2.3 sprint (WEIGHTS_US).
+        Reduced from 0.22 to fund analyst_consensus=0.10 and quality_piotroski=0.08.
+        Change only by updating the canonical source in regime_trader/config/weights.py.
         """
         from regime_trader.config.weights import WEIGHTS as CONFIG_WEIGHTS
-        assert CONFIG_WEIGHTS["congress"] == 0.22, (
-            "9-factor US congress weight must be 0.22 per v2.1-global spec (WEIGHTS_US). "
+        assert CONFIG_WEIGHTS["congress"] == 0.04, (
+            "US congress weight must be 0.04 per v2.3 sprint spec (WEIGHTS_US). "
             "Change only by updating the canonical source in regime_trader/config/weights.py."
         )
