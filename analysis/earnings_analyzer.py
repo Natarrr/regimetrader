@@ -273,6 +273,36 @@ def build_prompt(
 PROMPT_VERSION = get_prompt_version()
 
 
+# ── Standalone transcript fetch ───────────────────────────────────────────────
+
+def fetch_transcript(symbol: str, api_key: str, max_chars: int = 3000) -> str:
+    """Fetch the most recent earnings call transcript for *symbol* via FMP Ultimate.
+
+    Uses stable/earning-call-transcript-latest (limit=1). Returns the transcript
+    text truncated to *max_chars*, or an empty string on any failure (soft-fail —
+    transcript is additive enrichment, not a scored factor).
+
+    Intended for use in CI pipeline scripts that don't have an FMPClient instance.
+    For within-Python callers that already hold an FMPClient, prefer
+    FMPClient.get_earnings_transcript() which includes caching.
+    """
+    import urllib.request, urllib.parse, json as _json
+    if not api_key:
+        return ""
+    try:
+        params = urllib.parse.urlencode({"symbol": symbol, "limit": 1, "apikey": api_key})
+        url = f"https://financialmodelingprep.com/stable/earning-call-transcript-latest?{params}"
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = _json.loads(resp.read().decode())
+        if not isinstance(data, list) or not data:
+            return ""
+        content = data[0].get("content") or ""
+        return content[:max_chars]
+    except Exception as exc:
+        log.debug("fetch_transcript %s failed: %s", symbol, exc)
+        return ""
+
+
 # ── Shortlist builder ─────────────────────────────────────────────────────────
 
 def build_shortlist(
