@@ -439,10 +439,15 @@ def test_vix_dampening_applied_to_intl_entries(cook_mod, registry, tmp_path):
     out = tmp_path / "out.json"
     cook_mod.cook(us_path, intl_path, registry, out)
     result = json.loads(out.read_text())
-    eu_entry = result["top_buys_europe"][0]
+    # H-1 fix: under CAPITULATION, survivors are moved to watchlist; top_buys_* are emptied
+    assert result["top_buys_europe"] == [], "top_buys_europe must be empty under CAPITULATION"
+    watchlist = result.get("watchlist", [])
+    assert len(watchlist) == 1, f"Expected 1 watchlist entry, got {len(watchlist)}"
+    eu_entry = watchlist[0]
     # CAPITULATION multiplier = 0.50× (quality anchors survive, score dampened)
     assert abs(eu_entry["final_score"] - 0.50) < 1e-4, f"Expected 0.50, got {eu_entry['final_score']}"
     assert eu_entry.get("_capitulation_survivor") is True
+    assert eu_entry["badge"] == "WATCHLIST"
 
 
 class TestSectorCountCap:
