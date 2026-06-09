@@ -63,8 +63,6 @@ except ImportError:
 try:
     from regime_trader.risk.regime import (  # noqa: E402
         get_regime as _get_regime,
-        score_multiplier as _score_multiplier,
-        strategy_label as _strategy_label,
     )
     _HAS_REGIME = True
 except ImportError:
@@ -448,6 +446,8 @@ def _spy_qqq_snapshot() -> str:
     the full regime computation (HMM/GARCH/FRED/CAPE) fails.
     """
     try:
+        from backend.data.market_service import MarketData  # noqa: PLC0415
+
         def _snap(bars) -> dict:
             if bars is None or getattr(bars, "empty", True) or len(bars) < 2:
                 return {}
@@ -1548,11 +1548,6 @@ def build_payload(
         mid_caps       = list(status.get("mid_caps") or [])[:5]
         eu_mid_small   = list(status.get("eu_mid_small") or [])[:1]
         asia_mid_small = list(status.get("asia_mid_small") or [])[:1]
-        all_scores = sorted([
-            float(e.get("final_score", 0))
-            for e in top_buys + eu_entries + asia_entries + mid_caps
-            if e.get("final_score") is not None
-        ])
 
     # ── Timing ───────────────────────────────────────────────────────────────
     age_h = _data_age_hours(generated_at)
