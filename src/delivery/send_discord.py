@@ -1318,8 +1318,8 @@ def build_institutional_payload(top_lists: dict) -> list:
     ):
         n = len(watchlist)
         panic_note = (
-            f"\n[!! PANIC REGIME ACTIVE — ALL NEW BUY SIGNALS SUPPRESSED !!]"
-            f"\n[SELL/EXIT SIGNALS REMAIN ACTIVE — SEE EXIT RULES MODULE  ]"
+            "\n[!! PANIC REGIME ACTIVE — ALL NEW BUY SIGNALS SUPPRESSED !!]"
+            "\n[SELL/EXIT SIGNALS REMAIN ACTIVE — SEE EXIT RULES MODULE  ]"
             + (f"\n[{n} STRUCTURAL ANCHOR(S) AVAILABLE IN WATCHLIST           ]" if n else "")
         )
 
