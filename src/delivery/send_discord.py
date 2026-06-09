@@ -332,14 +332,14 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
             raw = raw_values[key]
         elif key == "quality_piotroski":
             _qf = entry.get("quality_piotroski_score")
+            if _qf is None:
+                _qf = factors.get("quality_piotroski")
             raw = float(_qf) if _qf is not None else None
         else:
             raw = factors.get(key)  # normalized float or absent (0.0)
             raw = float(raw) if raw is not None else None
 
-        if raw is None:
-            parts.append(f"{label}:None")
-        elif raw <= 0:
+        if raw is None or raw <= 0:
             parts.append(f"{label}:—")
         else:
             parts.append(f"{label}:{raw:.2f}")
@@ -1615,67 +1615,102 @@ def build_payload(
             "price action signals bear market (PATCH 10). VIX may lag. Consider risk reduction."
         )
 
-    alert_block = (
-        "\n" + "\n".join(f"```diff\n- {a}\n```" for a in alerts)
-    ) if alerts else ""
-
     # ── Description ──────────────────────────────────────────────────────────
-    vix_regime = get_market_regime(
-        float(vix_val)) if vix_val is not None else "VIX —"
-    age_note = f"  |  Data: {age_h:.1f}h ago" if age_h is not None else ""
+    def _fmt_pct(v):
+        if v is None:
+            return "—"
+        return f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
+
+    vix_regime_str = get_market_regime(float(vix_val)) if vix_val is not None else "VIX —"
+    vix_mult = float(status.get("vix_multiplier", 1.0))
+    overlay_str = f"×{vix_mult:.2f}"
+    ks_str = "KILL SWITCH" if kill_switch else "NORMAL"
+
+    if kill_switch:
+        action_str = "🔴 **KILL SWITCH ACTIVE** — Do NOT trade signals."
+    else:
+        action_str = "🟢 **MARKET OPEN** — All signals are actionable."
 
     laureate_line = ""
+    mkt_spy_line = ""
+    mkt_qqq_line = ""
     try:
         lr = _compute_laureate_regime()
         if lr:
-            icon     = lr.get("laureate_icon", "⚪")
-            state    = lr.get("laureate", "—")
-            hmm      = lr.get("hmm_label", "—")
-            mon      = lr.get("mon_regime", "—")
-            vol      = lr.get("vol_regime", "—")
-            scale    = lr.get("scale", 0.0)
-            m_icon   = lr.get("minsky_icon", "✅")
-            m_lvl    = lr.get("minsky_level", "CLEAR")
-            m_n      = lr.get("minsky_n", 0)
-            def _fmt_pct(v):
-                if v is None:
-                    return "—"
-                arrow = "▲" if v >= 0 else "▼"
-                return f"{arrow}{abs(v):.1f}%"
-
-            spy_p   = lr.get("spy_price")
-            qqq_p   = lr.get("qqq_price")
-            mkt_line = ""
-            if spy_p:
-                spy_str = (
-                    f"SPY `${spy_p:.0f}` "
-                    f"{_fmt_pct(lr.get('spy_pct_1d'))} 1d · {_fmt_pct(lr.get('spy_pct_12m'))} 12m"
-                )
-                qqq_str = (
-                    f"  ·  QQQ `${qqq_p:.0f}` "
-                    f"{_fmt_pct(lr.get('qqq_pct_1d'))} 1d · {_fmt_pct(lr.get('qqq_pct_12m'))} 12m"
-                    if qqq_p else ""
-                )
-                mkt_line = f"\n📈 {spy_str}{qqq_str}"
-
+            icon   = lr.get("laureate_icon", "⚪")
+            state  = lr.get("laureate", "—")
+            hmm    = lr.get("hmm_label", "—")
+            vol    = lr.get("vol_regime", "—")
+            m_icon = lr.get("minsky_icon", "✅")
+            m_lvl  = lr.get("minsky_level", "CLEAR")
+            m_n    = lr.get("minsky_n", 0)
             laureate_line = (
-                f"\n📊 **Laureate: {icon} {state}** · "
-                f"HMM: {hmm} · Mon: {mon} · Vol: {vol} · Scale: {scale:.2f}"
+                f"\n**Laureate:** {icon} {state}  ·  HMM: {hmm}  ·  Vol: {vol}"
                 f"\nMinsky: {m_icon} {m_lvl} ({m_n}/3)"
-                f"{mkt_line}"
             )
+            spy_p = lr.get("spy_price")
+            qqq_p = lr.get("qqq_price")
+            if spy_p:
+                mkt_spy_line = (
+                    f"📈 **SPY** `${spy_p:.0f}`  —  *1d* {_fmt_pct(lr.get('spy_pct_1d'))}  |  "
+                    f"*12m* {_fmt_pct(lr.get('spy_pct_12m'))}"
+                )
+            if qqq_p:
+                mkt_qqq_line = (
+                    f"🚀 **QQQ** `${qqq_p:.0f}`  —  *1d* {_fmt_pct(lr.get('qqq_pct_1d'))}  |  "
+                    f"*12m* {_fmt_pct(lr.get('qqq_pct_12m'))}"
+                )
     except Exception as _lr_exc:
-        log.debug("Laureate regime line skipped: %s", _lr_exc)
+        log.debug("Laureate regime failed: %s", _lr_exc)
 
-    mkt_snapshot_line = _spy_qqq_snapshot() if not laureate_line else ""
+    if not mkt_spy_line:
+        _raw_snap = _spy_qqq_snapshot().strip()
+        if _raw_snap:
+            if "·  QQQ" in _raw_snap:
+                _sparts = _raw_snap.split("·  QQQ", 1)
+                mkt_spy_line = _sparts[0].strip()
+                mkt_qqq_line = f"🚀 **QQQ**{_sparts[1]}" if len(_sparts) > 1 else ""
+            else:
+                mkt_spy_line = _raw_snap
 
-    description = (
-        f"**[REGIME TRADER]** Daily Market Report — **{date_str}**\n"
-        f"{vix_regime}{age_note}"
-        f"{laureate_line}"
-        f"{mkt_snapshot_line}"
-        f"{alert_block}"
-    )
+    try:
+        ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        ts_date = ts.strftime("%b %d, %Y • %H:%M UTC")
+    except Exception:
+        ts_date = date_str
+
+    desc_parts = [
+        "════════════════════════════════════",
+        "🌐 **REGIME TRADER | DAILY BRIEF**",
+        f"📅 **{ts_date}**",
+        "════════════════════════════════════",
+        "",
+        f"⚡ **ACTION BAR:** {action_str}",
+        f"*Data latency: {age_h:.1f}h  •  EDGAR-First*" if age_h is not None else "*EDGAR-First*",
+    ]
+
+    if alerts:
+        desc_parts.append("")
+        for _a in alerts:
+            desc_parts.append(f"⚠️ {_a}")
+
+    desc_parts.extend([
+        "",
+        "---",
+        "",
+        "### 📊 **1. MACRO RISK REGIME**",
+        "",
+        f"• **VIX:** {vix_regime_str}",
+        f"• **Overlay:** `{overlay_str}`  •  **Kill Switch:** {ks_str}",
+    ])
+    if laureate_line:
+        desc_parts.append(laureate_line)
+    if mkt_spy_line:
+        desc_parts.extend(["", mkt_spy_line])
+    if mkt_qqq_line:
+        desc_parts.append(mkt_qqq_line)
+
+    description = _truncate("\n".join(desc_parts), 4096)
 
     # Load yesterday's scores from archive for real score-delta display.
     # Reads all regional lists so EU/Asia tickers (never in unified top_buys)
@@ -1795,136 +1830,196 @@ def build_payload(
 
     # ── Fields ────────────────────────────────────────────────────────────────
     fields: List[Dict[str, Any]] = []
-    overlay = f"x{float(status.get('vix_multiplier', 1.0)):.2f}"
-    kill_state = "ACTIVE" if kill_switch else "NORMAL"
-    fields.extend([
-        {"name": "VIX", "value": f"`{vix_val:.1f}`" if vix_val is not None else "`—`", "inline": True},
-        {"name": "Regime", "value": f"`{vix_regime}`", "inline": True},
-        {"name": "Overlay", "value": f"`{overlay}`", "inline": True},
-        {"name": "Kill switch", "value": f"`{kill_state}`", "inline": True},
-    ])
-    fields.append({
-        "name": "⚡ ACTION BAR",
-        "value": (
-            "🚫 NO TRADES — MACRO KILL SWITCH ACTIVE (VIX ≥ 30)"
-            if kill_switch else "✅ MARKET OPEN — signals are actionable"
-        ),
-        "inline": False,
-    })
+    _DIV = {"name": "---", "value": "** **", "inline": False}
 
-    # ── Regime prediction panel ───────────────────────────────────────────────
-    if vix_val is not None and _HAS_REGIME:
-        try:
-            _regime = _get_regime(float(vix_val))
-            _mult = _score_multiplier(_regime)
-            _slabel = _strategy_label(_regime)
-            if _regime.value == "NORMAL":
-                _dist_bear = 25.0 - float(vix_val)
-                _dist_cap  = 30.0 - float(vix_val)
-                _thresholds = f"→ BEAR: VIX +{_dist_bear:.1f} | → CAPITULATION: VIX +{_dist_cap:.1f}"
-            elif _regime.value == "BEAR":
-                _dist_cap = 30.0 - float(vix_val)
-                _thresholds = f"→ CAPITULATION: VIX +{_dist_cap:.1f} | ↓ NORMAL: VIX -{float(vix_val) - 25.0:.1f}"
-            else:  # CAPITULATION
-                _thresholds = "Survivor criteria: beta ≤ 1.2 AND (Piotroski ≥ 0.70 OR D/E ≤ 0.30)"
-            _spy_mom = status.get("spy_momentum_regime", "NORMAL")
-            _spy_suffix = f" | SPY: {_spy_mom}" if _spy_mom != "NORMAL" else ""
-            _regime_val = f"{_slabel}\nMultiplier: ×{_mult:.2f}{_spy_suffix}\n{_thresholds}"
-            fields.append({
-                "name": "📊 REGIME PREDICTION",
-                "value": _truncate(_regime_val, 1024),
-                "inline": False,
-            })
-        except Exception as _reg_exc:
-            log.debug("Regime prediction field failed: %s", _reg_exc)
+    # Helper: compact factor chips for a ticker entry
+    def _compact_factors(e: Dict, market: str = "US", max_f: int = 5) -> str:
+        facts = e.get("factors") or {}
+        mkt_up = (market or "US").upper()
+        is_intl = mkt_up in ("EUROPE", "ASIA", "EU")
+        if is_intl:
+            keys = [
+                ("insider_conviction", "IC"), ("insider_breadth", "IB"),
+                ("news_buzz", "NB"), ("momentum_long", "MO"),
+                ("fcf_yield", "FCF"), ("amihud_shock", "AMH"), ("pb_value_up", "PB"),
+            ]
+        else:
+            keys = [
+                ("insider_conviction", "IC"), ("insider_breadth", "IB"),
+                ("congress", "CG"), ("news_buzz", "NB"), ("momentum_long", "MO"),
+                ("analyst_consensus", "AC"),
+            ]
+        parts = []
+        for key, lbl in keys:
+            val = facts.get(key)
+            if val is not None and float(val) > 0:
+                parts.append(f"{lbl}:{float(val):.2f}")
+        return "  ·  ".join(parts[:max_f]) if parts else "—"
 
-    _MARKET_SECTIONS = [
-        ("🇺🇸 Top 3 — USA", us_entries),
-        ("🇪🇺 Top 3 — Europe", eu_entries),
-        ("🇯🇵 Top 3 — Asia", asia_entries),
-    ]
-    for section_name, section_entries in _MARKET_SECTIONS:
-        if not section_entries:
-            continue
-        fields.append({"name": section_name, "value": "​", "inline": False})
-        fields.extend(_ticker_fields(section_entries, max_n=3,
-                      budget=1800, all_scores=all_scores, mid_cap=False))
+    # ── Section 2: Conviction Plays ───────────────────────────────────────────
+    plays_picks = []
+    for i, e in enumerate(us_entries[:2], 1):
+        plays_picks.append(("🎯", "USA", i, e))
+    for i, e in enumerate(eu_entries[:1], 1):
+        plays_picks.append(("👀", "EU", i, e))
+    for i, e in enumerate(asia_entries[:1], 1):
+        plays_picks.append(("👀", "Asia", i, e))
 
-    if mid_caps:
-        mid_scores = sorted([float(e.get("final_score", 0) or 0)
-                            for e in mid_caps])
-        fields.append(
-            {"name": "📈 Mid-cap catalyst watch — top 3 cross-market", "value": "​", "inline": False})
-        fields.extend(_ticker_fields(mid_caps, max_n=3,
-                      budget=1800, all_scores=mid_scores, mid_cap=True))
-
-    # ── EU/Asia Mid/Small-Cap Spotlight ──────────────────────────────────────
-    if (eu_mid_small or asia_mid_small) and len(fields) < 23:
+    if plays_picks:
+        play_lines = []
+        for icon, region, rank, e in plays_picks:
+            t_ = e.get("ticker", "?")
+            s_ = float(e.get("final_score", 0) or 0)
+            p_ = int(e.get("percentile", 0) or 0)
+            play_lines.append(
+                f"{icon} **WATCH: {t_}**  —  {region} #{rank}  |  "
+                f"`Score: {s_:.4f}`  |  `p{p_}`"
+            )
+            snap_parts: List[str] = []
+            mom = e.get("momentum_spy_relative")
+            if mom is not None:
+                mom_f = float(mom)
+                mom_pct = mom_f * 100 if abs(mom_f) < 5 else mom_f
+                snap_parts.append(f"{mom_pct:+.1f}% vs SPY (12m)")
+            ins_ = float(e.get("insider_usd", 0) or 0)
+            if ins_ > 0:
+                snap_parts.append(f"Insider {_fmt_usd(ins_)}")
+                fc = int(e.get("form4_count", 0) or 0)
+                if fc > 0:
+                    snap_parts.append(f"{fc} filings")
+            if not snap_parts:
+                eps_pct = e.get("earnings_surprise_pct")
+                if eps_pct is not None and float(eps_pct) > 0:
+                    snap_parts.append(f"EPS +{float(eps_pct) * 100:.1f}%")
+                else:
+                    snap_parts.append("No primary catalyst")
+            play_lines.append(f"└  *Snapshot:* {'  •  '.join(snap_parts)}")
+            facts_ = e.get("factors") or {}
+            driver_keys = [
+                ("insider_conviction", "IC"), ("insider_breadth", "IB"),
+                ("news_buzz", "NB"), ("momentum_long", "MO"),
+                ("analyst_consensus", "AC"), ("news_sentiment", "NS"),
+                ("congress", "CG"),
+            ]
+            drv_parts = []
+            for dk, dl in driver_keys:
+                dv = facts_.get(dk)
+                if dv is not None and float(dv) > 0:
+                    drv_parts.append(f"{dl}:`{float(dv):.2f}`")
+            if drv_parts:
+                play_lines.append(f"└  *Drivers:*  {'  ·  '.join(drv_parts[:3])}")
+            play_lines.append("")
         fields.append({
-            "name": "🔬 Mid/Small-Cap Watch",
-            "value": "Top-1 EU + Top-1 Asia mid/small-cap by factor score",
+            "name":  "### ⚡ 2. TODAY'S HIGHEST-CONVICTION PLAYS",
+            "value": _truncate("\n".join(play_lines).rstrip(), 1024),
             "inline": False,
         })
-        if eu_mid_small:
-            fields.append({"name": "🇪🇺 EU Mid-Cap", "value": "​", "inline": False})
-            fields.extend(_ticker_fields(eu_mid_small, max_n=1,
-                          budget=1800, all_scores=all_scores, mid_cap=True))
-        if asia_mid_small:
-            fields.append({"name": "🇯🇵 Asia Mid-Cap", "value": "​", "inline": False})
-            fields.extend(_ticker_fields(asia_mid_small, max_n=1,
-                          budget=1800, all_scores=all_scores, mid_cap=True))
+        fields.append(_DIV)
 
-    # ── Action today (before satellite — high priority) ───────────────────────
-    all_top = us_entries + eu_entries + asia_entries
-    action = _action_section(all_top, all_scores)
-    if action:
-        fields.append(action)
+    # ── Section 3: Global Factor Radar ────────────────────────────────────────
+    radar_sections = [
+        ("🇺🇸 **UNITED STATES**", us_entries,   "US"),
+        ("🇪🇺 **EUROPE**",        eu_entries,   "EUROPE"),
+        ("🇯🇵 **ASIA**",          asia_entries, "ASIA"),
+    ]
+    radar_lines: List[str] = []
+    for r_hdr, r_ents, r_mkt in radar_sections:
+        if not r_ents:
+            continue
+        radar_lines.append(r_hdr)
+        for i, e in enumerate(r_ents[:3], 1):
+            t_ = e.get("ticker", "?")
+            s_ = float(e.get("final_score", 0) or 0)
+            p_ = int(e.get("percentile", 0) or 0)
+            radar_lines.append(f"🔹 **#{i} {t_}** `{s_:.4f}` p{p_}")
+            fl = _compact_factors(e, r_mkt, max_f=5)
+            if fl and fl != "—":
+                radar_lines.append(f"└  {fl}")
+        radar_lines.append("")
+    if radar_lines:
+        fields.append({
+            "name":  "### 🗺️ 3. GLOBAL FACTOR RADAR",
+            "value": _truncate("\n".join(radar_lines).rstrip(), 1024),
+            "inline": False,
+        })
 
-    # ── MVO portfolio allocation ──────────────────────────────────────────────
+    # ── Section 4: Mid/Small-Cap Watch ────────────────────────────────────────
+    mid_small_lines: List[str] = []
+    if eu_mid_small:
+        e = eu_mid_small[0]
+        t_ = e.get("ticker", "?")
+        s_ = float(e.get("final_score", 0) or 0)
+        p_ = int(e.get("percentile", 0) or 0)
+        mid_small_lines.append(f"🇪🇺 **EU Mid-Cap: {t_}** `{s_:.4f}` p{p_}")
+        fl = _compact_factors(e, "EUROPE")
+        if fl and fl != "—":
+            mid_small_lines.append(f"└  {fl}")
+        mid_small_lines.append("")
+    if asia_mid_small:
+        e = asia_mid_small[0]
+        t_ = e.get("ticker", "?")
+        s_ = float(e.get("final_score", 0) or 0)
+        p_ = int(e.get("percentile", 0) or 0)
+        mid_small_lines.append(f"🇯🇵 **Asia Mid-Cap: {t_}** `{s_:.4f}` p{p_}")
+        fl = _compact_factors(e, "ASIA")
+        if fl and fl != "—":
+            mid_small_lines.append(f"└  {fl}")
+    if mid_small_lines:
+        fields.append(_DIV)
+        fields.append({
+            "name":  "### 🔬 4. MID/SMALL-CAP WATCH",
+            "value": _truncate("\n".join(mid_small_lines).rstrip(), 1024),
+            "inline": False,
+        })
+
+    # ── Section 5: MVO Portfolio Allocation ───────────────────────────────────
     mvo_pools = status.get("mvo_pools", {})
-    if mvo_pools and len(fields) < 23:
-        mvo_lines = []
+    if mvo_pools:
+        mvo_lines = [
+            (
+                f"*Mathematical weighting · VIX {float(vix_val):.1f} environment · "
+                f"overlay {overlay_str}*"
+            ) if vix_val is not None else "*Mathematical weighting*",
+            "",
+        ]
         pool_order = ["large_cap_anchors", "mid_cap", "small_cap"]
-        pool_labels = {
-            "large_cap_anchors": "🔵 LARGE (>$10B, equal-weight)",
-            "mid_cap":           "🟡 MID ($2B–$10B, Sharpe-max)",
-            "small_cap":         "🔴 SMALL ($300M–$2B, min-variance)",
+        pool_cfg = {
+            "large_cap_anchors": ("🔵", "LARGE-CAPS",  ">$10B"),
+            "mid_cap":           ("🟡", "MID-CAPS",    "$2B–$10B"),
+            "small_cap":         ("🔴", "SMALL-CAPS",  "$300M–$2B"),
         }
-        vix_note = (
-            f"VIX {float(vix_val):.1f} · overlay ×{float(status.get('vix_multiplier', 1.0)):.2f}"
-            if vix_val is not None else ""
-        )
-        mvo_header = [f"_{vix_note}_"] if vix_note else []
-        for pool_key in pool_order:
-            pool = mvo_pools.get(pool_key)
+        for pk in pool_order:
+            pool = mvo_pools.get(pk)
             if not pool:
                 continue
             positions = pool.get("positions", [])
             if not positions:
                 continue
-            label    = pool_labels.get(pool_key, pool_key)
-            method   = pool.get("method", "equal-weight")
-            n_pos    = len(positions)
-            avg_sc   = sum(p.get("final_score", 0) for p in positions) / max(1, n_pos)
-            score_note = f" · avg score: {avg_sc:.3f}" if n_pos > 1 else ""
-            pos_strs = [
-                f"`{p['ticker']}` {p.get('allocation', 0) * 100:.1f}%"
-                for p in positions[:6]
-                if (p.get("allocation") or 0) > 0.001
-            ]
-            if pos_strs:
-                mvo_lines.append(
-                    f"{label} [{method}, {n_pos} pos{score_note}]: {' · '.join(pos_strs)}"
-                )
-        if mvo_lines:
+            emoji_, label_, cap_range = pool_cfg.get(pk, ("⚫", pk, ""))
+            method = pool.get("method", "equal-weight")
+            n_pos  = len(positions)
+            avg_sc = sum(p.get("final_score", 0) for p in positions) / max(1, n_pos)
+            mvo_lines.append(
+                f"{emoji_} **{label_}** *({cap_range} | {method} | "
+                f"{n_pos} pos | avg score: {avg_sc:.3f})*"
+            )
+            for p in positions[:6]:
+                if (p.get("allocation") or 0) < 0.001:
+                    continue
+                alloc_pct = (p.get("allocation") or 0) * 100
+                sec_ = (p.get("sector") or "").strip() or "—"
+                mvo_lines.append(f"• **{p['ticker']}:** `{alloc_pct:.1f}%`  —  {sec_}")
+            mvo_lines.append("")
+        if len(mvo_lines) > 2:
+            fields.append(_DIV)
             fields.append({
-                "name":   "⚖️ MVO PORTFOLIO ALLOCATION",
-                "value":  _truncate("\n".join(mvo_header + mvo_lines), 1024),
+                "name":   "### ⚖️ 5. MVO PORTFOLIO ALLOCATION",
+                "value":  _truncate("\n".join(mvo_lines).rstrip(), 1024),
                 "inline": False,
             })
 
-    # ── Sector exposure ───────────────────────────────────────────────────────
-    all_entries = all_top + mid_caps[:5]
+    # ── Sector Exposure ───────────────────────────────────────────────────────
+    all_entries = us_entries + eu_entries + asia_entries + mid_caps[:3]
     structured = _sector_heatmap_structured(all_entries)
     if structured:
         sorted_sectors = sorted(
@@ -1937,21 +2032,32 @@ def build_payload(
                 1 for e in all_entries
                 if _SECTOR_SHORT.get((e.get("sector") or "").strip(), _SECTOR_MISC) == lbl
             )
-            chips = "  ".join(f"`{t}` {s:.2f}" for t, s in pairs)
+            chips = "  ·  ".join(f"`{t}` {s:.2f}" for t, s in pairs)
             sector_lines.append(f"{lbl} ({total_in_sector})  {chips}")
         fields.append({
-            "name":   "📊  Sector Exposure",
+            "name":   "📊 Sector Exposure",
             "value":  _truncate("\n".join(sector_lines), 1024),
             "inline": False,
         })
 
-    # ── Pipeline health (before satellite — critical visibility) ──────────────
+    # ── Pipeline health ────────────────────────────────────────────────────────
     if is_status_schema:
         fields.append(_health_field(status))
 
-    # ── Satellite (cyclicals + cannibals) — optional, appended last ───────────
-    # Placed after Action/Sector/Health so Discord's 25-field limit drops
-    # satellite before it drops analytical fields.
+    # ── Factor Legend ─────────────────────────────────────────────────────────
+    fields.append(_DIV)
+    fields.append({
+        "name":  "📖 Factor Legend",
+        "value": (
+            "*IC=Insider Conviction · IB=Insider Breadth · NB=News Buzz · "
+            "MO=Momentum · CG=Congress · AC=Analyst Consensus · AR=Analyst Revision · "
+            "VA=Volume Attention · FCF=Free Cash Flow Yield · AMH=Amihud Shock · "
+            "PB=Price-to-Book · PT=Price Target · QF=Piotroski Quality*"
+        ),
+        "inline": False,
+    })
+
+    # ── Satellite (cyclicals + cannibals) — appended last ─────────────────────
     try:
         if satellite:
             month_label = satellite.get("month", "")
@@ -2168,8 +2274,10 @@ def run_tests() -> int:
         payload = build_payload(tl)
         embed = payload["embeds"][0]
         _check("legacy_payload_no_crash", True)
+        # New format: "USA" appears in conviction plays field VALUE, not name
         _check("legacy_has_usa_section",
-               any("USA" in f["name"] or "Top 5" in f["name"] for f in embed["fields"]))
+               any("USA" in f["name"] or "USA" in f.get("value", "") or "CONVICTION" in f["name"]
+                   for f in embed["fields"]))
     except Exception:
         failures.append(
             f"FAIL [build_payload_legacy]: {traceback.format_exc()}")
@@ -2196,9 +2304,9 @@ def run_tests() -> int:
 
     # ── Test 9: VIX regime labels ─────────────────────────────────────────────
     try:
-        _check("vix_bullish",  "BULLISH" in get_market_regime(12.0))
-        _check("vix_stable",   "STABLE" in get_market_regime(18.0))
-        _check("vix_bearish",  "BEARISH" in get_market_regime(28.0))
+        _check("vix_low",    "VIX" in get_market_regime(12.0))
+        _check("vix_mid",    "VIX" in get_market_regime(18.0))
+        _check("vix_high",   "VIX" in get_market_regime(28.0))
     except Exception:
         failures.append(f"FAIL [vix_regime]: {traceback.format_exc()}")
 
@@ -2211,8 +2319,10 @@ def run_tests() -> int:
         st["results"] = [eu]
         payload = build_payload(st)
         names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        _check("europe_section_present", any(
-            "Europe" in n for n in names), f"names={names}")
+        # New format: EU entries appear in the GLOBAL FACTOR RADAR value, not in field names
+        all_values = " ".join(f.get("value", "") for f in payload["embeds"][0]["fields"])
+        _check("europe_section_present",
+               "EU" in all_values or "EUROPE" in all_values, f"names={names}")
         _check("usa_section_absent", not any(
             "USA" in n for n in names), f"names={names}")
         _check("asia_section_absent", not any(

@@ -1434,11 +1434,8 @@ def run(
                 log.debug("NEWS NEUTRAL %s: articles found but no directional sentiment", ticker)
             news_buzz_score, news_buzz_source = score_news_buzz_combined(ticker)
 
-            # ── Analyst consensus — bulk index only (per-ticker FMP removed) ────
-            # _bulk_consensus_idx is built once at pipeline start from
-            # upgrades-downgrades-consensus-bulk.ndjson (O(1) lookup, no file I/O).
-            # _score_record handles the consensusRating/consensus field name
-            # differences and returns 0.0 for absent/insufficient data.
+            # ── Analyst consensus — bulk index with per-ticker FMP fallback ────
+            # Primary: O(1) bulk lookup. Fallback: grades-consensus (confirmed 200).
             from regime_trader.scoring.analyst import _score_record as _ac_score_record  # noqa: PLC0415
             _bulk_cons_rec = _bulk_consensus_idx.get(ticker.upper())
             if _bulk_cons_rec:
@@ -1446,9 +1443,17 @@ def run(
                     ticker, _bulk_cons_rec
                 )
             else:
-                # None = absent from bulk index → _ticker_effective_weights()
-                # redistributes the weight rather than penalizing with 0.0.
-                analyst_consensus_score, analyst_consensus_source = None, "no_coverage"
+                # Bulk missed — fall back to per-ticker FMP (grades-consensus).
+                # None = confirmed no coverage; 0.0 = endpoint responded, no signal.
+                try:
+                    _ratings = _fmp_client.get_analyst_ratings(ticker)
+                    if _ratings:
+                        analyst_consensus_score, analyst_consensus_source = _ac_score_record(ticker, _ratings)
+                    else:
+                        analyst_consensus_score, analyst_consensus_source = None, "no_coverage"
+                except Exception as _ac_exc:
+                    log.debug("analyst_consensus per-ticker fallback failed %s: %s", ticker, _ac_exc)
+                    analyst_consensus_score, analyst_consensus_source = None, "no_coverage"
 
             # Recent upgrade/downgrade (FMP) — useful catalyst signal
             recent_upg = _fmp_client.get_recent_upgrades_downgrades(ticker)
@@ -1478,8 +1483,12 @@ def run(
                 quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
 
             # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
-            _rev_pct, _rev_n = _FMPClient().get_analyst_estimate_revision(ticker)
-            analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
+            analyst_revision_score = 0.0
+            try:
+                _rev_pct, _rev_n = _fmp_client.get_analyst_estimate_revision(ticker)
+                analyst_revision_score = score_analyst_revision(_rev_pct, _rev_n)
+            except Exception as _ar_exc:
+                log.debug("analyst_revision failed %s: %s", ticker, _ar_exc)
 
             # ── Price target upside ───────────────────────────────────────
             # None = absent analyst coverage (no price target filed).
@@ -1618,6 +1627,7 @@ def run(
                 "news_sentiment_score":     0.0,
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
+                "analyst_revision_score":   0.0,
                 "quality_piotroski_score":  0.0,
                 "quality_piotroski_raw":    None,
                 "congress_score":           0.0,
@@ -1654,6 +1664,7 @@ def run(
                 "news_sentiment_score":     0.0,
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
+                "analyst_revision_score":   0.0,
                 "quality_piotroski_score":  0.0,
                 "quality_piotroski_raw":    None,
                 "congress_score":           0.0,
