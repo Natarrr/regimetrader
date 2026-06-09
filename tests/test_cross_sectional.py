@@ -204,10 +204,14 @@ class TestEffectiveWeights:
 
 class TestVixOverlay:
     def test_normal_regime_no_dampening(self):
-        assert _apply_vix_overlay(0.80, 24.9) == pytest.approx(0.80)
+        assert _apply_vix_overlay(0.80, 19.9) == pytest.approx(0.80)
 
     def test_bear_regime_mild_penalty(self):
-        assert _apply_vix_overlay(1.0, 25.0) == pytest.approx(0.80)
+        """Bear starts at VIX 20 (src.risk.regime.BEAR_THRESHOLD)."""
+        assert _apply_vix_overlay(1.0, 20.0) == pytest.approx(0.80)
+
+    def test_bear_regime_mid(self):
+        assert _apply_vix_overlay(1.0, 22.0) == pytest.approx(0.80)
 
     def test_bear_regime_upper_boundary(self):
         assert _apply_vix_overlay(1.0, 29.9) == pytest.approx(0.80)

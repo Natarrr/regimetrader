@@ -138,14 +138,26 @@ def score_quality_piotroski(ratios: dict) -> tuple[float, int]:
     momentum — which makes it a natural complement to score_momentum_long.
 
     8 binary points (each worth 1/8 of the final score):
-        1. returnOnAssetsTTM > 0         — profitable at all
-        2. returnOnAssetsTTM > 0.05      — strong ROA (>5%)
-        3. operatingProfitMarginTTM > 0  — positive operating income (OCF proxy)
-        4. debtEquityRatioTTM < 1.0      — manageable leverage
-        5. debtEquityRatioTTM < 0.5      — low leverage (bonus)
-        6. currentRatioTTM > 1.5         — liquid balance sheet
-        7. grossProfitMarginTTM > 0.30   — 30%+ gross margin = pricing power
-        8. netProfitMarginTTM > 0.05     — profitable after all costs
+        1. ROA > 0                        — profitable at all
+        2. ROA > 0.05                     — strong ROA (>5%)
+        3. operatingProfitMarginTTM > 0   — positive operating income (OCF proxy)
+        4. debtToEquityRatioTTM < 1.0     — manageable leverage
+        5. debtToEquityRatioTTM < 0.5     — low leverage (bonus)
+        6. currentRatioTTM > 1.5          — liquid balance sheet
+        7. grossProfitMarginTTM > 0.30    — 30%+ gross margin = pricing power
+        8. netProfitMarginTTM > 0.05      — profitable after all costs
+
+    Field names (verified live 2026-06-09, identical for per-ticker
+    stable/ratios-ttm and ratios-ttm-bulk):
+        - The leverage field is debtToEquityRatioTTM. The legacy name
+          debtEquityRatioTTM is kept as a fallback candidate for old fixtures.
+        - There is NO returnOnAssets* field in the live payload. ROA is
+          derived via DuPont: ROA = netProfitMargin × assetTurnover
+          (netProfitMarginTTM × assetTurnoverTTM). Without this derivation
+          points 1–2 could never be awarded — the bug that pinned the whole
+          universe at raw=4.
+        - Unsuffixed variants (e.g. grossProfitMargin) are also accepted in
+          case a future bulk snapshot drops the TTM suffix.
 
     score = round(points_earned / 8.0, 4)
 
@@ -171,27 +183,41 @@ def score_quality_piotroski(ratios: dict) -> tuple[float, int]:
         Novy-Marx (2013), "The Other Side of Value", JFE 108(1).
         Ilmanen (2011), "Expected Returns", Wiley.
 
-    Source: FMPClient.get_ratios_ttm() → stable/ratios-ttm (24h cache).
+    Source: FMPClient.get_ratios_ttm() → stable/ratios-ttm (24h cache), or a
+    ratios-ttm-bulk snapshot record (run_pipeline bulk index — same shape).
     """
     if not isinstance(ratios, dict) or not ratios:
         return 0.0, 0
 
-    def _get(field: str) -> float | None:
-        v = ratios.get(field)
-        if v is None:
-            return None
-        try:
-            f = float(v)
-            return None if math.isnan(f) else f
-        except (TypeError, ValueError):
-            return None
+    def _get(*fields: str) -> float | None:
+        """First parseable value among candidate names, each tried with and
+        without the TTM suffix (per-ticker and bulk shapes)."""
+        for field in fields:
+            for key in (field, field.removesuffix("TTM")):
+                v = ratios.get(key)
+                if v is None:
+                    continue
+                try:
+                    f = float(v)
+                    if not math.isnan(f):
+                        return f
+                except (TypeError, ValueError):
+                    continue
+        return None
 
     roa  = _get("returnOnAssetsTTM")
     opm  = _get("operatingProfitMarginTTM")
-    de   = _get("debtEquityRatioTTM")
+    de   = _get("debtToEquityRatioTTM", "debtEquityRatioTTM")  # live name first; legacy for old fixtures
     cr   = _get("currentRatioTTM")
     gpm  = _get("grossProfitMarginTTM")
     npm  = _get("netProfitMarginTTM")
+
+    if roa is None:
+        # Live stable/ratios-ttm has no ROA field — derive via DuPont:
+        # ROA = net profit margin × asset turnover.
+        at = _get("assetTurnoverTTM")
+        if npm is not None and at is not None:
+            roa = npm * at
 
     # Guard: all fields missing → dead signal
     if all(v is None for v in (roa, opm, de, cr, gpm, npm)):

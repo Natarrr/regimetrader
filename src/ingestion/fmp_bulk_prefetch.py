@@ -9,7 +9,9 @@ FMP round-trips.
 
 Confirmed working stable/ routes (verified 2026-06-03):
   upgrades-downgrades-consensus-bulk → consensus field; analyst_consensus score
-  ratios-ttm-bulk                    → returnOnAssets, currentRatio, debtRatio, etc.
+  ratios-ttm-bulk                    → ratio fields; quality_piotroski score
+                                       (score_quality_piotroski tolerates TTM-suffixed
+                                       and unsuffixed field names)
   key-metrics-ttm-bulk               → peRatioTTM, revenuePerShareTTM, etc.
 
 Response format: FMP returns NDJSON (one JSON object per line), not a JSON array.
@@ -18,7 +20,8 @@ The parser handles both formats transparently.
 Removed endpoints (not available or no scoring consumer):
   financial-scores-bulk   — FMP stable/ 404; piotroski sourced per-ticker via FMPClient
   eod-bulk                — FMP stable/ 404; no scoring consumer
-  earnings-surprises-bulk — no scoring consumer; PEAD boost uses per-ticker FMPClient
+  earnings-surprises-bulk — no scoring consumer; PEAD boost uses per-ticker
+                            FMPClient.get_earnings_surprise() (stable/ "earnings")
   price-target-summary-bulk — no scoring consumer; PT upside uses per-ticker FMPClient
 
 Cache format: {cache_dir}/{endpoint}.json
@@ -103,11 +106,33 @@ def _is_cache_valid(cache_dir: Path, endpoint: str, ttl_hours: float) -> bool:
         return False
 
 
-def _parse_response(endpoint: str, text: str) -> list[dict[str, Any]]:
-    """Parse FMP bulk response — handles both JSON array and NDJSON formats.
+def _coerce_csv_value(raw: str | None) -> Any:
+    """Coerce a CSV string cell to int/float/None so downstream scorers
+    (int()/float() conversions in analyst.py, momentum_signals.py) behave
+    identically to the JSON record shape."""
+    if raw is None:
+        return None
+    s = raw.strip()
+    if s == "":
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        return s
 
-    FMP bulk endpoints return NDJSON (one JSON object per line).
-    Attempts JSON array first for forward compatibility; falls back to NDJSON.
+
+def _parse_response(endpoint: str, text: str) -> list[dict[str, Any]]:
+    """Parse FMP bulk response — handles JSON array, NDJSON, and CSV.
+
+    FMP bulk routes serve text/csv as of 2026-06-09 (confirmed live for all
+    three endpoints: header row + quoted cells). Earlier snapshots were
+    NDJSON; JSON array is attempted first for forward compatibility.
+    Silently returning 0 records on an unrecognized format is what masked
+    the bulk pipeline being dead — the CSV branch closes that gap.
     """
     text = text.strip()
     if not text:
@@ -121,17 +146,37 @@ def _parse_response(endpoint: str, text: str) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pass
 
+    first_line = text.splitlines()[0].strip() if text.splitlines() else ""
+    if first_line.startswith("{"):
+        # NDJSON — one JSON object per line.
+        records = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    records.append(obj)
+            except json.JSONDecodeError as exc:
+                logger.debug("NDJSON line skip (%s): %s", endpoint, exc)
+        return records
+
+    # CSV — header row defines field names (e.g. symbol,strongBuy,...,consensus).
+    import csv
+    import io
+
     records = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict):
-                records.append(obj)
-        except json.JSONDecodeError as exc:
-            logger.debug("NDJSON line skip (%s): %s", endpoint, exc)
+    reader = csv.DictReader(io.StringIO(text))
+    for row in reader:
+        rec = {k: _coerce_csv_value(v) for k, v in row.items() if k is not None}
+        if rec.get("symbol") or rec.get("ticker"):
+            records.append(rec)
+    if not records:
+        logger.warning(
+            "Bulk response for %s parsed to 0 records (unrecognized format; "
+            "first line: %.80s)", endpoint, first_line,
+        )
     return records
 
 

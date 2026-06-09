@@ -96,3 +96,38 @@ def test_score_record_num_analysts_fallback():
     score, src = _score_record("AAPL", record)
     assert score == 0.75
     assert src == "consensus:Buy:3"
+
+
+# ── Live CSV bulk record shape (2026-06-09: strongBuy/buy/... + consensus) ──
+
+def test_live_csv_shape_consensus_with_derived_count():
+    """Live CSV records have no analystRatingsCount — coverage derives from
+    the rating-count sum. Regression for the silent insufficient_coverage bug."""
+    rec = {"symbol": "AAPL", "strongBuy": 10, "buy": 20, "hold": 5,
+           "sell": 1, "strongSell": 0, "consensus": "Buy"}
+    score, src = _score_record("AAPL", rec)
+    assert score == 0.75
+    assert src == "consensus:Buy:36"
+
+
+def test_live_csv_shape_computed_fallback_without_consensus():
+    rec = {"symbol": "MSFT", "strongBuy": 4, "buy": 0, "hold": 0,
+           "sell": 0, "strongSell": 4, "consensus": ""}
+    score, src = _score_record("MSFT", rec)
+    assert score == 0.5
+    assert src == "consensus_computed:8"
+
+
+def test_live_csv_shape_thin_coverage_still_zero():
+    rec = {"symbol": "TINY", "strongBuy": 1, "buy": 0, "hold": 0,
+           "sell": 0, "strongSell": 0, "consensus": "Strong Buy"}
+    score, src = _score_record("TINY", rec)
+    assert score == 0.0
+    assert src.startswith("insufficient_coverage")
+
+
+def test_legacy_ndjson_shape_unchanged():
+    rec = {"symbol": "NVDA", "consensus": "Strong Buy", "analystRatingsCount": 8}
+    score, src = _score_record("NVDA", rec)
+    assert score == 1.0
+    assert src == "consensus:Strong Buy:8"

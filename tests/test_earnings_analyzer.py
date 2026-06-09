@@ -577,3 +577,60 @@ class TestRunAnalysisTranscript:
         mock_build.assert_called_once()
         call_kwargs = mock_build.call_args.kwargs
         assert call_kwargs.get("transcript") == "CEO: Guidance raised."
+
+
+# ── Regime-scaled quintile floor (bear floor 85) ──────────────────────────────
+
+class TestEffectiveQuintileFloor:
+    """BEAR regime (20 <= VIX < 30) raises the shortlist floor 80 → 85."""
+
+    def test_normal_vix_uses_base_floor(self):
+        from analysis.earnings_analyzer import effective_quintile_floor
+        assert effective_quintile_floor(15.0) == 80.0
+
+    def test_bear_vix_raises_floor_to_85(self):
+        from analysis.earnings_analyzer import effective_quintile_floor
+        assert effective_quintile_floor(24.0) == 85.0
+
+    def test_bear_boundary_at_20(self):
+        from analysis.earnings_analyzer import effective_quintile_floor
+        assert effective_quintile_floor(20.0) == 85.0
+        assert effective_quintile_floor(19.9) == 80.0
+
+    def test_capitulation_not_bear_scaled(self):
+        """VIX >= 30 is CAPITULATION — kill-switch territory, not the bear floor."""
+        from analysis.earnings_analyzer import effective_quintile_floor
+        assert effective_quintile_floor(35.0) == 80.0
+
+    def test_none_vix_uses_base_floor(self):
+        from analysis.earnings_analyzer import effective_quintile_floor
+        assert effective_quintile_floor(None) == 80.0
+
+    def test_env_override(self, monkeypatch):
+        from analysis.earnings_analyzer import effective_quintile_floor
+        monkeypatch.setenv("SHORTLIST_QUINTILE_FLOOR_BEAR", "90")
+        assert effective_quintile_floor(24.0) == 90.0
+
+    def test_bear_floor_never_below_base(self, monkeypatch):
+        from analysis.earnings_analyzer import effective_quintile_floor
+        monkeypatch.setenv("SHORTLIST_QUINTILE_FLOOR", "88")
+        monkeypatch.setenv("SHORTLIST_QUINTILE_FLOOR_BEAR", "85")
+        assert effective_quintile_floor(24.0) == 88.0
+
+
+class TestBuildShortlistRegimeFloor:
+    def test_bear_vix_excludes_82_keeps_86(self):
+        candidates = [_candidate("GOOD", 0.86), _candidate("MEH", 0.82)]
+        result = build_shortlist(candidates, vix=24.0)
+        assert "GOOD" in result
+        assert "MEH" not in result
+
+    def test_normal_vix_keeps_82(self):
+        candidates = [_candidate("MEH", 0.82)]
+        result = build_shortlist(candidates, vix=15.0)
+        assert "MEH" in result
+
+    def test_explicit_floor_overrides_regime_scaling(self):
+        candidates = [_candidate("MEH", 0.82)]
+        result = build_shortlist(candidates, quintile_floor=80, vix=24.0)
+        assert "MEH" in result

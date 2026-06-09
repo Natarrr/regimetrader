@@ -7,7 +7,7 @@ credible, costly-to-fake signal. This pipeline sources it from two layers:
   2. SEC EDGAR direct        — Form 4 count + CEO buy flag (always, free)
 
 Bulk cache: pass --bulk-cache <dir> (written by scripts/fmp_bulk_prefetch.py)
-to replace per-ticker FMP calls for quality_piotroski (financial-scores-bulk)
+to replace per-ticker FMP calls for quality_piotroski (ratios-ttm-bulk)
 and analyst_consensus (upgrades-downgrades-consensus-bulk).
 
 Usage:
@@ -237,15 +237,25 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
     # Truthy check on by_ticker: an empty {} from a failed S3 run must not be
     # served as a valid cache hit — it would silence the Quiver fallback for
     # up to 24h, leaving congress_score=0.0 for all tickers.
+    # The shared cache may be mid-write by another runner (warm_shared_cache /
+    # parallel pipelines on separate VMs) — a corrupt or partial read is a
+    # cache MISS, never a crash: we fall through to a live refetch.
     if CONGRESS_CACHE_PATH.exists():
         try:
             cached = json.loads(CONGRESS_CACHE_PATH.read_text(encoding="utf-8"))
             age_h = (time.time() - float(cached.get("_ts", 0))) / 3600
             by_ticker_cached = cached.get("by_ticker", {})
+            if not isinstance(by_ticker_cached, dict):
+                raise ValueError(
+                    f"by_ticker is {type(by_ticker_cached).__name__}, expected dict"
+                )
             if age_h < _CONGRESS_TTL_HOURS and by_ticker_cached:
                 return by_ticker_cached
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning(
+                "congress_cache.json unreadable (%s) — treating as cache miss, refetching",
+                exc,
+            )
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
     by_ticker: Dict[str, Dict] = {}
@@ -736,7 +746,7 @@ def score_news_sentiment_combined(
         if s > 0.0:
             headline_score = s
 
-    # PEAD boost — FMP /stable/earnings-surprises (Bernard & Thomas 1989)
+    # PEAD boost — FMP /stable/earnings (Bernard & Thomas 1989)
     # PATCH 04: Apply exponential decay with half-life = 20 days.
     # Bernard & Thomas (1989): drift is ~100% of peak at day 1, ~50% at day 20,
     # ~25% at day 40, and ~12% at day 60. A flat 90-day window overstates
@@ -841,7 +851,8 @@ def fetch_fmp_insider_all(
 
     Form 4 insider purchases are a credible, costly-to-fake signal (Stiglitz 2001).
     Uses FMPClient with limit=500 per ticker to cover 180-day lookback for mega-caps.
-    max_workers=10: FMP Ultimate cap is 50 req/s; 10 threads at ~30 rps is safe.
+    max_workers=10: FMP Ultimate cap is 50 req/s; the shared FMPClient rate gate
+    holds aggregate throughput at FMP_MAX_RPS (default 50) across all threads.
 
     Args:
         client: Optional pre-created FMPClient instance. If None, creates one.
@@ -1200,22 +1211,27 @@ def run(
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
 
     # ── Bulk cache indexes (loaded once, shared across all threads) ───────────
-    _bulk_piotroski_idx: Dict[str, Any] = {}
+    # ratios-ttm-bulk records share the per-ticker stable/ratios-ttm shape, so
+    # score_quality_piotroski() consumes them directly (bulk miss → per-ticker).
+    _bulk_ratios_idx: Dict[str, Any] = {}
     _bulk_consensus_idx: Dict[str, Any] = {}
     _ambiguous_bases: set = set()
     if bulk_cache is not None:
         try:
             from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous as _bti_ambig  # noqa: PLC0415
-            # financial-scores-bulk has no FMP stable/ route; piotroski is per-ticker.
-            # _bulk_piotroski_idx stays {} — scoring falls back to FMPClient.get_quality_score().
             _bulk_consensus_idx, _ambiguous_bases = _bti_ambig(bulk_cache, "upgrades-downgrades-consensus-bulk")
+            _bulk_ratios_idx, _ratios_ambiguous = _bti_ambig(bulk_cache, "ratios-ttm-bulk")
             log.info(
-                "Bulk cache loaded: consensus=%d symbols, ambiguous_bases=%d (piotroski: per-ticker FMP)",
-                len(_bulk_consensus_idx),
-                len(_ambiguous_bases),
+                "Bulk cache loaded: consensus=%d symbols (ambiguous=%d), ratios=%d symbols (ambiguous=%d)",
+                len(_bulk_consensus_idx), len(_ambiguous_bases),
+                len(_bulk_ratios_idx), len(_ratios_ambiguous),
             )
         except Exception as _bexc:
             log.warning("Bulk cache load failed (%s) — falling back to per-ticker FMP", _bexc)
+
+    # Piotroski source audit counters (threads append; summarized after the loop).
+    _pio_counter_lock = threading.Lock()
+    _pio_counters = {"bulk": 0, "fmp_per_ticker": 0}
 
     # ── Shared FMP client — created once so health_report() captures all calls ─
     _fmp_client = _FMPClient()
@@ -1458,29 +1474,28 @@ def run(
             # Recent upgrade/downgrade (FMP) — useful catalyst signal
             recent_upg = _fmp_client.get_recent_upgrades_downgrades(ticker)
 
-            # ── quality_piotroski — bulk index first, per-ticker FMP fallback ──
-            # Bulk source: financial-scores-bulk (piotroskiScore 0-9)
-            _bulk_pio_rec = _bulk_piotroski_idx.get(ticker.upper(), {})
-            if _bulk_pio_rec:
-                _pio_raw = _bulk_pio_rec.get("piotroskiScore")
-                if _pio_raw is not None:
-                    try:
-                        _pio_int = int(_pio_raw)
-                        from regime_trader.config.weights import PIOTROSKI_GATE  # noqa: PLC0415
-                        _missing = PIOTROSKI_GATE["missing_score"]
-                        _supp    = PIOTROSKI_GATE["suppress_below"]
-                        _disc    = PIOTROSKI_GATE["discount_below"]
-                        _dfact   = PIOTROSKI_GATE["discount_factor"]
-                        _base = round(_pio_int / 9.0, 4)
-                        quality_piotroski_score = _base
-                        quality_piotroski_raw = _pio_int
-                    except (TypeError, ValueError):
-                        quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
-                    log.debug("Piotroski bulk %s: raw=%s score=%.4f", ticker, _pio_raw, quality_piotroski_score)
-                else:
-                    quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
-            else:
+            # ── quality_piotroski — ratios-ttm-bulk first, per-ticker fallback ──
+            # Bulk record shape == per-ticker stable/ratios-ttm; both paths emit
+            # (score, raw 0-8) so the downstream _piotroski_gate_multiplier is
+            # applied identically regardless of source.
+            _bulk_ratios_rec = _bulk_ratios_idx.get(ticker.upper())
+            _pio_source = "fmp_per_ticker"
+            quality_piotroski_score, quality_piotroski_raw = 0.0, 0
+            if _bulk_ratios_rec:
+                from regime_trader.scoring.momentum_signals import score_quality_piotroski as _pio_score  # noqa: PLC0415
+                quality_piotroski_score, quality_piotroski_raw = _pio_score(_bulk_ratios_rec)
+                _pio_source = "bulk"
+            if _pio_source != "bulk" or (quality_piotroski_score == 0.0 and quality_piotroski_raw == 0):
+                # Bulk miss OR dead signal from the bulk record (field-shape
+                # guard) — fall back to per-ticker stable/ratios-ttm.
                 quality_piotroski_score, quality_piotroski_raw = _fmp_client.get_quality_score(ticker)
+                _pio_source = "fmp_per_ticker"
+            with _pio_counter_lock:
+                _pio_counters[_pio_source] += 1
+            log.debug(
+                "Piotroski %s: raw=%d score=%.4f source=%s",
+                ticker, quality_piotroski_raw, quality_piotroski_score, _pio_source,
+            )
 
             # ── Analyst revision momentum (Chan-Jegadeesh-Lakonishok 1996 JF) ─
             analyst_revision_score = 0.0
@@ -1694,6 +1709,14 @@ def run(
             if r.get("_scoring_error", False):
                 errors += 1
             results.append(r)
+
+    # Piotroski source audit: with a warm ratios-ttm-bulk snapshot, the bulk
+    # share should be near 100% — a high per-ticker share means the snapshot
+    # is stale, empty, or the record shape regressed (check fmp_bulk_prefetch).
+    log.info(
+        "Piotroski sources: bulk=%d, per-ticker=%d (universe=%d)",
+        _pio_counters["bulk"], _pio_counters["fmp_per_ticker"], len(tickers),
+    )
 
     # PATCH 08: Report any structural FMP failures found during _score_ticker().
     if _structural_failures_in_scoring:
@@ -1949,6 +1972,17 @@ def run(
         "top_by_market": top_by_market,  # Fix #5: per-market Top-20, low_coverage excluded
         "computed_at":   pipeline_run_ts,
     }
+
+    # ── VIX snapshot — advisory traceability only ─────────────────────────────
+    # Records the VIX the discovery run observed, so a regime divergence between
+    # discovery and downstream scoring (generate_top_lists._read_vix is the
+    # scoring authority) is visible in the artifact diff.
+    try:
+        _vix_quote = _fmp_client.get_quote("^VIX") or {}
+        status["vix_snapshot"] = float(_vix_quote.get("price") or 0) or None
+    except Exception as _vexc:
+        log.warning("VIX snapshot for intel_source_status failed (non-fatal): %s", _vexc)
+        status["vix_snapshot"] = None
 
     # ── Fix #8: permanent factor orthogonality diagnostic ────────────────────
     # López de Prado (AFML ch. 8): monitor that engineered features remain

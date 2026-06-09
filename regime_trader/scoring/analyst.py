@@ -38,19 +38,34 @@ def _score_record(symbol: str, record: dict) -> tuple[float, str]:
     """
     consensus = (record.get("consensus") or "").strip()
 
+    # Rating counts — two record shapes in the wild:
+    #   legacy NDJSON snapshot: analystRatingsStrongBuy, analystRatingsBuy, ...
+    #   live CSV bulk route:    strongBuy, buy, hold, sell, strongSell
+    def _count(*keys: str) -> int:
+        for key in keys:
+            v = record.get(key)
+            if v is None or v == "":
+                continue
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    strong_buy  = _count("analystRatingsStrongBuy",  "strongBuy")
+    buy         = _count("analystRatingsBuy",        "buy")
+    hold        = _count("analystRatingsHold",       "hold")
+    sell        = _count("analystRatingsSell",       "sell")
+    strong_sell = _count("analystRatingsStrongSell", "strongSell")
+    total = strong_buy + buy + hold + sell + strong_sell
+
     if consensus in _CONSENSUS_SCORE:
-        analyst_count = int(record.get("analystRatingsCount") or record.get("numAnalysts") or 0)
+        # Live CSV records carry no explicit count field — derive coverage
+        # from the rating-count sum when analystRatingsCount/numAnalysts absent.
+        analyst_count = _count("analystRatingsCount", "numAnalysts") or total
         if analyst_count < _MIN_ANALYSTS:
             return 0.0, f"insufficient_coverage:{analyst_count}"
         return _CONSENSUS_SCORE[consensus], f"consensus:{consensus}:{analyst_count}"
-
-    # Fallback: compute from raw buy/hold/sell counts
-    strong_buy  = int(record.get("analystRatingsStrongBuy",  0) or 0)
-    buy         = int(record.get("analystRatingsBuy",         0) or 0)
-    hold        = int(record.get("analystRatingsHold",        0) or 0)
-    sell        = int(record.get("analystRatingsSell",        0) or 0)
-    strong_sell = int(record.get("analystRatingsStrongSell",  0) or 0)
-    total = strong_buy + buy + hold + sell + strong_sell
 
     if total < _MIN_ANALYSTS:
         return 0.0, f"insufficient_coverage:{total}"

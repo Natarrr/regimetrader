@@ -19,7 +19,11 @@ All active scoring endpoints confirmed HTTP 200:
   upgrades-downgrades-consensus-bulk ratios-ttm-bulk        key-metrics-ttm-bulk
 
 Confirmed HTTP 404 (quarantined):
-  earnings-surprises    upgrades-downgrades    senate-trading    house-trading
+  upgrades-downgrades    senate-trading    house-trading
+
+PEAD NOTE: "earnings-surprises" is HTTP 404 on stable/ and is no longer called.
+get_earnings_surprise() computes the surprise from stable/ "earnings"
+(epsActual vs epsEstimated) instead — same return contract.
 
 IMPORTANT — insider path distinction:
   "insider-trading"         → HTTP 404 (bare path, NOT used by this client)
@@ -42,7 +46,7 @@ This client:
 
 Auth: FMP_API_KEY env var (Ultimate plan).
 Cache: file-based under .cache/fmp/<bucket>/<ticker>.json with per-bucket TTL.
-Rate: FMP_MAX_RPS env var (Ultimate cap is 50 req/s). Default 30.
+Rate: FMP_MAX_RPS env var (Ultimate cap is 50 req/s). Default 50.
 """
 from __future__ import annotations
 
@@ -69,7 +73,7 @@ _FMP_BASE = "https://financialmodelingprep.com"
 _STABLE = f"{_FMP_BASE}/stable"
 _TIMEOUT = 15
 _DEFAULT_CACHE_ROOT = Path(__file__).parent.parent.parent / ".cache" / "fmp"
-_DEFAULT_MAX_RPS = 30.0
+_DEFAULT_MAX_RPS = 50.0
 
 # Endpoints confirmed HTTP 404 on stable/ routes.
 # _get() skips these entirely — no HTTP call, no failure count, no health-report alarm.
@@ -79,7 +83,6 @@ _DEFAULT_MAX_RPS = 30.0
 # it is never called by this client. The actual scoring path is "insider-trading/search"
 # which returns HTTP 200 (confirmed 2026-06-09). Do not conflate the two.
 _DEAD_ENDPOINTS: frozenset[str] = frozenset({
-    "earnings-surprises",   # HTTP 404 — not yet migrated to stable/ (confirmed 2026-06-09)
     "upgrades-downgrades",  # HTTP 404 — renamed to grades-consensus on stable/ (confirmed 2026-06-09)
 })
 
@@ -565,14 +568,19 @@ class FMPClient:
         showed that standardized unexpected earnings (SUE) predict returns for
         60–90 days post-announcement — the most robust anomaly in event studies.
 
-        surprise_pct = (actual - estimate) / abs(estimate)
+        surprise_pct = (epsActual - epsEstimated) / abs(epsEstimated)
         days_since   = calendar days from the announcement date to today
+
+        Source: stable/ "earnings" (the legacy "earnings-surprises" route is
+        HTTP 404 on stable/). The earnings calendar mixes future scheduled
+        quarters (epsActual=None) with past reports, newest-first; the most
+        recent PAST report with both actual and estimated EPS is used.
 
         Returns (None, 0) gracefully on any error, empty response, or zero estimate
         (avoids division-by-zero on pre-revenue companies).
 
-        Uses the "news" TTL bucket (2h) — earnings surprise data changes at most
-        once per quarter so 2h is conservative and keeps the news cache coherent.
+        Uses the "news" TTL bucket — earnings surprise data changes at most
+        once per quarter so the news TTL is conservative and keeps the cache coherent.
         """
         if not self._api_key:
             return None, 0
@@ -583,48 +591,46 @@ class FMPClient:
             return tuple(cached)  # type: ignore[return-value]
 
         try:
+            # limit=8: covers up to ~4 future scheduled quarters plus >=4 past reports.
             data = self._get(
-                "earnings-surprises",
-                {"symbol": ticker, "limit": 4},
+                "earnings",
+                {"symbol": ticker, "limit": 8},
                 bucket="news",
             ) or []
             if not isinstance(data, list) or not data:
                 self._cache_write("news", cache_key, [None, 0])
                 return None, 0
 
-            # FMP returns newest-first; index 0 is the most recent quarter.
-            most_recent = data[0]
-            actual = most_recent.get("actualEarningResult")
-            estimate = most_recent.get("estimatedEarning")
-            date_str = str(most_recent.get("date") or "")
+            from datetime import date as _date
+            today = datetime.now(timezone.utc).date()
 
-            if actual is None or estimate is None:
-                self._cache_write("news", cache_key, [None, 0])
-                return None, 0
-
-            actual = float(actual)
-            estimate = float(estimate)
-
-            # Guard: zero or near-zero estimate → undefined surprise % (pre-revenue)
-            if abs(estimate) < 1e-6:
-                self._cache_write("news", cache_key, [None, 0])
-                return None, 0
-
-            surprise_pct = (actual - estimate) / abs(estimate)
-
-            days_since = 0
-            if date_str:
+            for row in data:
+                date_str = str(row.get("date") or "")[:10]
                 try:
-                    from datetime import date as _date
-                    announcement = _date.fromisoformat(date_str[:10])
-                    days_since = max(
-                        0, (datetime.now(timezone.utc).date() - announcement).days)
-                except Exception:
-                    days_since = 0
+                    announced = _date.fromisoformat(date_str)
+                except ValueError:
+                    continue
+                if announced > today:
+                    continue  # scheduled future quarter — no actuals yet
+                actual = row.get("epsActual")
+                estimate = row.get("epsEstimated")
+                if actual is None or estimate is None:
+                    continue
+                actual = float(actual)
+                estimate = float(estimate)
 
-            result = (round(surprise_pct, 6), days_since)
-            self._cache_write("news", cache_key, list(result))
-            return result
+                # Guard: zero or near-zero estimate → undefined surprise % (pre-revenue)
+                if abs(estimate) < 1e-6:
+                    break
+
+                surprise_pct = (actual - estimate) / abs(estimate)
+                days_since = max(0, (today - announced).days)
+                result = (round(surprise_pct, 6), days_since)
+                self._cache_write("news", cache_key, list(result))
+                return result
+
+            self._cache_write("news", cache_key, [None, 0])
+            return None, 0
 
         except FMPEndpointError:
             # Structural failure already logged by _get(); propagate to health_report

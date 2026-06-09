@@ -146,3 +146,41 @@ class TestGoldenRecord:
             f"PIOTROSKI FLAT: {len(flat)}/{len(us_results)} US tickers at sentinel "
             f"{sentinel} — >70% at missing-score value; ratios-ttm may be broken"
         )
+
+
+class TestRegimeAuditTrail:
+    """vix_regime in the payload + REGIME TRANSITION warning in the audit log."""
+
+    def test_payload_includes_vix_regime(self, generated):
+        # Golden VIX 18.43 < 20 → NORMAL under the canonical thresholds.
+        assert generated.get("vix_regime") == "NORMAL"
+
+    def test_kill_switch_audit_logs_regime_transition(self, tmp_path, caplog):
+        from backend.market_intel.generate_top_lists import _log_kill_switch_state
+
+        _log_kill_switch_state(False, 15.0, tmp_path, run_id="t1")   # NORMAL
+        with caplog.at_level("WARNING"):
+            _log_kill_switch_state(False, 24.0, tmp_path, run_id="t2")  # BEAR
+
+        lines = (tmp_path / "kill_switch_audit.ndjson").read_text().strip().splitlines()
+        assert len(lines) == 2
+        entries = [json.loads(ln) for ln in lines]
+        assert entries[0]["vix_regime"] == "NORMAL"
+        assert entries[1]["vix_regime"] == "BEAR"
+        assert any("REGIME TRANSITION" in r.message for r in caplog.records)
+
+    def test_no_transition_warning_when_regime_stable(self, tmp_path, caplog):
+        from backend.market_intel.generate_top_lists import _log_kill_switch_state
+
+        _log_kill_switch_state(False, 15.0, tmp_path, run_id="t1")
+        with caplog.at_level("WARNING"):
+            _log_kill_switch_state(False, 16.0, tmp_path, run_id="t2")
+        assert not any("REGIME TRANSITION" in r.message for r in caplog.records)
+
+    def test_corrupt_audit_log_does_not_crash(self, tmp_path):
+        from backend.market_intel.generate_top_lists import _log_kill_switch_state
+
+        (tmp_path / "kill_switch_audit.ndjson").write_text('{"broken', encoding="utf-8")
+        _log_kill_switch_state(True, 32.0, tmp_path, run_id="t1")  # must not raise
+        lines = (tmp_path / "kill_switch_audit.ndjson").read_text().strip().splitlines()
+        assert json.loads(lines[-1])["vix_regime"] == "CAPITULATION"

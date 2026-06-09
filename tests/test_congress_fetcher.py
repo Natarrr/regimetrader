@@ -165,3 +165,36 @@ class TestFetchCongressBuys:
             first_count = mock_get.call_count
             fetch_congress_buys(lookback_days=90)
             assert mock_get.call_count == first_count
+
+    def test_corrupt_cache_treated_as_miss(self, tmp_path, monkeypatch, caplog):
+        """Partial write from another runner → warn + refetch, never crash."""
+        self._no_quiver(monkeypatch)
+        cache = tmp_path / "cc.json"
+        cache.write_text('{"_ts": 17, "by_ticker": {"AAPL', encoding="utf-8")
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", cache)
+        house = [{"transaction_date": "2026-04-01", "ticker": "JPM", "type": "purchase"}]
+        with caplog.at_level("WARNING"), \
+             patch("requests.get", side_effect=self._make_mock_get(house, [])) as mock_get:
+            result = fetch_congress_buys(lookback_days=90)
+        assert mock_get.call_count > 0, "corrupt cache must trigger a live refetch"
+        assert result["JPM"]["purchases"] == 1
+        assert any("cache miss" in r.message for r in caplog.records)
+
+    def test_wrong_typed_by_ticker_treated_as_miss(self, tmp_path, monkeypatch, caplog):
+        """by_ticker serialized as a list (schema drift) → cache miss, refetch."""
+        self._no_quiver(monkeypatch)
+        import json as _json
+        import time as _time
+        cache = tmp_path / "cc.json"
+        cache.write_text(
+            _json.dumps({"_ts": _time.time(), "by_ticker": ["AAPL", "MSFT"]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("src.ingestion.run_pipeline.CONGRESS_CACHE_PATH", cache)
+        house = [{"transaction_date": "2026-04-01", "ticker": "JPM", "type": "purchase"}]
+        with caplog.at_level("WARNING"), \
+             patch("requests.get", side_effect=self._make_mock_get(house, [])) as mock_get:
+            result = fetch_congress_buys(lookback_days=90)
+        assert mock_get.call_count > 0
+        assert result["JPM"]["purchases"] == 1
+        assert any("cache miss" in r.message for r in caplog.records)

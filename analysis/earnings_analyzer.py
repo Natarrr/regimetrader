@@ -70,6 +70,28 @@ _DEFAULT_CLAUDE_SCORE_MIN = int(os.getenv("AUTO_EXEC_CLAUDE_SCORE_MIN", "70"))
 _QUINTILE_FLOOR = float(os.getenv("SHORTLIST_QUINTILE_FLOOR", "80"))  # top 20%
 
 
+def effective_quintile_floor(vix: Optional[float]) -> float:
+    """Regime-scaled shortlist floor.
+
+    BEAR regime (BEAR_THRESHOLD <= VIX < 30) raises the floor to
+    SHORTLIST_QUINTILE_FLOOR_BEAR (default 85) for graduated caution — fewer,
+    stronger candidates when volatility is elevated. Env vars are read at call
+    time (not import time) so workflow overrides and tests behave predictably.
+    """
+    base = float(os.getenv("SHORTLIST_QUINTILE_FLOOR", "80"))
+    if vix is None:
+        return base
+    from src.risk.regime import RiskRegime, get_regime  # noqa: PLC0415
+    if get_regime(vix) == RiskRegime.BEAR:
+        bear_floor = max(base, float(os.getenv("SHORTLIST_QUINTILE_FLOOR_BEAR", "85")))
+        log.info(
+            "[SHORTLIST] BEAR regime (VIX=%.1f) — quintile floor raised %.0f -> %.0f",
+            vix, base, bear_floor,
+        )
+        return bear_floor
+    return base
+
+
 # ── Result dataclass ──────────────────────────────────────────────────────────
 
 @dataclass
@@ -308,8 +330,9 @@ def fetch_transcript(symbol: str, api_key: str, max_chars: int = 3000) -> str:
 def build_shortlist(
     candidates: List[Dict[str, Any]],
     watchlist: Optional[List[str]] = None,
-    quintile_floor: float = _QUINTILE_FLOOR,
+    quintile_floor: Optional[float] = None,
     max_symbols: int = 20,
+    vix: Optional[float] = None,
 ) -> List[str]:
     """Select symbols for Claude analysis: top quintile + explicit watchlist.
 
@@ -321,12 +344,19 @@ def build_shortlist(
         candidates:     List of ScanResult dicts with 'symbol' and
                         'smart_money_score' (0–1).
         watchlist:      Additional symbols to include regardless of score.
-        quintile_floor: Minimum quant score (0–100) to include.
+        quintile_floor: Minimum quant score (0–100) to include. When None
+                        (default), resolved via effective_quintile_floor(vix):
+                        80 in NORMAL, raised to 85 in BEAR regime.
         max_symbols:    Hard cap on shortlist size (cost control).
+        vix:            Current VIX level for regime-scaled floor resolution.
+                        Ignored when quintile_floor is passed explicitly.
 
     Returns:
         Deduplicated list of ticker symbols.
     """
+    if quintile_floor is None:
+        quintile_floor = effective_quintile_floor(vix)
+
     selected: List[str] = []
     seen: set = set()
 

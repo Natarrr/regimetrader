@@ -1,8 +1,8 @@
-# Path: regime_trader/risk/regime.py
+# Path: src/risk/regime.py
 """Shared RiskRegime — single source of truth for VIX thresholds.
 
-NORMAL      : VIX < 25   — full positioning
-BEAR        : 25 ≤ VIX < 30 — graduated caution
+NORMAL      : VIX < 20   — full positioning
+BEAR        : 20 ≤ VIX < 30 — graduated caution
 CAPITULATION: VIX ≥ 30   — distressed alpha regime (NOT a blind kill-switch)
 
 At CAPITULATION, the pipeline does NOT go silent. It surfaces the highest-quality,
@@ -19,8 +19,12 @@ import math
 from enum import Enum
 from typing import List
 
-_BEAR_THRESHOLD = 25.0
+_BEAR_THRESHOLD = 20.0
 _CAPITULATION_THRESHOLD = 30.0
+
+# Public aliases — consumers must import these instead of hardcoding VIX levels.
+BEAR_THRESHOLD = _BEAR_THRESHOLD
+CAPITULATION_THRESHOLD = _CAPITULATION_THRESHOLD
 _BETA_MAX = 1.2       # assets above this beta are filtered in CAPITULATION
 _PIOTROSKI_FLOOR = 0.70   # normalized score threshold (≈ F-Score ≥ 7)
 _DE_CEILING = 0.30    # normalized D/E — bottom quintile qualifier

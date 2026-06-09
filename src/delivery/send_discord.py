@@ -61,7 +61,10 @@ except ImportError:
     _HAS_SCORE_BAR = False
 
 try:
-    from regime_trader.risk.regime import (  # noqa: E402
+    # Canonical thresholds live in src.risk.regime (the old regime_trader.risk.regime
+    # module was deleted in the src migration — importing it left _HAS_REGIME
+    # permanently False and silently routed display through the legacy fallback).
+    from src.risk.regime import (  # noqa: E402
         get_regime as _get_regime,
     )
     _HAS_REGIME = True
@@ -93,7 +96,9 @@ _FACTOR_DISPLAY: List[tuple] = [
 ]
 
 # ── VIX regime thresholds ─────────────────────────────────────────────────────
-_VIX_BEARISH = 25.0
+# Fallback constants only — the live path uses src.risk.regime via _get_regime.
+# Keep aligned with src/risk/regime.py BEAR_THRESHOLD (bear starts at 20).
+_VIX_BEARISH = 20.0
 _VIX_STABLE = 15.0
 
 # ── Sector normalisation ───────────────────────────────────────────────────────
@@ -1371,7 +1376,7 @@ def build_institutional_payload(top_lists: dict) -> list:
 
     if kill_switch or vix >= 30:
         strategy = "CAPITULATION DISTRESSED REGIME / HIGH-QUALITY ANCHORS ONLY"
-    elif vix >= 25:
+    elif vix >= _VIX_BEARISH:
         strategy = "DEFENSIVE / GRADUATED POSITIONING ACTIVATED"
     else:
         strategy = "NORMAL / FULL POSITIONING"
@@ -1453,7 +1458,7 @@ def build_institutional_payload(top_lists: dict) -> list:
     ])
 
     color = _COLOR_RED if (kill_switch or vix >= 30) else (
-        _COLOR_ORANGE if vix >= 25 else _COLOR_GREEN
+        _COLOR_ORANGE if vix >= _VIX_BEARISH else _COLOR_GREEN
     )
 
     def _wrap_code(text: str) -> str:

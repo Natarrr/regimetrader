@@ -252,12 +252,12 @@ class TestCIIsolation:
         assert c is not None
         assert c._api_key == "test-key"
 
-    def test_fmp_max_rps_defaults_to_30(self, tmp_path, monkeypatch):
-        """Default changed from 20 to 30 RPS (Ultimate cap 50; 30 leaves headroom)."""
+    def test_fmp_max_rps_defaults_to_50(self, tmp_path, monkeypatch):
+        """Default is 50 RPS — saturates the FMP Ultimate cap (3,000 calls/min)."""
         monkeypatch.setenv("FMP_API_KEY", "k")
         monkeypatch.delenv("FMP_MAX_RPS", raising=False)
         c = FMPClient(api_key="k", cache_root=tmp_path / "fmp")
-        assert c._min_delay == pytest.approx(1.0 / 30.0, abs=1e-6)
+        assert c._min_delay == pytest.approx(1.0 / 50.0, abs=1e-6)
 
 
 # ── Pipeline wrappers ───────────────────────────────────────────────────────
@@ -496,3 +496,75 @@ class TestGetQualityScore:
             score, raw = client.get_quality_score("AAPL")
         assert score == round(5 / 8, 4)
         assert raw == 5
+
+
+# ── PEAD: get_earnings_surprise (stable/ "earnings") ────────────────────────
+
+class TestGetEarningsSurprise:
+    """PEAD surprise from stable/ "earnings" (epsActual vs epsEstimated).
+
+    The legacy "earnings-surprises" route is HTTP 404 on stable/; the earnings
+    calendar mixes future scheduled rows (epsActual=None) with past reports.
+    """
+
+    @staticmethod
+    def _days_ago(n: int) -> str:
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc).date() - timedelta(days=n)).isoformat()
+
+    @staticmethod
+    def _days_ahead(n: int) -> str:
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc).date() + timedelta(days=n)).isoformat()
+
+    def test_beat_returns_positive_pct_and_days(self, client):
+        rows = [{"date": self._days_ago(10), "epsActual": 1.15, "epsEstimated": 1.00}]
+        with patch.object(client, "_get", return_value=rows):
+            pct, days = client.get_earnings_surprise("AAPL")
+        assert pct == pytest.approx(0.15, abs=1e-6)
+        assert days == 10
+
+    def test_future_scheduled_row_skipped(self, client):
+        rows = [
+            {"date": self._days_ahead(30), "epsActual": None, "epsEstimated": 1.20},
+            {"date": self._days_ago(45), "epsActual": 0.90, "epsEstimated": 1.00},
+        ]
+        with patch.object(client, "_get", return_value=rows):
+            pct, days = client.get_earnings_surprise("AAPL")
+        assert pct == pytest.approx(-0.10, abs=1e-6)
+        assert days == 45
+
+    def test_miss_returns_negative_pct(self, client):
+        rows = [{"date": self._days_ago(5), "epsActual": -0.50, "epsEstimated": 1.00}]
+        with patch.object(client, "_get", return_value=rows):
+            pct, _ = client.get_earnings_surprise("AAPL")
+        assert pct == pytest.approx(-1.50, abs=1e-6)
+
+    def test_zero_estimate_returns_none(self, client):
+        """Pre-revenue: |estimate| < 1e-6 → undefined surprise %, no fallthrough."""
+        rows = [{"date": self._days_ago(5), "epsActual": 0.10, "epsEstimated": 0.0}]
+        with patch.object(client, "_get", return_value=rows):
+            assert client.get_earnings_surprise("AAPL") == (None, 0)
+
+    def test_empty_response_returns_none(self, client):
+        with patch.object(client, "_get", return_value=[]):
+            assert client.get_earnings_surprise("AAPL") == (None, 0)
+
+    def test_result_cached_no_second_get(self, client):
+        rows = [{"date": self._days_ago(10), "epsActual": 1.15, "epsEstimated": 1.00}]
+        with patch.object(client, "_get", return_value=rows) as mock_get:
+            first = client.get_earnings_surprise("AAPL")
+            second = client.get_earnings_surprise("AAPL")
+        assert mock_get.call_count == 1
+        assert first == second
+
+    def test_endpoint_error_soft_fails(self, client):
+        from regime_trader.services.fmp_client import FMPEndpointError
+        with patch.object(client, "_get", side_effect=FMPEndpointError("earnings", 404)):
+            assert client.get_earnings_surprise("AAPL") == (None, 0)
+
+    def test_endpoint_not_quarantined(self, client):
+        """Regression: "earnings" must never join _DEAD_ENDPOINTS by accident."""
+        from regime_trader.services.fmp_client import _DEAD_ENDPOINTS
+        assert "earnings" not in _DEAD_ENDPOINTS
+        assert "earnings-surprises" not in _DEAD_ENDPOINTS  # removed — no longer called

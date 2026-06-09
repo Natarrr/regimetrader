@@ -355,3 +355,68 @@ class TestQualityPiotroski:
         score2, raw2 = score_quality_piotroski(42)
         assert score1 == 0.0
         assert score2 == 0.0
+
+
+class TestScoreQualityPiotroskiLiveFieldShape:
+    """Live stable/ratios-ttm + ratios-ttm-bulk shape (verified 2026-06-09):
+    leverage field is debtToEquityRatioTTM, and there is NO returnOnAssets*
+    field — ROA derives via DuPont (netProfitMargin × assetTurnover).
+    Regression for the bug that pinned the whole universe at raw=4.
+    """
+
+    def _live_quality_ratios(self) -> dict:
+        """Field names exactly as the live FMP payload — all 8 points pass."""
+        return {
+            "operatingProfitMarginTTM": 0.15,    # point 3
+            "debtToEquityRatioTTM":     0.30,    # points 4+5 (live name)
+            "currentRatioTTM":          2.0,     # point 6
+            "grossProfitMarginTTM":     0.45,    # point 7
+            "netProfitMarginTTM":       0.08,    # point 8
+            "assetTurnoverTTM":         0.80,    # DuPont: ROA = 0.08*0.8 = 0.064 → points 1+2
+        }
+
+    def test_live_shape_reaches_8_of_8(self):
+        score, raw = score_quality_piotroski(self._live_quality_ratios())
+        assert raw == 8, "live payload must be able to award all 8 points"
+        assert score == 1.0
+
+    def test_dupont_roa_derivation(self):
+        """npm=0.10 × at=0.8 → ROA=0.08 > 0.05: points 1 and 2 awarded."""
+        ratios = {"netProfitMarginTTM": 0.10, "assetTurnoverTTM": 0.80}
+        score, raw = score_quality_piotroski(ratios)
+        # npm 0.10 > 0.05 (point 8) + derived ROA points 1, 2 = 3 points
+        assert raw == 3
+
+    def test_dupont_skipped_when_explicit_roa_present(self):
+        """Explicit returnOnAssetsTTM wins over the DuPont derivation."""
+        ratios = {
+            "returnOnAssetsTTM":  -0.10,   # explicit negative ROA: points 1+2 fail
+            "netProfitMarginTTM":  0.10,   # would derive positive ROA if used
+            "assetTurnoverTTM":    0.80,
+        }
+        score, raw = score_quality_piotroski(ratios)
+        assert raw == 1  # only point 8 (npm > 0.05)
+
+    def test_unsuffixed_bulk_shape_scores_identically(self):
+        """Future-proofing: a bulk snapshot without the TTM suffix scores the same."""
+        unsuffixed = {
+            "operatingProfitMargin": 0.15,
+            "debtToEquityRatio":     0.30,
+            "currentRatio":          2.0,
+            "grossProfitMargin":     0.45,
+            "netProfitMargin":       0.08,
+            "assetTurnover":         0.80,
+        }
+        score, raw = score_quality_piotroski(unsuffixed)
+        assert raw == 8
+        assert score == 1.0
+
+    def test_live_name_preferred_over_legacy(self):
+        """When both leverage names exist the live one wins."""
+        ratios = {
+            "debtToEquityRatioTTM": 0.30,   # live: passes points 4+5
+            "debtEquityRatioTTM":   5.00,   # legacy: would fail both
+            "currentRatioTTM":      2.0,
+        }
+        score, raw = score_quality_piotroski(ratios)
+        assert raw == 3  # points 4, 5, 6

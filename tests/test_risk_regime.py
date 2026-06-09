@@ -12,14 +12,25 @@ from src.risk.regime import (
 
 
 class TestRiskRegime:
-    def test_normal_below_25(self):
-        assert get_regime(20.0) == RiskRegime.NORMAL
+    def test_normal_below_20(self):
+        assert get_regime(19.9) == RiskRegime.NORMAL
 
-    def test_bear_25_to_30(self):
+    def test_bear_starts_exactly_at_20(self):
+        """Spec: Bear regime = VIX 20–29 — boundary is inclusive."""
+        assert get_regime(20.0) == RiskRegime.BEAR
+
+    def test_bear_20_to_30(self):
+        assert get_regime(22.0) == RiskRegime.BEAR
         assert get_regime(27.5) == RiskRegime.BEAR
+        assert get_regime(29.9) == RiskRegime.BEAR
 
     def test_capitulation_at_30(self):
         assert get_regime(30.0) == RiskRegime.CAPITULATION
+
+    def test_public_threshold_aliases_exported(self):
+        from src.risk.regime import BEAR_THRESHOLD, CAPITULATION_THRESHOLD
+        assert BEAR_THRESHOLD == 20.0
+        assert CAPITULATION_THRESHOLD == 30.0
 
     def test_capitulation_above_40(self):
         assert get_regime(42.0) == RiskRegime.CAPITULATION

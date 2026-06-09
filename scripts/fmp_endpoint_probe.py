@@ -79,6 +79,8 @@ PROBES: list[tuple[str, str, dict]] = [
                                             {"symbol": TICKER, "year": "2024", "quarter": "4", "page": 0, "limit": 5}),
     # ── Insider (scoring uses /search sub-path, not bare insider-trading) ──
     ("insider-trading/search [US]",         "insider-trading/search",       {"symbol": TICKER, "page": 0, "limit": 5}),
+    # ── PEAD: get_earnings_surprise() source — expect epsActual/epsEstimated/date ──
+    ("earnings [PEAD]",                     "earnings",                     {"symbol": TICKER, "limit": 4}),
     # ── Quarantined (should stay 404) ──────────────────────────────────────
     ("earnings-surprises [DEAD]",           "earnings-surprises",           {"symbol": TICKER, "limit": 1}),
     ("upgrades-downgrades [DEAD]",          "upgrades-downgrades",          {"symbol": TICKER, "page": 0}),

@@ -28,16 +28,18 @@ _MAX_SECTOR_WEIGHT = 0.30   # max 30% per sector
 _MAX_TURNOVER = 0.20        # max 20% portfolio turnover
 
 TARGET_VOL: dict[str, float] = {
-    "normal": 0.15,   # VIX < 25
-    "bear":   0.10,   # VIX 25–30
+    "normal": 0.15,   # VIX < BEAR_THRESHOLD (20)
+    "bear":   0.10,   # BEAR_THRESHOLD <= VIX < 30
     "panic":  0.05,   # VIX >= 30
 }
 
 
 def _vix_regime(vix: float) -> str:
-    if vix >= 30:
+    # Thresholds sourced from src.risk.regime — the single source of truth.
+    from src.risk.regime import BEAR_THRESHOLD, CAPITULATION_THRESHOLD  # noqa: PLC0415
+    if vix >= CAPITULATION_THRESHOLD:
         return "panic"
-    if vix >= 25:
+    if vix >= BEAR_THRESHOLD:
         return "bear"
     return "normal"
 

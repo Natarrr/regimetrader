@@ -354,18 +354,21 @@ def _apply_vix_overlay(score: float, vix: Optional[float]) -> float:
     This overlay converts relative scores to absolute risk-adjusted scores by
     dampening all signals when the VIX regime is elevated.
 
-      VIX ≥ 40 (Crash)  : ×0.20 — almost nothing should be HIGH BUY in a crash
-      VIX ≥ 30 (Panic)  : ×0.50 — significant systemic risk, dampen all buys
-      VIX ≥ 25 (Bear)   : ×0.80 — elevated risk, mild penalty
-      VIX  < 25 (Normal) : ×1.00 — no adjustment
+      VIX ≥ 40 (Crash)        : ×0.20 — almost nothing should be HIGH BUY in a crash
+      VIX ≥ 30 (Panic)        : ×0.50 — significant systemic risk, dampen all buys
+      VIX ≥ BEAR_THRESHOLD    : ×0.80 — elevated risk, mild penalty (bear at 20)
+      VIX  < BEAR_THRESHOLD   : ×1.00 — no adjustment
+
+    Thresholds sourced from src.risk.regime — the single source of truth.
     """
     if vix is None:
         return score
+    from src.risk.regime import BEAR_THRESHOLD, CAPITULATION_THRESHOLD  # noqa: PLC0415
     if vix >= 40:
         return score * 0.20
-    if vix >= 30:
+    if vix >= CAPITULATION_THRESHOLD:
         return score * 0.50
-    if vix >= 25:
+    if vix >= BEAR_THRESHOLD:
         return score * 0.80
     return score
 
@@ -673,6 +676,17 @@ def _read_vix(log_dir: Path) -> Optional[float]:
     return None
 
 
+def _vix_regime_label(vix: Optional[float]) -> str:
+    """Canonical regime label from src.risk.regime, or 'UNKNOWN' when VIX absent."""
+    if vix is None:
+        return "UNKNOWN"
+    try:
+        from src.risk.regime import get_regime  # noqa: PLC0415
+        return get_regime(float(vix)).value
+    except Exception:
+        return "UNKNOWN"
+
+
 def _log_kill_switch_state(
     kill_switch: bool,
     vix: float,
@@ -684,18 +698,44 @@ def _log_kill_switch_state(
     Written at scoring time so the audit trail covers every run, including
     those where the switch is inactive.  Consumers can grep for
     kill_switch_active=true to reconstruct suppression history.
+    Regime transitions (e.g. NORMAL -> BEAR) are surfaced as warnings so they
+    are visible in CI logs without parsing the NDJSON.
     """
     import os  # noqa: PLC0415 — local import avoids circular dep at module level
+    regime = _vix_regime_label(vix)
     entry = {
         "event": "kill_switch_state",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "kill_switch_active": kill_switch,
         "vix": round(vix, 2),
+        "vix_regime": regime,
         "run_id": run_id or os.environ.get("GITHUB_RUN_ID", "local"),
     }
     audit_log = log_dir / "kill_switch_audit.ndjson"
+
+    # Tolerant read of the previous entry — detect regime transitions.
+    prev_regime: Optional[str] = None
+    needs_newline = False
+    try:
+        if audit_log.exists():
+            raw = audit_log.read_text(encoding="utf-8")
+            # A truncated last line (crashed writer) must not corrupt the next
+            # append — terminate it before writing the new entry.
+            needs_newline = bool(raw) and not raw.endswith("\n")
+            lines = raw.strip().splitlines()
+            if lines:
+                prev_regime = json.loads(lines[-1]).get("vix_regime")
+    except Exception as exc:
+        log.warning("kill_switch_audit.ndjson read failed (non-fatal): %s", exc)
+    if prev_regime and prev_regime != regime:
+        log.warning(
+            "REGIME TRANSITION: %s -> %s (VIX %.1f)", prev_regime, regime, vix
+        )
+
     try:
         with audit_log.open("a", encoding="utf-8") as fh:
+            if needs_newline:
+                fh.write("\n")
             fh.write(json.dumps(entry) + "\n")
     except Exception as exc:
         log.warning("kill_switch_audit.ndjson write failed (non-fatal): %s", exc)
@@ -971,6 +1011,7 @@ def generate(
         "schema_version":           "9f-piog-eu",
         "piotroski_eu_gate_active": True,
         "vix":             current_vix,
+        "vix_regime":      _vix_regime_label(current_vix),
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
         "spy_momentum_regime":   spy_momentum_regime,

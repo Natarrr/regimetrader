@@ -16,9 +16,9 @@ name: hybrid_pipeline
 #   - schedule: 08:30 ET on trading days (12:30 UTC)
 #   - workflow_dispatch with optional overrides
 #
-# VIX regime thresholds (aligned with _apply_vix_overlay kill-switch):
+# VIX regime thresholds (aligned with src/risk/regime.py BEAR_THRESHOLD=20):
 #   VIX < 20  → Normal
-#   VIX 20-29 → Bear (graduated caution — reduce shortlist floor to 85)
+#   VIX 20-29 → Bear (graduated caution — quintile floor raised 80 → 85)
 #   VIX ≥ 30  → Panic/Crash (kill-switch: BUY signals suppressed)
 #
 # Cost model (transcript-aware, claude-sonnet-4-6):
@@ -59,6 +59,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.11"
   SHORTLIST_QUINTILE_FLOOR: ${{ github.event.inputs.shortlist_floor || '80' }}
+  SHORTLIST_QUINTILE_FLOOR_BEAR: ${{ vars.SHORTLIST_QUINTILE_FLOOR_BEAR || '85' }}
 
 jobs:
   # ── 1. Load & reshape quant data ────────────────────────────────────────────
@@ -166,6 +167,24 @@ jobs:
           else:
               data = json.loads(src.read_text())
               top_buys = data.get("top_buys", [])
+
+              # Regime-scaled quintile floor (aligned with src/risk/regime.py):
+              # BEAR (20 <= VIX < 30) raises the floor from 80 to 85 so only
+              # the strongest candidates reach Claude during graduated caution.
+              try:
+                  vix = float(data.get("vix") or 0)
+              except (TypeError, ValueError):
+                  vix = 0.0
+              base_floor = float(os.environ.get("SHORTLIST_QUINTILE_FLOOR", "80"))
+              bear_floor = float(os.environ.get("SHORTLIST_QUINTILE_FLOOR_BEAR", "85"))
+              floor = max(base_floor, bear_floor) if 20 <= vix < 30 else base_floor
+              n_before = len(top_buys)
+              top_buys = [
+                  e for e in top_buys
+                  if float(e.get("final_score") or 0) * 100 >= floor
+              ]
+              print(f"[FLOOR AUDIT] vix={vix:.1f} floor={floor:.0f} kept={len(top_buys)}/{n_before}")
+
               shortlist = [e["ticker"] for e in top_buys]
               candidates = [
                   {
