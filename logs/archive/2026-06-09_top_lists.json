@@ -1,0 +1,3514 @@
+{
+  "generated_at": "2026-06-09T03:33:24.471982+00:00",
+  "source_run_id": "27181925815",
+  "ticker_count": 160,
+  "weights": {
+    "insider_conviction": 0.394738,
+    "insider_breadth": 0.197368,
+    "news_buzz": 0.065789,
+    "momentum_long": 0.197368,
+    "volume_attention": 0.039474,
+    "quality_piotroski": 0.105263
+  },
+  "weights_version": "v2.2-global",
+  "schema_version": "9f-piog-eu",
+  "piotroski_eu_gate_active": true,
+  "vix": 18.92,
+  "kill_switch": false,
+  "vix_multiplier": 1.0,
+  "spy_momentum_regime": "NORMAL",
+  "momentum_multiplier": 1.0,
+  "top_buys": [
+    {
+      "ticker": "TXN",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 264746053700.0,
+      "raw_score": 0.6982,
+      "final_score": 0.4189,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 55,
+      "factors": {
+        "insider_conviction": 0.8448,
+        "insider_breadth": 0.3175,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.578,
+        "momentum_long": 0.7133,
+        "volume_attention": 0.4564,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0003,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 168163416.09,
+      "momentum_spy_relative": 0.264556,
+      "volume_spike": 1.1609,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.06777,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.209169
+    },
+    {
+      "ticker": "JNJ",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 558859491987.0,
+      "raw_score": 0.6944,
+      "final_score": 0.4166,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 46,
+      "factors": {
+        "insider_conviction": 0.7264,
+        "insider_breadth": 0.7909,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.7919,
+        "momentum_long": 0.6551,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2981,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 141271982.24,
+      "momentum_spy_relative": 0.196464,
+      "volume_spike": 0.8452,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.067669,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.214056
+    },
+    {
+      "ticker": "AMD",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 799532098000.0,
+      "raw_score": 0.6866,
+      "final_score": 0.412,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 35,
+      "factors": {
+        "insider_conviction": 0.5205,
+        "insider_breadth": 0.571,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 1.0,
+        "momentum_long": 1.0,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 1580181.03,
+      "momentum_spy_relative": 2.6865040000000002,
+      "volume_spike": 0.7992,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.063685,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.209169
+    },
+    {
+      "ticker": "ETR",
+      "sector": "Utilities",
+      "cap_tier": "large",
+      "market_cap": 49502147029.0,
+      "raw_score": 0.6823,
+      "final_score": 0.4094,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 110,
+      "factors": {
+        "insider_conviction": 0.7789,
+        "insider_breadth": 0.7813,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.1252,
+        "momentum_long": 0.5959,
+        "volume_attention": 0.6233,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.29,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 19170509.45,
+      "momentum_spy_relative": 0.127238,
+      "volume_spike": 1.2197,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.061431,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.104664
+    },
+    {
+      "ticker": "PFE",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 146019652800.0,
+      "raw_score": 0.6799,
+      "final_score": 0.4079,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 56,
+      "factors": {
+        "insider_conviction": 0.8474,
+        "insider_breadth": 0.741,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.8361,
+        "momentum_long": 0.3749,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2488,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 91299598.98,
+      "momentum_spy_relative": -0.131345,
+      "volume_spike": 0.8186,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.060132,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.214056
+    }
+  ],
+  "top_buys_usa": [
+    {
+      "ticker": "TXN",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 264746053700.0,
+      "raw_score": 0.6982,
+      "final_score": 0.4189,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 55,
+      "factors": {
+        "insider_conviction": 0.8448,
+        "insider_breadth": 0.3175,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.578,
+        "momentum_long": 0.7133,
+        "volume_attention": 0.4564,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0003,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 168163416.09,
+      "momentum_spy_relative": 0.264556,
+      "volume_spike": 1.1609,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.06777,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.209169
+    },
+    {
+      "ticker": "JNJ",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 558859491987.0,
+      "raw_score": 0.6944,
+      "final_score": 0.4166,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 46,
+      "factors": {
+        "insider_conviction": 0.7264,
+        "insider_breadth": 0.7909,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.7919,
+        "momentum_long": 0.6551,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2981,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 141271982.24,
+      "momentum_spy_relative": 0.196464,
+      "volume_spike": 0.8452,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.067669,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.214056
+    },
+    {
+      "ticker": "AMD",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 799532098000.0,
+      "raw_score": 0.6866,
+      "final_score": 0.412,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 35,
+      "factors": {
+        "insider_conviction": 0.5205,
+        "insider_breadth": 0.571,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 1.0,
+        "momentum_long": 1.0,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 1580181.03,
+      "momentum_spy_relative": 2.6865040000000002,
+      "volume_spike": 0.7992,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.063685,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.209169
+    },
+    {
+      "ticker": "ETR",
+      "sector": "Utilities",
+      "cap_tier": "large",
+      "market_cap": 49502147029.0,
+      "raw_score": 0.6823,
+      "final_score": 0.4094,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 110,
+      "factors": {
+        "insider_conviction": 0.7789,
+        "insider_breadth": 0.7813,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.1252,
+        "momentum_long": 0.5959,
+        "volume_attention": 0.6233,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.29,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 19170509.45,
+      "momentum_spy_relative": 0.127238,
+      "volume_spike": 1.2197,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.061431,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.104664
+    },
+    {
+      "ticker": "PFE",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 146019652800.0,
+      "raw_score": 0.6799,
+      "final_score": 0.4079,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 56,
+      "factors": {
+        "insider_conviction": 0.8474,
+        "insider_breadth": 0.741,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.8361,
+        "momentum_long": 0.3749,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2488,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 91299598.98,
+      "momentum_spy_relative": -0.131345,
+      "volume_spike": 0.8186,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.060132,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.214056
+    }
+  ],
+  "top_buys_europe": [],
+  "top_buys_asia": [],
+  "top_buys_us": [
+    {
+      "ticker": "TXN",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 264746053700.0,
+      "raw_score": 0.6982,
+      "final_score": 0.4189,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 55,
+      "factors": {
+        "insider_conviction": 0.8448,
+        "insider_breadth": 0.3175,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.578,
+        "momentum_long": 0.7133,
+        "volume_attention": 0.4564,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0003,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 168163416.09,
+      "momentum_spy_relative": 0.264556,
+      "volume_spike": 1.1609,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.06777,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.209169
+    },
+    {
+      "ticker": "JNJ",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 558859491987.0,
+      "raw_score": 0.6944,
+      "final_score": 0.4166,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 46,
+      "factors": {
+        "insider_conviction": 0.7264,
+        "insider_breadth": 0.7909,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.7919,
+        "momentum_long": 0.6551,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2981,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 141271982.24,
+      "momentum_spy_relative": 0.196464,
+      "volume_spike": 0.8452,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.067669,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.214056
+    },
+    {
+      "ticker": "AMD",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 799532098000.0,
+      "raw_score": 0.6866,
+      "final_score": 0.412,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 35,
+      "factors": {
+        "insider_conviction": 0.5205,
+        "insider_breadth": 0.571,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 1.0,
+        "momentum_long": 1.0,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 1580181.03,
+      "momentum_spy_relative": 2.6865040000000002,
+      "volume_spike": 0.7992,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.063685,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.209169
+    },
+    {
+      "ticker": "ETR",
+      "sector": "Utilities",
+      "cap_tier": "large",
+      "market_cap": 49502147029.0,
+      "raw_score": 0.6823,
+      "final_score": 0.4094,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 110,
+      "factors": {
+        "insider_conviction": 0.7789,
+        "insider_breadth": 0.7813,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.1252,
+        "momentum_long": 0.5959,
+        "volume_attention": 0.6233,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.29,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 19170509.45,
+      "momentum_spy_relative": 0.127238,
+      "volume_spike": 1.2197,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.061431,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.104664
+    },
+    {
+      "ticker": "PFE",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 146019652800.0,
+      "raw_score": 0.6799,
+      "final_score": 0.4079,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 56,
+      "factors": {
+        "insider_conviction": 0.8474,
+        "insider_breadth": 0.741,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.8361,
+        "momentum_long": 0.3749,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2488,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 91299598.98,
+      "momentum_spy_relative": -0.131345,
+      "volume_spike": 0.8186,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.060132,
+      "portfolio_weight_method": "sharpe",
+      "sector_weight_contribution": 0.214056
+    }
+  ],
+  "top_buys_eu": [],
+  "weights_global": {
+    "insider_conviction": 0.28,
+    "insider_breadth": 0.14,
+    "congress": 0.0,
+    "news_sentiment": 0.13,
+    "news_buzz": 0.04,
+    "momentum_long": 0.17,
+    "volume_attention": 0.04,
+    "analyst_consensus": 0.1,
+    "quality_piotroski": 0.05,
+    "analyst_revision": 0.02,
+    "price_target_upside": 0.03,
+    "transcript_tone": 0.0
+  },
+  "weights_us": {
+    "insider_conviction": 0.3,
+    "insider_breadth": 0.15,
+    "congress": 0.04,
+    "news_sentiment": 0.1,
+    "news_buzz": 0.05,
+    "momentum_long": 0.15,
+    "volume_attention": 0.03,
+    "analyst_consensus": 0.1,
+    "quality_piotroski": 0.08
+  },
+  "shadow_top_buys": [
+    {
+      "ticker": "TXN",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 264746053700.0,
+      "raw_score": 0.6982,
+      "final_score": 0.4189,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 55,
+      "factors": {
+        "insider_conviction": 0.8448,
+        "insider_breadth": 0.3175,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.578,
+        "momentum_long": 0.7133,
+        "volume_attention": 0.4564,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0003,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 168163416.09,
+      "momentum_spy_relative": 0.264556,
+      "volume_spike": 1.1609,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
+    },
+    {
+      "ticker": "JNJ",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 558859491987.0,
+      "raw_score": 0.6944,
+      "final_score": 0.4166,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 46,
+      "factors": {
+        "insider_conviction": 0.7264,
+        "insider_breadth": 0.7909,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.7919,
+        "momentum_long": 0.6551,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2981,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 141271982.24,
+      "momentum_spy_relative": 0.196464,
+      "volume_spike": 0.8452,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
+    },
+    {
+      "ticker": "AMD",
+      "sector": "Information Technology",
+      "cap_tier": "large",
+      "market_cap": 799532098000.0,
+      "raw_score": 0.6866,
+      "final_score": 0.412,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 35,
+      "factors": {
+        "insider_conviction": 0.5205,
+        "insider_breadth": 0.571,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 1.0,
+        "momentum_long": 1.0,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.0,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 1580181.03,
+      "momentum_spy_relative": 2.6865040000000002,
+      "volume_spike": 0.7992,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
+    },
+    {
+      "ticker": "ETR",
+      "sector": "Utilities",
+      "cap_tier": "large",
+      "market_cap": 49502147029.0,
+      "raw_score": 0.6823,
+      "final_score": 0.4094,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 110,
+      "factors": {
+        "insider_conviction": 0.7789,
+        "insider_breadth": 0.7813,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.1252,
+        "momentum_long": 0.5959,
+        "volume_attention": 0.6233,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.29,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 19170509.45,
+      "momentum_spy_relative": 0.127238,
+      "volume_spike": 1.2197,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
+    },
+    {
+      "ticker": "PFE",
+      "sector": "Healthcare",
+      "cap_tier": "large",
+      "market_cap": 146019652800.0,
+      "raw_score": 0.6799,
+      "final_score": 0.4079,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 56,
+      "factors": {
+        "insider_conviction": 0.8474,
+        "insider_breadth": 0.741,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.8361,
+        "momentum_long": 0.3749,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.2488,
+        "quality_piotroski": 0.6667,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 91299598.98,
+      "momentum_spy_relative": -0.131345,
+      "volume_spike": 0.8186,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US"
+    }
+  ],
+  "mid_caps": [
+    {
+      "ticker": "TTD",
+      "sector": "Communication Services",
+      "cap_tier": "mid",
+      "market_cap": 9134206018.0,
+      "raw_score": 0.5166,
+      "final_score": 0.31,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 24,
+      "factors": {
+        "insider_conviction": 1.0,
+        "insider_breadth": 0.0005,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.214,
+        "momentum_long": 0.0,
+        "volume_attention": 0.0602,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 1.0,
+        "quality_piotroski": 1.0,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": true,
+        "missing_sources": [
+          "congress",
+          "news_sentiment",
+          "momentum_long",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "fmp"
+      },
+      "news_source": "none",
+      "insider_usd": 197872097.59,
+      "momentum_spy_relative": -0.908153,
+      "volume_spike": 1.0212,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
+    },
+    {
+      "ticker": "MOS",
+      "sector": "Materials",
+      "cap_tier": "mid",
+      "market_cap": 6795561249.0,
+      "raw_score": 0.1825,
+      "final_score": 0.0,
+      "badge": "WATCHLIST",
+      "region": "US",
+      "weights_set": "US",
+      "ceo_buy": false,
+      "form4_count": 25,
+      "factors": {
+        "insider_conviction": 0.0,
+        "insider_breadth": 0.747,
+        "congress": 0.0,
+        "news_sentiment": 0.0,
+        "news_buzz": 0.0,
+        "momentum_long": 0.0,
+        "volume_attention": 0.0,
+        "analyst_consensus": 0.0,
+        "analyst_revision": 0.0,
+        "price_target_upside": 0.7452,
+        "quality_piotroski": 0.3333,
+        "transcript_tone": 0.0
+      },
+      "validation_metadata": {
+        "is_complete": false,
+        "missing_sources": [
+          "insider_conviction",
+          "congress",
+          "news_sentiment",
+          "volume_attention",
+          "analyst_consensus",
+          "analyst_revision",
+          "transcript_tone"
+        ]
+      },
+      "quiver_evidence": {
+        "congress": {
+          "purchases": 0,
+          "sales": 0,
+          "net": 0,
+          "recency_days": null,
+          "representatives": []
+        },
+        "source": "s3",
+        "insider_source": "none"
+      },
+      "news_source": "none",
+      "insider_usd": 0.0,
+      "momentum_spy_relative": -0.593487,
+      "volume_spike": 0.7427,
+      "market": "USA",
+      "esg_score": null,
+      "esg_e_score": null,
+      "esg_flag": false,
+      "momentum_multiplier": 1.0,
+      "pipeline": "US",
+      "congress_boost": 0.0,
+      "portfolio_weight": 0.0,
+      "portfolio_weight_method": "n/a",
+      "sector_weight_contribution": 0.0
+    }
+  ],
+  "small_caps": [],
+  "sector_picks": {
+    "Energy": [
+      {
+        "ticker": "BKR",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 64325734313.0,
+        "raw_score": 0.6436,
+        "final_score": 0.3862,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 51,
+        "factors": {
+          "insider_conviction": 0.7056,
+          "insider_breadth": 0.5765,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.1252,
+          "momentum_long": 0.8758,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.3944,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 13628853.12,
+        "momentum_spy_relative": 0.45462100000000005,
+        "volume_spike": 0.6648,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.041327,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.041327
+      },
+      {
+        "ticker": "HAL",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 33833608268.0,
+        "raw_score": 0.6192,
+        "final_score": 0.3715,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 49,
+        "factors": {
+          "insider_conviction": 0.8699,
+          "insider_breadth": 0.0,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.1252,
+          "momentum_long": 1.0,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.103,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 27057508.76,
+        "momentum_spy_relative": 0.709902,
+        "volume_spike": 0.6528,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      },
+      {
+        "ticker": "EOG",
+        "sector": "Energy",
+        "cap_tier": "large",
+        "market_cap": 74647954350.0,
+        "raw_score": 0.5372,
+        "final_score": 0.3223,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 48,
+        "factors": {
+          "insider_conviction": 0.5854,
+          "insider_breadth": 0.495,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.3392,
+          "momentum_long": 0.4095,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2593,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 2446568.51,
+        "momentum_spy_relative": -0.09101700000000001,
+        "volume_spike": 0.5486,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Materials": [
+      {
+        "ticker": "PPG",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 25160952000.0,
+        "raw_score": 0.6369,
+        "final_score": 0.3821,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 162,
+        "factors": {
+          "insider_conviction": 0.9451,
+          "insider_breadth": 0.4234,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.3392,
+          "momentum_long": 0.267,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.3985,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 33487997.59,
+        "momentum_spy_relative": -0.257685,
+        "volume_spike": 0.7353,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.037774,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.074768
+      },
+      {
+        "ticker": "FCX",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 91874450972.0,
+        "raw_score": 0.6354,
+        "final_score": 0.3812,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 29,
+        "factors": {
+          "insider_conviction": 0.558,
+          "insider_breadth": 0.9483,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.2829,
+          "momentum_long": 0.7052,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.356,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 1000908.02,
+        "momentum_spy_relative": 0.255127,
+        "volume_spike": 0.8412,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.036994,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.074768
+      },
+      {
+        "ticker": "NUE",
+        "sector": "Materials",
+        "cap_tier": "large",
+        "market_cap": 57709569400.0,
+        "raw_score": 0.5845,
+        "final_score": 0.3507,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 58,
+        "factors": {
+          "insider_conviction": 0.6576,
+          "insider_breadth": 0.2195,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.214,
+          "momentum_long": 1.0,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.0481,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 7501695.81,
+        "momentum_spy_relative": 0.640219,
+        "volume_spike": 0.909,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Industrials": [
+      {
+        "ticker": "PCAR",
+        "sector": "Industrials",
+        "cap_tier": "large",
+        "market_cap": 62333340963.0,
+        "raw_score": 0.6777,
+        "final_score": 0.4066,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 112,
+        "factors": {
+          "insider_conviction": 0.8349,
+          "insider_breadth": 0.7769,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.214,
+          "momentum_long": 0.4799,
+          "volume_attention": 0.4019,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2911,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 38116014.53,
+        "momentum_spy_relative": -0.008564000000000016,
+        "volume_spike": 1.1415,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.059005,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.108219
+      },
+      {
+        "ticker": "CAT",
+        "sector": "Industrials",
+        "cap_tier": "large",
+        "market_cap": 421777662680.0,
+        "raw_score": 0.6588,
+        "final_score": 0.3953,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 75,
+        "factors": {
+          "insider_conviction": 0.7096,
+          "insider_breadth": 0.3862,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.5264,
+          "momentum_long": 1.0,
+          "volume_attention": 0.0068,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.0733,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 91610588.29,
+        "momentum_spy_relative": 1.308702,
+        "volume_spike": 1.0023,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.049213,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.108219
+      },
+      {
+        "ticker": "MMM",
+        "sector": "Industrials",
+        "cap_tier": "large",
+        "market_cap": 80243123105.0,
+        "raw_score": 0.6289,
+        "final_score": 0.3773,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 44,
+        "factors": {
+          "insider_conviction": 0.9144,
+          "insider_breadth": 0.5479,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.0,
+          "momentum_long": 0.2766,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2092,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 84387324.94,
+        "momentum_spy_relative": -0.24632,
+        "volume_spike": 0.7239,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Consumer Discretionary": [
+      {
+        "ticker": "ULTA",
+        "sector": "Consumer Discretionary",
+        "cap_tier": "large",
+        "market_cap": 19895453131.0,
+        "raw_score": 0.6794,
+        "final_score": 0.4076,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 11,
+        "factors": {
+          "insider_conviction": 1.0,
+          "insider_breadth": 0.2306,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.7919,
+          "momentum_long": 0.3923,
+          "volume_attention": 1.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 1.0,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 67638674.0,
+        "momentum_spy_relative": -0.110995,
+        "volume_spike": 2.1239,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.059872,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.059872
+      },
+      {
+        "ticker": "ORLY",
+        "sector": "Consumer Discretionary",
+        "cap_tier": "large",
+        "market_cap": 73772216333.0,
+        "raw_score": 0.5942,
+        "final_score": 0.3565,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 35,
+        "factors": {
+          "insider_conviction": 0.7945,
+          "insider_breadth": 0.5663,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.0,
+          "momentum_long": 0.3,
+          "volume_attention": 0.998,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.6157,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 32228478.27,
+        "momentum_spy_relative": -0.219046,
+        "volume_spike": 1.3515,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      },
+      {
+        "ticker": "HD",
+        "sector": "Consumer Discretionary",
+        "cap_tier": "large",
+        "market_cap": 308817007582.0,
+        "raw_score": 0.525,
+        "final_score": 0.315,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 53,
+        "factors": {
+          "insider_conviction": 0.661,
+          "insider_breadth": 0.6539,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.4644,
+          "momentum_long": 0.1736,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.5864,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 34659047.52,
+        "momentum_spy_relative": -0.36692199999999997,
+        "volume_spike": 0.9776,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Consumer Staples": [
+      {
+        "ticker": "KO",
+        "sector": "Consumer Staples",
+        "cap_tier": "large",
+        "market_cap": 342219451528.0,
+        "raw_score": 0.6582,
+        "final_score": 0.3949,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 56,
+        "factors": {
+          "insider_conviction": 0.8189,
+          "insider_breadth": 0.699,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.7542,
+          "momentum_long": 0.3744,
+          "volume_attention": 0.0829,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.309,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 179091229.3,
+        "momentum_spy_relative": -0.132042,
+        "volume_spike": 1.0292,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.048866,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.048866
+      },
+      {
+        "ticker": "CHD",
+        "sector": "Consumer Staples",
+        "cap_tier": "large",
+        "market_cap": 22592572451.0,
+        "raw_score": 0.6111,
+        "final_score": 0.3667,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 109,
+        "factors": {
+          "insider_conviction": 0.9968,
+          "insider_breadth": 0.506,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.0,
+          "momentum_long": 0.241,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.3346,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 45280727.09,
+        "momentum_spy_relative": -0.28796,
+        "volume_spike": 0.9925,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      },
+      {
+        "ticker": "CL",
+        "sector": "Consumer Staples",
+        "cap_tier": "large",
+        "market_cap": 68872293912.0,
+        "raw_score": 0.5763,
+        "final_score": 0.3458,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 31,
+        "factors": {
+          "insider_conviction": 0.7408,
+          "insider_breadth": 0.6898,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.3868,
+          "momentum_long": 0.2641,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.3433,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 19195860.11,
+        "momentum_spy_relative": -0.26094,
+        "volume_spike": 0.925,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Healthcare": [
+      {
+        "ticker": "JNJ",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 558859491987.0,
+        "raw_score": 0.6944,
+        "final_score": 0.4166,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 46,
+        "factors": {
+          "insider_conviction": 0.7264,
+          "insider_breadth": 0.7909,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.7919,
+          "momentum_long": 0.6551,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2981,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 141271982.24,
+        "momentum_spy_relative": 0.196464,
+        "volume_spike": 0.8452,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.067669,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.214056
+      },
+      {
+        "ticker": "PFE",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 146019652800.0,
+        "raw_score": 0.6799,
+        "final_score": 0.4079,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 56,
+        "factors": {
+          "insider_conviction": 0.8474,
+          "insider_breadth": 0.741,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.8361,
+          "momentum_long": 0.3749,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2488,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 91299598.98,
+        "momentum_spy_relative": -0.131345,
+        "volume_spike": 0.8186,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.060132,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.214056
+      },
+      {
+        "ticker": "MRK",
+        "sector": "Healthcare",
+        "cap_tier": "large",
+        "market_cap": 295193414081.0,
+        "raw_score": 0.6613,
+        "final_score": 0.3968,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 66,
+        "factors": {
+          "insider_conviction": 0.7519,
+          "insider_breadth": 0.5412,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.6784,
+          "momentum_long": 0.6404,
+          "volume_attention": 0.4178,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.3257,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 91828138.95,
+        "momentum_spy_relative": 0.17927800000000002,
+        "volume_spike": 1.1473,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.050514,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.214056
+      }
+    ],
+    "Financials": [
+      {
+        "ticker": "BLK",
+        "sector": "Financials",
+        "cap_tier": "large",
+        "market_cap": 154422115238.0,
+        "raw_score": 0.6511,
+        "final_score": 0.3907,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 68,
+        "factors": {
+          "insider_conviction": 0.7616,
+          "insider_breadth": 0.6624,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.6222,
+          "momentum_long": 0.3724,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.7454,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 51985199.5,
+        "momentum_spy_relative": -0.134291,
+        "volume_spike": 0.955,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.045226,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.045226
+      },
+      {
+        "ticker": "AXP",
+        "sector": "Financials",
+        "cap_tier": "large",
+        "market_cap": 213090548149.0,
+        "raw_score": 0.612,
+        "final_score": 0.3672,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 54,
+        "factors": {
+          "insider_conviction": 0.688,
+          "insider_breadth": 0.8211,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.6608,
+          "momentum_long": 0.328,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.5322,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 37783612.35,
+        "momentum_spy_relative": -0.1863,
+        "volume_spike": 0.7944,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      },
+      {
+        "ticker": "MS",
+        "sector": "Financials",
+        "cap_tier": "large",
+        "market_cap": 334762929560.0,
+        "raw_score": 0.609,
+        "final_score": 0.3654,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 48,
+        "factors": {
+          "insider_conviction": 0.4651,
+          "insider_breadth": 0.7151,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.6608,
+          "momentum_long": 0.6869,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.0597,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 372499.68,
+        "momentum_spy_relative": 0.233669,
+        "volume_spike": 0.8881,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Information Technology": [
+      {
+        "ticker": "TXN",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 264746053700.0,
+        "raw_score": 0.6982,
+        "final_score": 0.4189,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 55,
+        "factors": {
+          "insider_conviction": 0.8448,
+          "insider_breadth": 0.3175,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.578,
+          "momentum_long": 0.7133,
+          "volume_attention": 0.4564,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.0003,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 168163416.09,
+        "momentum_spy_relative": 0.264556,
+        "volume_spike": 1.1609,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.06777,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.209169
+      },
+      {
+        "ticker": "AMD",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 799532098000.0,
+        "raw_score": 0.6866,
+        "final_score": 0.412,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 35,
+        "factors": {
+          "insider_conviction": 0.5205,
+          "insider_breadth": 0.571,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 1.0,
+          "momentum_long": 1.0,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.0,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 1580181.03,
+        "momentum_spy_relative": 2.6865040000000002,
+        "volume_spike": 0.7992,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.063685,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.209169
+      },
+      {
+        "ticker": "MU",
+        "sector": "Information Technology",
+        "cap_tier": "large",
+        "market_cap": 1070531534400.0,
+        "raw_score": 0.6449,
+        "final_score": 0.3869,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 25,
+        "factors": {
+          "insider_conviction": 0.546,
+          "insider_breadth": 0.1798,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 1.0,
+          "momentum_long": 1.0,
+          "volume_attention": 0.646,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.0,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 7821723.4,
+        "momentum_spy_relative": 5.648105999999999,
+        "volume_spike": 1.2277,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.041933,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.209169
+      }
+    ],
+    "Communication Services": [
+      {
+        "ticker": "META",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 1485967579878.0,
+        "raw_score": 0.6657,
+        "final_score": 0.3994,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 81,
+        "factors": {
+          "insider_conviction": 1.0,
+          "insider_breadth": 0.1246,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 1.0,
+          "momentum_long": 0.1818,
+          "volume_attention": 1.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.9424,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 8377925206.6,
+        "momentum_spy_relative": -0.357373,
+        "volume_spike": 1.3661,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.052766,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.093833
+      },
+      {
+        "ticker": "RDDT",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 32961397144.0,
+        "raw_score": 0.6431,
+        "final_score": 0.3859,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 57,
+        "factors": {
+          "insider_conviction": 0.7781,
+          "insider_breadth": 0.4518,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.5532,
+          "momentum_long": 0.5328,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.7892,
+          "quality_piotroski": 1.0,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 12765884.79,
+        "momentum_spy_relative": 0.05339399999999997,
+        "volume_spike": 0.8792,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.041067,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.093833
+      },
+      {
+        "ticker": "DIS",
+        "sector": "Communication Services",
+        "cap_tier": "large",
+        "market_cap": 171688884491.0,
+        "raw_score": 0.6153,
+        "final_score": 0.3692,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 37,
+        "factors": {
+          "insider_conviction": 0.8119,
+          "insider_breadth": 0.7079,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.5532,
+          "momentum_long": 0.2456,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.9189,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 89201242.92,
+        "momentum_spy_relative": -0.282755,
+        "volume_spike": 0.7969,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Real Estate": [
+      {
+        "ticker": "PSA",
+        "sector": "Real Estate",
+        "cap_tier": "large",
+        "market_cap": 54608771288.0,
+        "raw_score": 0.6126,
+        "final_score": 0.3676,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 41,
+        "factors": {
+          "insider_conviction": 1.0,
+          "insider_breadth": 0.4355,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.0,
+          "momentum_long": 0.3126,
+          "volume_attention": 0.0,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.158,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "volume_attention",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 444710335.17,
+        "momentum_spy_relative": -0.204291,
+        "volume_spike": 0.6812,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      },
+      {
+        "ticker": "SPG",
+        "sector": "Real Estate",
+        "cap_tier": "large",
+        "market_cap": 67236629880.0,
+        "raw_score": 0.5681,
+        "final_score": 0.3409,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 59,
+        "factors": {
+          "insider_conviction": 0.5713,
+          "insider_breadth": 0.6983,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.2829,
+          "momentum_long": 0.5006,
+          "volume_attention": 0.4348,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.1054,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 920968.8,
+        "momentum_spy_relative": 0.01575399999999999,
+        "volume_spike": 1.1533,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      },
+      {
+        "ticker": "AVB",
+        "sector": "Real Estate",
+        "cap_tier": "large",
+        "market_cap": 26616605920.0,
+        "raw_score": 0.5673,
+        "final_score": 0.3404,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 37,
+        "factors": {
+          "insider_conviction": 0.663,
+          "insider_breadth": 0.912,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.1252,
+          "momentum_long": 0.2095,
+          "volume_attention": 0.1487,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2131,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 3911775.24,
+        "momentum_spy_relative": -0.325003,
+        "volume_spike": 1.0522,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ],
+    "Utilities": [
+      {
+        "ticker": "ETR",
+        "sector": "Utilities",
+        "cap_tier": "large",
+        "market_cap": 49502147029.0,
+        "raw_score": 0.6823,
+        "final_score": 0.4094,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 110,
+        "factors": {
+          "insider_conviction": 0.7789,
+          "insider_breadth": 0.7813,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.1252,
+          "momentum_long": 0.5959,
+          "volume_attention": 0.6233,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.29,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 19170509.45,
+        "momentum_spy_relative": 0.127238,
+        "volume_spike": 1.2197,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.061431,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.104664
+      },
+      {
+        "ticker": "PPL",
+        "sector": "Utilities",
+        "cap_tier": "large",
+        "market_cap": 26595585297.0,
+        "raw_score": 0.6474,
+        "final_score": 0.3884,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 55,
+        "factors": {
+          "insider_conviction": 0.9059,
+          "insider_breadth": 0.5572,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.2829,
+          "momentum_long": 0.3366,
+          "volume_attention": 0.6233,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.4682,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 26559265.64,
+        "momentum_spy_relative": -0.17619600000000002,
+        "volume_spike": 1.2198,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.043233,
+        "portfolio_weight_method": "sharpe",
+        "sector_weight_contribution": 0.104664
+      },
+      {
+        "ticker": "AEP",
+        "sector": "Utilities",
+        "cap_tier": "large",
+        "market_cap": 68976190850.0,
+        "raw_score": 0.6155,
+        "final_score": 0.3693,
+        "badge": "WATCHLIST",
+        "region": "US",
+        "weights_set": "US",
+        "ceo_buy": false,
+        "form4_count": 58,
+        "factors": {
+          "insider_conviction": 0.7195,
+          "insider_breadth": 0.562,
+          "congress": 0.0,
+          "news_sentiment": 0.0,
+          "news_buzz": 0.2829,
+          "momentum_long": 0.5278,
+          "volume_attention": 0.6982,
+          "analyst_consensus": 0.0,
+          "analyst_revision": 0.0,
+          "price_target_upside": 0.2958,
+          "quality_piotroski": 0.6667,
+          "transcript_tone": 0.0
+        },
+        "validation_metadata": {
+          "is_complete": true,
+          "missing_sources": [
+            "congress",
+            "news_sentiment",
+            "analyst_consensus",
+            "analyst_revision",
+            "transcript_tone"
+          ]
+        },
+        "quiver_evidence": {
+          "congress": {
+            "purchases": 0,
+            "sales": 0,
+            "net": 0,
+            "recency_days": null,
+            "representatives": []
+          },
+          "source": "s3",
+          "insider_source": "fmp"
+        },
+        "news_source": "none",
+        "insider_usd": 15412502.27,
+        "momentum_spy_relative": 0.04757999999999998,
+        "volume_spike": 1.2459,
+        "market": "USA",
+        "esg_score": null,
+        "esg_e_score": null,
+        "esg_flag": false,
+        "momentum_multiplier": 1.0,
+        "pipeline": "US",
+        "congress_boost": 0.0,
+        "portfolio_weight": 0.0,
+        "portfolio_weight_method": "n/a",
+        "sector_weight_contribution": 0.0
+      }
+    ]
+  },
+  "dead_factors_detail": {
+    "congress": {
+      "dead": true,
+      "dead_days": 3
+    }
+  }
+}
