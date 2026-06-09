@@ -377,20 +377,22 @@ class TestSchemaGate:
         assert v["is_complete"] is True
         assert len(v["missing_sources"]) == 7
 
-    def test_ticker_with_nine_zeros_is_incomplete(self):
-        # >8 zero factors → is_complete = False: indicates genuine price/EDGAR failure.
+    def test_ticker_with_eleven_zeros_is_incomplete(self):
+        # >10 zero factors → is_complete = False: indicates genuine price/EDGAR failure.
+        # Threshold is 10 (original 6 + 4 always-absent INTL factors for US tickers).
         rows = [_make_schema_row(
             insider_conviction_score=0.0, insider_breadth_score=0.0,
             congress_score=0.0, news_sentiment_score=0.0, news_buzz_score=0.0,
             volume_attention_score=0.0, analyst_consensus_score=0.0,
             momentum_long_score=0.0, quality_piotroski_score=0.0,
+            analyst_revision_score=0.0, price_target_upside_score=0.0,
         )]
         complete_rows = [_make_schema_row(f"T{i}") for i in range(4)]
         all_rows = rows + complete_rows
         _schema_gate(all_rows, universe_size=len(all_rows))
         v = all_rows[0]["_validation"]
         assert v["is_complete"] is False
-        assert len(v["missing_sources"]) == 9
+        assert len(v["missing_sources"]) == 11
 
     def test_ticker_with_three_zeros_is_now_complete(self):
         # With threshold=4, 3 zero factors is within tolerance (normal pattern).
@@ -423,8 +425,8 @@ class TestSchemaGate:
         assert "insider_breadth" in all_rows[0]["_validation"]["missing_sources"]
 
     def test_circuit_breaker_fires_when_below_5_percent(self):
-        # Threshold=8: tickers need >8 zeros to be "incomplete".
-        # 5 tickers, all with 9 missing factors → 0 complete < 40% of 5
+        # Threshold=10: tickers need >10 zeros to be "incomplete".
+        # 5 tickers, all with 11 missing factors → 0 complete < 40% of 5
         rows = [
             _make_schema_row(
                 f"T{i}",
@@ -432,6 +434,7 @@ class TestSchemaGate:
                 congress_score=0.0, news_sentiment_score=0.0, news_buzz_score=0.0,
                 volume_attention_score=0.0, analyst_consensus_score=0.0,
                 momentum_long_score=0.0, quality_piotroski_score=0.0,
+                analyst_revision_score=0.0, price_target_upside_score=0.0,
             )
             for i in range(5)
         ]
@@ -452,12 +455,13 @@ class TestSchemaGate:
         _schema_gate(rows, universe_size=10)
 
     def test_circuit_breaker_raises_pipeline_integrity_error_type(self):
-        # Need >8 zeros to be incomplete; use 9 zero factors.
+        # Need >10 zeros to be incomplete; use 11 zero factors.
         rows = [_make_schema_row(
             insider_conviction_score=0.0, insider_breadth_score=0.0,
             congress_score=0.0, news_sentiment_score=0.0, news_buzz_score=0.0,
             volume_attention_score=0.0, analyst_consensus_score=0.0,
             momentum_long_score=0.0, quality_piotroski_score=0.0,
+            analyst_revision_score=0.0, price_target_upside_score=0.0,
         )]
         with pytest.raises(PipelineIntegrityError):
             _schema_gate(rows, universe_size=1)
