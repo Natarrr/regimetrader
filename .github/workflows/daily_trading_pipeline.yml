@@ -492,9 +492,9 @@ jobs:
               log.error("ticker_registry.json not found — aborting")
               sys.exit(1)
           registry = json.loads(reg_path.read_text(encoding="utf-8"))
-          eu_tickers   = [e["ticker"] for e in registry.get("europe", [])]
-          asia_tickers = [e["ticker"] for e in registry.get("asia", [])]
-          log.info("Registry: %d EU + %d Asia tickers", len(eu_tickers), len(asia_tickers))
+          eu_tickers   = [e["ticker"] for e in registry.get("europe", []) + registry.get("europe_mid", [])]
+          asia_tickers = [e["ticker"] for e in registry.get("asia",   []) + registry.get("asia_mid",   [])]
+          log.info("Registry: %d EU + %d Asia tickers (incl. mid/small)", len(eu_tickers), len(asia_tickers))
 
           payload: list[dict] = []
           for market_enum, tickers in [
@@ -512,7 +512,11 @@ jobs:
               entries = fetcher.prepare(tickers)
               for entry in entries:
                   # raw_factors keys use _score suffix — compatible with StrategyEngine
-                  payload.append({"ticker": entry.ticker, "metrics": entry.raw_factors})
+                  payload.append({
+                      "ticker":  entry.ticker,
+                      "metrics": entry.raw_factors,
+                      "sector":  entry.raw_factors.get("sector", "") or getattr(entry, "sector", ""),
+                  })
               log.info("%s: fetched %d entries", market_enum.value, len(entries))
 
           out_path = Path("logs/raw_intl_fetcher_output.json")

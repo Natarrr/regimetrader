@@ -207,6 +207,7 @@ class FMPFetcher(BaseMarketFetcher):
                 momentum_long_score, volume_attention_score,
             )
         mktcap_from_quote = float(quote.get("marketCap", 0) or 0)
+        sector_from_quote = (quote.get("sector") or "").strip()
 
         # ── 2. News — sentiment + buzz ────────────────────────────────────────
         news_sentiment_score: Optional[float] = None
@@ -489,6 +490,8 @@ class FMPFetcher(BaseMarketFetcher):
             "insider_usd":               float(total_usd) if total_usd else 0.0,
             "earnings_surprise_pct":     _eps_pct_intl,
             "earnings_surprise_days":    _eps_days_intl,
+            # Company meta (sector for Discord sector heatmap)
+            "sector":                    sector_from_quote,
         }
 
 

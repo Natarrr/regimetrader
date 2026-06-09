@@ -491,6 +491,27 @@ def _compute_laureate_regime() -> Optional[dict]:
         if bars.empty:
             return None
 
+        def _market_snapshot(b) -> dict:
+            """Extract {price, pct_1d, pct_12m} from a bars DataFrame."""
+            if b is None or b.empty or len(b) < 2:
+                return {}
+            closes = b["Close"].dropna()
+            if len(closes) < 2:
+                return {}
+            price   = float(closes.iloc[-1])
+            pct_1d  = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
+            pct_12m = None
+            if len(closes) >= 252:
+                pct_12m = round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1)
+            return {"price": price, "pct_1d": pct_1d, "pct_12m": pct_12m}
+
+        spy_snap = _market_snapshot(bars)
+        try:
+            qqq_bars = MarketData.get_historical_bars("QQQ", years_back=2)
+            qqq_snap = _market_snapshot(qqq_bars)
+        except Exception:
+            qqq_snap = {}
+
         fe = FeatureEngineer()
         features, returns, meta = fe.build(bars)
         if len(features) < 60:
@@ -535,6 +556,12 @@ def _compute_laureate_regime() -> Optional[dict]:
             "minsky_icon":     minsky.icon,
             "minsky_n":        minsky.conditions_met,
             "minsky_narrative": minsky.narrative,
+            "spy_price":       spy_snap.get("price"),
+            "spy_pct_1d":      spy_snap.get("pct_1d"),
+            "spy_pct_12m":     spy_snap.get("pct_12m"),
+            "qqq_price":       qqq_snap.get("price"),
+            "qqq_pct_1d":      qqq_snap.get("pct_1d"),
+            "qqq_pct_12m":     qqq_snap.get("pct_12m"),
         }
         _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         _CACHE_FILE.write_text(json.dumps(result))
@@ -732,7 +759,7 @@ def _factor_contribution_line(entry: Dict[str, Any]) -> str:
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
     buckets: Dict[str, List[tuple]] = {}
     for e in entries:
-        raw = (e.get("sector") or "").strip()
+        raw = (e.get("sector") or e.get("factors", {}).get("sector") or "").strip()
         label = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
         ticker = e.get("ticker", "?")
         score = float(e.get("final_score", 0))
@@ -1567,10 +1594,32 @@ def build_payload(
             m_icon   = lr.get("minsky_icon", "✅")
             m_lvl    = lr.get("minsky_level", "CLEAR")
             m_n      = lr.get("minsky_n", 0)
+            def _fmt_pct(v):
+                if v is None:
+                    return "—"
+                arrow = "▲" if v >= 0 else "▼"
+                return f"{arrow}{abs(v):.1f}%"
+
+            spy_p   = lr.get("spy_price")
+            qqq_p   = lr.get("qqq_price")
+            mkt_line = ""
+            if spy_p:
+                spy_str = (
+                    f"SPY `${spy_p:.0f}` "
+                    f"{_fmt_pct(lr.get('spy_pct_1d'))} 1d · {_fmt_pct(lr.get('spy_pct_12m'))} 12m"
+                )
+                qqq_str = (
+                    f"  ·  QQQ `${qqq_p:.0f}` "
+                    f"{_fmt_pct(lr.get('qqq_pct_1d'))} 1d · {_fmt_pct(lr.get('qqq_pct_12m'))} 12m"
+                    if qqq_p else ""
+                )
+                mkt_line = f"\n📈 {spy_str}{qqq_str}"
+
             laureate_line = (
                 f"\n📊 **Laureate: {icon} {state}** · "
                 f"HMM: {hmm} · Mon: {mon} · Vol: {vol} · Scale: {scale:.2f}"
                 f"\nMinsky: {m_icon} {m_lvl} ({m_n}/3)"
+                f"{mkt_line}"
             )
     except Exception as _lr_exc:
         log.debug("Laureate regime line skipped: %s", _lr_exc)
@@ -1795,6 +1844,11 @@ def build_payload(
             "mid_cap":           "🟡 MID ($2B–$10B, Sharpe-max)",
             "small_cap":         "🔴 SMALL ($300M–$2B, min-variance)",
         }
+        vix_note = (
+            f"VIX {float(vix_val):.1f} · overlay ×{float(status.get('vix_multiplier', 1.0)):.2f}"
+            if vix_val is not None else ""
+        )
+        mvo_header = [f"_{vix_note}_"] if vix_note else []
         for pool_key in pool_order:
             pool = mvo_pools.get(pool_key)
             if not pool:
@@ -1802,18 +1856,24 @@ def build_payload(
             positions = pool.get("positions", [])
             if not positions:
                 continue
-            label = pool_labels.get(pool_key, pool_key)
+            label    = pool_labels.get(pool_key, pool_key)
+            method   = pool.get("method", "equal-weight")
+            n_pos    = len(positions)
+            avg_sc   = sum(p.get("final_score", 0) for p in positions) / max(1, n_pos)
+            score_note = f" · avg score: {avg_sc:.3f}" if n_pos > 1 else ""
             pos_strs = [
                 f"`{p['ticker']}` {p.get('allocation', 0) * 100:.1f}%"
                 for p in positions[:6]
                 if (p.get("allocation") or 0) > 0.001
             ]
             if pos_strs:
-                mvo_lines.append(f"{label}: {' · '.join(pos_strs)}")
+                mvo_lines.append(
+                    f"{label} [{method}, {n_pos} pos{score_note}]: {' · '.join(pos_strs)}"
+                )
         if mvo_lines:
             fields.append({
                 "name":   "⚖️ MVO PORTFOLIO ALLOCATION",
-                "value":  _truncate("\n".join(mvo_lines), 1024),
+                "value":  _truncate("\n".join(mvo_header + mvo_lines), 1024),
                 "inline": False,
             })
 

@@ -112,6 +112,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     factors["congress"] = 0.0
     return {
         "ticker":          ticker,
+        "sector":          (raw.get("sector") or "").strip(),
         "final_score":     composite_score,
         "badge":           _badge(composite_score),
         "market":          market,

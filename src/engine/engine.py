@@ -117,6 +117,7 @@ class StrategyEngine:
                 "pipeline":         "INTL",
                 "weight_coverage":  weight_coverage,
                 "_low_coverage":    low_coverage,
+                "sector":           asset.get("sector", ""),
             })
 
         # Sort universe descending by final quantitative output ranking
