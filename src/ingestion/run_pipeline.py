@@ -1240,23 +1240,40 @@ def run(
         ("price-target-consensus", {"symbol": "AAPL"}),
     ]
     _dead_fmp: list = []
+    _auth_failure = False
     from regime_trader.services.fmp_client import FMPEndpointError as _FMPErr  # noqa: PLC0415
     for _ep_path, _ep_params in _FMP_CRITICAL_PROBES:
         try:
             _fmp_client._get(_ep_path, _ep_params)
             log.info("FMP preflight OK: %s", _ep_path)
         except _FMPErr as _fmp_exc:
-            log.error("FMP PREFLIGHT FAIL: %s (HTTP %s)", _fmp_exc.path, _fmp_exc.status)
+            if _fmp_exc.status in (401, 403):
+                # Auth failure — all endpoints will fail, abort immediately.
+                log.critical(
+                    "FMP PREFLIGHT AUTH FAILURE: %s (HTTP %s) — API key invalid or plan expired. "
+                    "Aborting: all factor scores would be zero.",
+                    _fmp_exc.path, _fmp_exc.status,
+                )
+                _auth_failure = True
+                break
+            # 404 — endpoint not in current plan; factor scores 0.0, pipeline continues.
+            log.error(
+                "FMP PREFLIGHT: %s returned HTTP 404 — endpoint may be deprecated. "
+                "Factor will score 0.0 this run. If persistently dead, add to "
+                "_DEAD_ENDPOINTS in fmp_client.py.",
+                _fmp_exc.path,
+            )
             _dead_fmp.append(_ep_path)
         except Exception as _fmp_gen:
             log.warning("FMP preflight probe %s: %s (non-structural — continuing)", _ep_path, _fmp_gen)
+    if _auth_failure:
+        sys.exit(1)
     if _dead_fmp:
-        log.critical(
-            "Aborting pipeline — %d critical FMP endpoint(s) structurally unavailable: %s. "
-            "Proceeding would silently zero these factors across the entire universe.",
+        log.warning(
+            "FMP preflight: %d endpoint(s) unavailable (404) — affected factors zeroed: %s. "
+            "Pipeline continuing; check fmp_health.json for details.",
             len(_dead_fmp), _dead_fmp,
         )
-        sys.exit(1)
 
     # ── EDGAR connectivity preflight ──────────────────────────────────────────
     _ua = os.getenv("EDGAR_USER_AGENT") or "regime-trader-research n.tardy@hotmail.fr"
