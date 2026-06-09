@@ -462,7 +462,7 @@ def _compute_laureate_regime() -> Optional[dict]:
             fetch_10y_yield, fetch_2y_yield, fetch_m2_velocity,
         )
         from backend.quant_models.monetary_pulse import (                      # noqa: PLC0415
-            yield_spread, is_inverted, monetary_regime,
+            yield_spread, monetary_regime,
         )
         from backend.quant_models.valuation_radar import (                     # noqa: PLC0415
             fetch_shiller_cape_series, cape_percentile,
@@ -490,7 +490,6 @@ def _compute_laureate_regime() -> Optional[dict]:
         state = clf.predict_current(features[-40:])
 
         import pandas as pd  # noqa: PLC0415
-        import numpy as np   # noqa: PLC0415
         log_rets = pd.Series(returns)
         garch    = fit_gjr_garch(log_rets)
         vol_reg  = volatility_regime(garch["persistence"])

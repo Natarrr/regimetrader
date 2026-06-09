@@ -110,9 +110,6 @@ class FMPFetcher(BaseMarketFetcher):
             orthogonalize_insider_scores,
         )
         from regime_trader.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
-        from regime_trader.scoring.fundamental_signals import (  # noqa: PLC0415
-            score_fcf_yield, score_amihud_shock, score_pb_value_up, score_roic_quality,
-        )
 
         client = FMPClient(api_key=self._api_key)
         entries: list[TickerEntry] = []

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -144,9 +143,12 @@ def minsky_moment(
         )
     elif n == 2:
         triggered = []
-        if cond1: triggered.append(f"GARCH={garch_persistence:.3f}")
-        if cond2: triggered.append(f"CAPE p{cape_pct:.0f}")
-        if cond3: triggered.append(f"spread {yield_spread_bps:.0f}bps")
+        if cond1:
+            triggered.append(f"GARCH={garch_persistence:.3f}")
+        if cond2:
+            triggered.append(f"CAPE p{cape_pct:.0f}")
+        if cond3:
+            triggered.append(f"spread {yield_spread_bps:.0f}bps")
         level = "WARNING"
         narrative = f"2/3 Minsky conditions: {', '.join(triggered)}"
     elif n == 1:
