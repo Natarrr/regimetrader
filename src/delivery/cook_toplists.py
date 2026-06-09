@@ -79,15 +79,23 @@ def _badge(score: float) -> str:
 
 
 def _build_registry_map(registry_path: Path) -> dict:
-    """Return {ticker: {"market": "EUROPE"|"ASIA", "cap_tier": "large"|"mid"|"small"}} from ticker_registry.json."""
+    """Return {ticker: {"market", "cap_tier", "sector"}} from ticker_registry.json."""
     if not registry_path.exists():
         return {}
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     mapping: dict = {}
     for entry in registry.get("europe", []) + registry.get("europe_mid", []):
-        mapping[entry["ticker"]] = {"market": "EUROPE", "cap_tier": entry.get("cap_tier", "large")}
+        mapping[entry["ticker"]] = {
+            "market":   "EUROPE",
+            "cap_tier": entry.get("cap_tier", "large"),
+            "sector":   entry.get("sector", ""),
+        }
     for entry in registry.get("asia", []) + registry.get("asia_mid", []):
-        mapping[entry["ticker"]] = {"market": "ASIA", "cap_tier": entry.get("cap_tier", "large")}
+        mapping[entry["ticker"]] = {
+            "market":   "ASIA",
+            "cap_tier": entry.get("cap_tier", "large"),
+            "sector":   entry.get("sector", ""),
+        }
     return mapping
 
 
@@ -112,7 +120,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     factors["congress"] = 0.0
     return {
         "ticker":          ticker,
-        "sector":          (raw.get("sector") or "").strip(),
+        "sector":          (raw.get("sector") or _registry_meta.get("sector") or "").strip(),
         "final_score":     composite_score,
         "badge":           _badge(composite_score),
         "market":          market,

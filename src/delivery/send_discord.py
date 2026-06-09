@@ -441,6 +441,49 @@ def get_market_regime(vix: float) -> str:
     return f"VIX `{vix:.1f}` {emoji} **{label}**"
 
 
+def _spy_qqq_snapshot() -> str:
+    """Return a one-line market snapshot for SPY + QQQ, or '' on failure.
+
+    Runs independently of _compute_laureate_regime() so it appears even when
+    the full regime computation (HMM/GARCH/FRED/CAPE) fails.
+    """
+    try:
+        def _snap(bars) -> dict:
+            if bars is None or getattr(bars, "empty", True) or len(bars) < 2:
+                return {}
+            closes = bars["Close"].dropna()
+            if len(closes) < 2:
+                return {}
+            price   = float(closes.iloc[-1])
+            pct_1d  = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
+            pct_12m = round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1) if len(closes) >= 252 else None
+            return {"price": price, "pct_1d": pct_1d, "pct_12m": pct_12m}
+
+        def _fmt(v):
+            if v is None:
+                return "—"
+            return f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
+
+        spy = _snap(MarketData.get_historical_bars("SPY", years_back=2))
+        if not spy:
+            return ""
+        qqq: dict = {}
+        try:
+            qqq = _snap(MarketData.get_historical_bars("QQQ", years_back=2))
+        except Exception:
+            pass
+
+        spy_str = f"SPY `${spy['price']:.0f}` {_fmt(spy.get('pct_1d'))} 1d · {_fmt(spy.get('pct_12m'))} 12m"
+        qqq_str = (
+            f"  ·  QQQ `${qqq['price']:.0f}` {_fmt(qqq.get('pct_1d'))} 1d · {_fmt(qqq.get('pct_12m'))} 12m"
+            if qqq else ""
+        )
+        return f"\n📈 {spy_str}{qqq_str}"
+    except Exception as exc:
+        log.debug("_spy_qqq_snapshot failed: %s", exc)
+        return ""
+
+
 def _compute_laureate_regime() -> Optional[dict]:
     """Compute Laureate 4-state regime (BULL/OVERHEATED/FRAGILE/CRASH) for SPY.
 
@@ -1624,10 +1667,13 @@ def build_payload(
     except Exception as _lr_exc:
         log.debug("Laureate regime line skipped: %s", _lr_exc)
 
+    mkt_snapshot_line = _spy_qqq_snapshot() if not laureate_line else ""
+
     description = (
         f"**[REGIME TRADER]** Daily Market Report — **{date_str}**\n"
         f"{vix_regime}{age_note}"
         f"{laureate_line}"
+        f"{mkt_snapshot_line}"
         f"{alert_block}"
     )
 
