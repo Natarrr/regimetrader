@@ -79,15 +79,15 @@ def _badge(score: float) -> str:
 
 
 def _build_registry_map(registry_path: Path) -> dict:
-    """Return {ticker: "EUROPE"|"ASIA"} from ticker_registry.json."""
+    """Return {ticker: {"market": "EUROPE"|"ASIA", "cap_tier": "large"|"mid"|"small"}} from ticker_registry.json."""
     if not registry_path.exists():
         return {}
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    mapping = {}
-    for entry in registry.get("europe", []):
-        mapping[entry["ticker"]] = "EUROPE"
-    for entry in registry.get("asia", []):
-        mapping[entry["ticker"]] = "ASIA"
+    mapping: dict = {}
+    for entry in registry.get("europe", []) + registry.get("europe_mid", []):
+        mapping[entry["ticker"]] = {"market": "EUROPE", "cap_tier": entry.get("cap_tier", "large")}
+    for entry in registry.get("asia", []) + registry.get("asia_mid", []):
+        mapping[entry["ticker"]] = {"market": "ASIA", "cap_tier": entry.get("cap_tier", "large")}
     return mapping
 
 
@@ -97,7 +97,9 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     Applies VIX dampening to final_score. congress is forced to 0.0 (audit check E).
     """
     ticker = raw.get("ticker", "")
-    market = ticker_market_map.get(ticker, "EUROPE")
+    _registry_meta = ticker_market_map.get(ticker, {"market": "EUROPE", "cap_tier": "large"})
+    market = _registry_meta["market"]
+    cap_tier = _registry_meta["cap_tier"]
     composite_score = float(raw.get("composite_score", 0.0))
     regime = get_regime(vix)
     # CAPITULATION dampening is applied by apply_capitulation_filter() — skip here
@@ -113,6 +115,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         "final_score":     composite_score,
         "badge":           _badge(composite_score),
         "market":          market,
+        "cap_tier":        cap_tier,
         "factors":         factors,
         "pipeline":        raw.get("pipeline", "INTL"),
         "weight_coverage": raw.get("weight_coverage", 0.0),
@@ -130,6 +133,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         "insider_usd":                 float(raw.get("insider_usd") or 0.0),
         "market_cap":                  float(raw.get("market_cap") or 0.0),
         "momentum_spy_relative":       float(raw.get("return_12_1m") or 0.0),
+        "analyst_consensus_score":     factor_snapshots.get("analyst_consensus"),
     }
 
 
@@ -161,12 +165,21 @@ def cook(
 
     top_buys_europe: list = []
     top_buys_asia: list = []
+    eu_mid_small: list = []
+    asia_mid_small: list = []
     for raw_entry in intl_raw:
         normalized = _normalize_intl_entry(raw_entry, ticker_market, vix)
+        cap = normalized["cap_tier"]
         if normalized["market"] == "EUROPE":
-            top_buys_europe.append(normalized)
+            if cap in ("mid", "small"):
+                eu_mid_small.append(normalized)
+            else:
+                top_buys_europe.append(normalized)
         elif normalized["market"] == "ASIA":
-            top_buys_asia.append(normalized)
+            if cap in ("mid", "small"):
+                asia_mid_small.append(normalized)
+            else:
+                top_buys_asia.append(normalized)
         # Tickers absent from registry are silently dropped — registry is authoritative
 
     # ── Capitulation regime gate ──────────────────────────────────────────────
@@ -174,6 +187,10 @@ def cook(
     top_buys_usa    = apply_capitulation_filter(top_buys_usa,    vix)
     top_buys_europe = apply_capitulation_filter(top_buys_europe, vix)
     top_buys_asia   = apply_capitulation_filter(top_buys_asia,   vix)
+    eu_mid_small    = apply_capitulation_filter(eu_mid_small,    vix)
+    asia_mid_small  = apply_capitulation_filter(asia_mid_small,  vix)
+    eu_mid_small    = sorted(eu_mid_small,   key=lambda x: -x["final_score"])[:1]
+    asia_mid_small  = sorted(asia_mid_small, key=lambda x: -x["final_score"])[:1]
     vix_regime      = regime.value
 
     # ── ATR / Batch Floor enrichment ──────────────────────────────────────────
@@ -256,6 +273,8 @@ def cook(
         "eu_overflow":     eu_overflow,
         "asia_overflow":   asia_overflow,
         "mvo_pools":       mvo_pools,
+        "eu_mid_small":    eu_mid_small,
+        "asia_mid_small":  asia_mid_small,
         "vix":             vix,
         "vix_regime":      vix_regime,
         "kill_switch":     kill_switch,

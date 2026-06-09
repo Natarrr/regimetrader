@@ -70,13 +70,18 @@ FACTOR_FIELDS: Dict[str, str] = {
     "price_target_upside": "price_target_upside_score",
     "quality_piotroski":   "quality_piotroski_score",
     "transcript_tone":     "transcript_tone_score",
+    # EU/Asia fundamental value + quality signals (v2.3)
+    "fcf_yield":           "fcf_yield_score",
+    "amihud_shock":        "amihud_shock_score",
+    "pb_value_up":         "pb_value_up_score",
+    "roic_quality":        "roic_quality_score",
 }
 
 # Schema gate: a ticker is "incomplete" when more than this many factors are
 # zero (i.e. missing / dead API).  Incomplete tickers are scored but flagged;
 # they are NOT excluded from ranking — exclusion would distort cross-sectional
 # normalization.  Instead, validation_metadata carries the signal to consumers.
-_SCHEMA_MISSING_THRESHOLD = 6   # >6 zero factors → is_complete = False
+_SCHEMA_MISSING_THRESHOLD = 8   # >8 zero factors → is_complete = False (raised from 6: 4 new INTL factors may be None for US tickers)
 # Rationale: after RT-QA-2026-REV6 (FIX 1+2), analyst_consensus and news_sentiment
 # now correctly return 0.0 when absent (instead of the phantom 0.5 they returned
 # before). The structurally-zero factor set for a healthy large-cap ticker is now:

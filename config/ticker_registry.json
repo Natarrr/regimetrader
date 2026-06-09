@@ -11,6 +11,16 @@
     {"ticker": "AZN.L",   "name": "AstraZeneca",   "sector": "Health Care",             "cap_tier": "large", "exchange": "LSE"},
     {"ticker": "NOVN.SW", "name": "Novartis",      "sector": "Health Care",             "cap_tier": "large", "exchange": "SWX"}
   ],
+  "europe_mid": [
+    {"ticker": "ASM.AS",  "name": "ASM International", "sector": "Information Technology", "cap_tier": "mid", "exchange": "AMS"},
+    {"ticker": "UCB.BR",  "name": "UCB",               "sector": "Health Care",             "cap_tier": "mid", "exchange": "BRU"},
+    {"ticker": "KPN.AS",  "name": "KPN",               "sector": "Communication Services",  "cap_tier": "mid", "exchange": "AMS"},
+    {"ticker": "DANO.PA", "name": "Danone",             "sector": "Consumer Staples",        "cap_tier": "mid", "exchange": "EPA"},
+    {"ticker": "RWE.DE",  "name": "RWE",               "sector": "Utilities",               "cap_tier": "mid", "exchange": "XETRA"},
+    {"ticker": "BAYN.DE", "name": "Bayer",             "sector": "Health Care",             "cap_tier": "mid", "exchange": "XETRA"},
+    {"ticker": "VOD.L",   "name": "Vodafone",          "sector": "Communication Services",  "cap_tier": "mid", "exchange": "LSE"},
+    {"ticker": "BNP.PA",  "name": "BNP Paribas",      "sector": "Financials",              "cap_tier": "mid", "exchange": "EPA"}
+  ],
   "asia": [
     {"ticker": "7203.T",   "name": "Toyota",       "sector": "Consumer Discretionary",  "cap_tier": "large", "exchange": "TSE"},
     {"ticker": "9984.T",   "name": "SoftBank",     "sector": "Communication Services",  "cap_tier": "large", "exchange": "TSE"},
@@ -22,5 +32,15 @@
     {"ticker": "2318.HK",  "name": "Ping An HK",  "sector": "Financials",              "cap_tier": "large", "exchange": "HKEX"},
     {"ticker": "TCS.NS",   "name": "TCS",          "sector": "Information Technology",  "cap_tier": "large", "exchange": "NSE"},
     {"ticker": "RIL.NS",   "name": "Reliance",     "sector": "Energy",                  "cap_tier": "large", "exchange": "NSE"}
+  ],
+  "asia_mid": [
+    {"ticker": "4661.T",   "name": "Oriental Land", "sector": "Consumer Discretionary",  "cap_tier": "mid", "exchange": "TSE"},
+    {"ticker": "6501.T",   "name": "Hitachi",       "sector": "Industrials",             "cap_tier": "mid", "exchange": "TSE"},
+    {"ticker": "003550.KS","name": "LG Corp",       "sector": "Industrials",             "cap_tier": "mid", "exchange": "KRX"},
+    {"ticker": "1928.HK",  "name": "Sands China",  "sector": "Consumer Discretionary",  "cap_tier": "mid", "exchange": "HKEX"},
+    {"ticker": "2382.HK",  "name": "Sunny Optical", "sector": "Information Technology", "cap_tier": "mid", "exchange": "HKEX"},
+    {"ticker": "INFY.NS",  "name": "Infosys",       "sector": "Information Technology",  "cap_tier": "mid", "exchange": "NSE"},
+    {"ticker": "WIPRO.NS", "name": "Wipro",         "sector": "Information Technology",  "cap_tier": "mid", "exchange": "NSE"},
+    {"ticker": "3659.T",   "name": "Nexon",         "sector": "Communication Services",  "cap_tier": "mid", "exchange": "TSE"}
   ]
 }

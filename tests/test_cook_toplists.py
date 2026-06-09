@@ -185,14 +185,14 @@ def test_badge_watchlist(cook_mod):
 
 def test_registry_map_europe(cook_mod, registry):
     m = cook_mod._build_registry_map(registry)
-    assert m["SAP.DE"] == "EUROPE"
-    assert m["ASML.AS"] == "EUROPE"
+    assert m["SAP.DE"]["market"] == "EUROPE"
+    assert m["ASML.AS"]["market"] == "EUROPE"
 
 
 def test_registry_map_asia(cook_mod, registry):
     m = cook_mod._build_registry_map(registry)
-    assert m["7203.T"] == "ASIA"
-    assert m["9984.T"] == "ASIA"
+    assert m["7203.T"]["market"] == "ASIA"
+    assert m["9984.T"]["market"] == "ASIA"
 
 
 def test_registry_map_missing_file(cook_mod, tmp_path):

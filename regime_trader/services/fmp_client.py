@@ -391,9 +391,16 @@ class FMPClient:
 
         cutoff = (datetime.now(timezone.utc) -
                   timedelta(days=lookback_days)).date().isoformat()
-        data = self._get("insider-trading/search",
-                         {"symbol": ticker, "page": 0, "limit": 500},
-                         bucket="insider") or []
+        symbols_to_try = [ticker]
+        if "." in ticker:
+            symbols_to_try.append(ticker.split(".")[0])
+        data: list = []
+        for sym in symbols_to_try:
+            data = self._get("insider-trading/search",
+                             {"symbol": sym, "page": 0, "limit": 500},
+                             bucket="insider") or []
+            if data:
+                break
 
         total_usd = 0.0
         most_recent_days = 0
@@ -796,6 +803,36 @@ class FMPClient:
         if result:
             self._cache_write("ratios", ticker, result)
         return result
+
+    def get_enterprise_value(self, ticker: str) -> Optional[float]:
+        """Most recent enterprise value in USD from stable/enterprise-values.
+
+        Falls back to base symbol for dotted EU/Asia tickers (e.g., ASML.AS → ASML).
+        Returns None when FMP has no coverage (not 0.0 — absence is distinct from zero EV).
+
+        Reference: Damodaran (2006) — FCF Yield denominator.
+        """
+        if not self._api_key:
+            return None
+        cached = self._cache_read("ev", ticker)
+        if cached is not None:
+            return float(cached) if cached else None
+
+        symbols_to_try = [ticker]
+        if "." in ticker:
+            symbols_to_try.append(ticker.split(".")[0])
+
+        for sym in symbols_to_try:
+            data = self._get("enterprise-values", {"symbol": sym, "limit": 1},
+                             bucket="key_metrics") or []
+            if data and isinstance(data, list):
+                ev = data[0].get("enterpriseValue")
+                if ev is not None:
+                    ev_float = float(ev) or None
+                    self._cache_write("ev", ticker, ev_float)
+                    return ev_float
+        self._cache_write("ev", ticker, None)
+        return None
 
     def get_quality_score(self, ticker: str) -> tuple[float, int]:
         """Piotroski F-score quality gate from cached ratios-ttm data.

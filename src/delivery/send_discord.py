@@ -282,6 +282,7 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
     if is_intl:
         # EU / Asia: congress structurally absent — omit entirely
         # AC (analyst_consensus) carries redistributed weight — include
+        # v2.3: FCF/AMH/PB/ROI added for EU/Asia fundamental value + quality
         labels = [
             ("insider_conviction",  "IC"),
             ("insider_breadth",     "IB"),
@@ -292,6 +293,10 @@ def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
             ("analyst_consensus",   "AC"),
             ("analyst_revision",    "AR"),
             ("price_target_upside", "PT"),
+            ("fcf_yield",           "FCF"),
+            ("amihud_shock",        "AMH"),
+            ("pb_value_up",         "PB"),
+            ("roic_quality",        "ROI"),
         ]
     else:
         # US: full 9-factor display including congress
@@ -424,6 +429,109 @@ def get_market_regime(vix: float) -> str:
     else:
         label, emoji = "NORMAL", "🟢"
     return f"VIX `{vix:.1f}` {emoji} **{label}**"
+
+
+def _compute_laureate_regime() -> Optional[dict]:
+    """Compute Laureate 4-state regime (BULL/OVERHEATED/FRAGILE/CRASH) for SPY.
+
+    Pipeline:
+        1. SPY bars → FeatureEngineer → RegimeClassifier (HMM)
+        2. GJR-GARCH persistence on SPY log returns
+        3. FRED: 10Y-2Y yield spread + M2 velocity
+        4. Shiller CAPE percentile
+        5. classify_regime() → BULL/OVERHEATED/FRAGILE/CRASH
+        6. minsky_moment() → CRITICAL/WARNING/WATCH/CLEAR
+
+    Caches result in .cache/laureate_regime.json (TTL 6h).
+    Returns None on any failure — Discord falls back to VIX-only regime line.
+    """
+    import time  # noqa: PLC0415
+    _CACHE_FILE = Path(".cache/laureate_regime.json")
+    _TTL        = 6 * 3600
+    try:
+        if _CACHE_FILE.exists():
+            blob = json.loads(_CACHE_FILE.read_text())
+            if time.time() - blob.get("ts", 0) < _TTL:
+                return blob
+    except Exception:
+        pass
+
+    try:
+        from backend.data.market_service import MarketData                     # noqa: PLC0415
+        from backend.data.fred_service import (                                # noqa: PLC0415
+            fetch_10y_yield, fetch_2y_yield, fetch_m2_velocity,
+        )
+        from backend.quant_models.monetary_pulse import (                      # noqa: PLC0415
+            yield_spread, is_inverted, monetary_regime,
+        )
+        from backend.quant_models.valuation_radar import (                     # noqa: PLC0415
+            fetch_shiller_cape_series, cape_percentile,
+        )
+        from backend.quant_models.volatility_brain import (                    # noqa: PLC0415
+            fit_gjr_garch, volatility_regime,
+        )
+        from backend.quant_models.prediction_controller import (               # noqa: PLC0415
+            classify_regime, combined_position_scale, minsky_moment, laureate_icon,
+        )
+        from feature_engineering.feature_engineering import FeatureEngineer    # noqa: PLC0415
+        from hmm_engine.classifier import RegimeClassifier                     # noqa: PLC0415
+
+        bars = MarketData.get_historical_bars("SPY", years_back=5)
+        if bars.empty:
+            return None
+
+        fe = FeatureEngineer()
+        features, returns, meta = fe.build(bars)
+        if len(features) < 60:
+            return None
+
+        clf = RegimeClassifier()
+        clf.fit(features, returns)
+        state = clf.predict_current(features[-40:])
+
+        import pandas as pd  # noqa: PLC0415
+        import numpy as np   # noqa: PLC0415
+        log_rets = pd.Series(returns)
+        garch    = fit_gjr_garch(log_rets)
+        vol_reg  = volatility_regime(garch["persistence"])
+
+        gs10   = fetch_10y_yield()
+        gs2    = fetch_2y_yield()
+        m2v    = fetch_m2_velocity()
+        spread = yield_spread(gs10, gs2)
+        spread_now = float(spread.iloc[-1]) if not spread.empty else 0.0
+        mon_reg = monetary_regime(spread, m2v)
+
+        cape_series = fetch_shiller_cape_series()
+        cape_pct    = cape_percentile(cape_series)
+
+        laureate = classify_regime(state.label, mon_reg, vol_reg)
+        scale    = combined_position_scale(laureate)
+        minsky   = minsky_moment(garch["persistence"], cape_pct, spread_now)
+
+        result = {
+            "ts":              time.time(),
+            "laureate":        laureate,
+            "laureate_icon":   laureate_icon(laureate),
+            "hmm_label":       state.label,
+            "hmm_prob":        round(state.probability, 3),
+            "mon_regime":      mon_reg,
+            "vol_regime":      vol_reg,
+            "garch_persistence": garch["persistence"],
+            "cape_percentile": cape_pct,
+            "yield_spread_bps": round(spread_now, 1),
+            "scale":           scale,
+            "minsky_level":    minsky.alert_level,
+            "minsky_icon":     minsky.icon,
+            "minsky_n":        minsky.conditions_met,
+            "minsky_narrative": minsky.narrative,
+        }
+        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CACHE_FILE.write_text(json.dumps(result))
+        return result
+    except Exception as exc:
+        log.warning("_compute_laureate_regime failed: %s", exc)
+        return None
 
 
 def _buyback_conviction(yield_pct: float) -> Optional[float]:
@@ -1309,6 +1417,19 @@ def build_payload(
              if r.get("cap_tier") == "mid" and r.get("ticker") not in top_tickers],
             key=lambda e: -e["final_score"]
         )[:5]
+        # EU/Asia mid-cap spotlight: top-1 per region from dedicated mid sleeve
+        eu_mid_small = sorted(
+            [_normalise_entry(r) for r in all_results
+             if r.get("cap_tier") in ("mid", "small")
+             and r.get("market", "").upper() in ("EUROPE", "EU")],
+            key=lambda e: -e["final_score"]
+        )[:1]
+        asia_mid_small = sorted(
+            [_normalise_entry(r) for r in all_results
+             if r.get("cap_tier") in ("mid", "small")
+             and r.get("market", "").upper() == "ASIA"],
+            key=lambda e: -e["final_score"]
+        )[:1]
 
     else:
         # Legacy top_lists.json schema — graceful degradation
@@ -1322,10 +1443,12 @@ def build_payload(
             or status.get("top_buys")
             or []
         )
-        us_entries   = top_buys[:5]
-        eu_entries   = list(status.get("top_buys_europe") or [])[:5]
-        asia_entries = list(status.get("top_buys_asia") or [])[:5]
-        mid_caps     = list(status.get("mid_caps") or [])[:5]
+        us_entries     = top_buys[:5]
+        eu_entries     = list(status.get("top_buys_europe") or [])[:5]
+        asia_entries   = list(status.get("top_buys_asia") or [])[:5]
+        mid_caps       = list(status.get("mid_caps") or [])[:5]
+        eu_mid_small   = list(status.get("eu_mid_small") or [])[:1]
+        asia_mid_small = list(status.get("asia_mid_small") or [])[:1]
         all_scores = sorted([
             float(e.get("final_score", 0))
             for e in top_buys + eu_entries + asia_entries + mid_caps
@@ -1401,9 +1524,32 @@ def build_payload(
     vix_regime = get_market_regime(
         float(vix_val)) if vix_val is not None else "VIX —"
     age_note = f"  |  Data: {age_h:.1f}h ago" if age_h is not None else ""
+
+    laureate_line = ""
+    try:
+        lr = _compute_laureate_regime()
+        if lr:
+            icon     = lr.get("laureate_icon", "⚪")
+            state    = lr.get("laureate", "—")
+            hmm      = lr.get("hmm_label", "—")
+            mon      = lr.get("mon_regime", "—")
+            vol      = lr.get("vol_regime", "—")
+            scale    = lr.get("scale", 0.0)
+            m_icon   = lr.get("minsky_icon", "✅")
+            m_lvl    = lr.get("minsky_level", "CLEAR")
+            m_n      = lr.get("minsky_n", 0)
+            laureate_line = (
+                f"\n📊 **Laureate: {icon} {state}** · "
+                f"HMM: {hmm} · Mon: {mon} · Vol: {vol} · Scale: {scale:.2f}"
+                f"\nMinsky: {m_icon} {m_lvl} ({m_n}/3)"
+            )
+    except Exception as _lr_exc:
+        log.debug("Laureate regime line skipped: %s", _lr_exc)
+
     description = (
         f"**[REGIME TRADER]** Daily Market Report — **{date_str}**\n"
         f"{vix_regime}{age_note}"
+        f"{laureate_line}"
         f"{alert_block}"
     )
 
@@ -1583,6 +1729,22 @@ def build_payload(
             {"name": "📈 Mid-cap catalyst watch — top 3 cross-market", "value": "​", "inline": False})
         fields.extend(_ticker_fields(mid_caps, max_n=3,
                       budget=1800, all_scores=mid_scores, mid_cap=True))
+
+    # ── EU/Asia Mid/Small-Cap Spotlight ──────────────────────────────────────
+    if (eu_mid_small or asia_mid_small) and len(fields) < 23:
+        fields.append({
+            "name": "🔬 Mid/Small-Cap Watch",
+            "value": "Top-1 EU + Top-1 Asia mid/small-cap by factor score",
+            "inline": False,
+        })
+        if eu_mid_small:
+            fields.append({"name": "🇪🇺 EU Mid-Cap", "value": "​", "inline": False})
+            fields.extend(_ticker_fields(eu_mid_small, max_n=1,
+                          budget=1800, all_scores=all_scores, mid_cap=True))
+        if asia_mid_small:
+            fields.append({"name": "🇯🇵 Asia Mid-Cap", "value": "​", "inline": False})
+            fields.extend(_ticker_fields(asia_mid_small, max_n=1,
+                          budget=1800, all_scores=all_scores, mid_cap=True))
 
     # ── Action today (before satellite — high priority) ───────────────────────
     all_top = us_entries + eu_entries + asia_entries

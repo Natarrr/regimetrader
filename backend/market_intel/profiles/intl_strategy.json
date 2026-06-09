@@ -1,20 +1,25 @@
 {
-    "_note": "weights.py is canonical; sync manually on weight changes",
+    "_note": "weights.py is canonical for per-region weights; sync manually on weight changes",
+    "_version": "v2.3-fundamentals",
     "region": "INTL",
-    "expected_factors": 12,
+    "expected_factors": 16,
     "active_factors": {
-        "insider_conviction":  0.28,
-        "insider_breadth":     0.14,
+        "insider_conviction":  0.15,
+        "insider_breadth":     0.08,
         "congress":            0.00,
-        "news_sentiment":      0.13,
-        "news_buzz":           0.04,
-        "momentum_long":       0.17,
-        "volume_attention":    0.04,
+        "news_sentiment":      0.08,
+        "news_buzz":           0.02,
+        "momentum_long":       0.12,
+        "volume_attention":    0.03,
         "analyst_consensus":   0.10,
         "quality_piotroski":   0.05,
         "analyst_revision":    0.02,
         "price_target_upside": 0.03,
-        "transcript_tone":     0.00
+        "transcript_tone":     0.00,
+        "fcf_yield":           0.12,
+        "amihud_shock":        0.06,
+        "pb_value_up":         0.07,
+        "roic_quality":        0.07
     },
     "output_filename": "top_lists_intl.json"
 }

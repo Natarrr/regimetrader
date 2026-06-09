@@ -78,42 +78,52 @@ assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_GLOBAL sums to {sum(WEIGHTS_GLOBAL.values()):.8f}, not 1.0"
 )
 
-# ── European universe — Quality-Core Model ─────────────────────────────────────
-# quality_piotroski + analyst_revision + price_target_upside >= 0.55 (quality pillar)
-# Piotroski 2000; Chan, Jegadeesh & Lakonishok 1996; Brav & Lehavy 2003
+# ── European universe — Quality-Core + Fundamental Value Model (v2.3) ─────────
+# New factors (v2.3): fcf_yield [Damodaran], amihud_shock [Amihud 2002],
+#   pb_value_up [Fama & French 1992], roic_quality [Greenblatt 2005]
+# insider_conviction/breadth reduced from 0.12/0.06 to free weight for fundamentals.
 WEIGHTS_EU: dict[str, float] = {
-    "insider_conviction":  0.12,
-    "insider_breadth":     0.06,
+    "insider_conviction":  0.08,   # reduced — MAR Art.19 sparse vs SEC Form 4
+    "insider_breadth":     0.04,
     "congress":            0.00,   # structurally absent
     "news_sentiment":      0.05,
     "news_buzz":           0.02,
     "momentum_long":       0.08,   # Rouwenhorst 1998 (moderated for EU)
     "volume_attention":    0.02,
     "analyst_consensus":   0.07,
-    "quality_piotroski":   0.28,   # dominant pillar — Piotroski 2000
-    "analyst_revision":    0.15,   # Chan, Jegadeesh & Lakonishok 1996
-    "price_target_upside": 0.15,   # Brav & Lehavy 2003
+    "quality_piotroski":   0.10,   # Piotroski 2000
+    "analyst_revision":    0.10,   # Chan, Jegadeesh & Lakonishok 1996
+    "price_target_upside": 0.10,   # Brav & Lehavy 2003
+    "fcf_yield":           0.14,   # Damodaran — free cash generation (NEW)
+    "amihud_shock":        0.05,   # Amihud 2002 — liquidity shock signal (NEW)
+    "pb_value_up":         0.07,   # Fama & French 1992 — value trigger (NEW)
+    "roic_quality":        0.08,   # Greenblatt 2005 — ROIC/ROE quality (NEW)
     "transcript_tone":     0.00,   # structurally absent outside US
 }
 assert abs(sum(WEIGHTS_EU.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_EU sums to {sum(WEIGHTS_EU.values()):.8f}, not 1.0"
 )
 
-# ── Asian universe — Liquidity & Momentum Model ────────────────────────────────
-# momentum_long + volume_attention >= 0.35 (liquidity/momentum pillar)
-# Rouwenhorst 1998; Gervais & Odean 2001; Givoly & Lakonishok 1979; Tetlock 2007
+# ── Asian universe — Momentum-Quality Hybrid Model (v2.3) ─────────────────────
+# New factors (v2.3): fcf_yield, amihud_shock, pb_value_up, roic_quality
+# Amihud shock weighted higher for Asia — liquidity crises are a distinct
+# APAC risk factor (Rouwenhorst 1998; Kim & Lee 2014 — Asia illiquidity premium).
 WEIGHTS_ASIA: dict[str, float] = {
-    "insider_conviction":  0.15,
-    "insider_breadth":     0.07,
+    "insider_conviction":  0.08,   # EDINET partial, KRX partial
+    "insider_breadth":     0.04,
     "congress":            0.00,   # structurally absent
-    "news_sentiment":      0.15,   # Tetlock 2007
-    "news_buzz":           0.08,
-    "momentum_long":       0.25,   # Rouwenhorst 1998 — APAC momentum premium
-    "volume_attention":    0.10,   # Gervais & Odean 2001
-    "analyst_consensus":   0.12,   # Givoly & Lakonishok 1979
-    "quality_piotroski":   0.03,
-    "analyst_revision":    0.03,
-    "price_target_upside": 0.02,
+    "news_sentiment":      0.10,   # Tetlock 2007
+    "news_buzz":           0.04,
+    "momentum_long":       0.15,   # Rouwenhorst 1998 — APAC momentum premium
+    "volume_attention":    0.06,   # Gervais & Odean 2001
+    "analyst_consensus":   0.10,   # Givoly & Lakonishok 1979
+    "analyst_revision":    0.05,
+    "price_target_upside": 0.05,
+    "quality_piotroski":   0.05,   # Piotroski 2000
+    "fcf_yield":           0.10,   # Damodaran — value signal (NEW)
+    "amihud_shock":        0.06,   # Amihud 2002 — especially relevant in APAC (NEW)
+    "pb_value_up":         0.06,   # Fama & French 1992 — value trigger (NEW)
+    "roic_quality":        0.06,   # Greenblatt 2005 — ROIC/ROE quality (NEW)
     "transcript_tone":     0.00,   # structurally absent outside US
 }
 assert abs(sum(WEIGHTS_ASIA.values()) - 1.0) < 1e-6, (

@@ -116,9 +116,13 @@ def test_eu_score_uses_global_weights():
         "volume_attention":    0.35,
         "analyst_consensus":   0.80,
         "quality_piotroski":   0.75,
-        "analyst_revision":    0.65,   # WEIGHTS_EU specific (0.15 weight)
-        "price_target_upside": 0.70,   # WEIGHTS_EU specific (0.15 weight)
-        "transcript_tone":     0.00,   # structurally absent
+        "analyst_revision":    0.65,
+        "price_target_upside": 0.70,
+        "transcript_tone":     0.00,
+        "fcf_yield":           0.65,   # WEIGHTS_EU v2.3 fundamental factors
+        "amihud_shock":        0.55,
+        "pb_value_up":         0.60,
+        "roic_quality":        0.70,
     }
     score, meta = compute_composite_score("SAP.DE", factors, piotroski_raw=7)
 
@@ -191,6 +195,10 @@ def test_eu_perfect_factors_reaches_score_one():
         "quality_piotroski":  1.0,
         "price_target_upside": 1.0,
         "transcript_tone":    0.0,
+        "fcf_yield":          1.0,
+        "amihud_shock":       1.0,
+        "pb_value_up":        1.0,
+        "roic_quality":       1.0,
     }
     score, meta = compute_composite_score("ASML.AS", perfect)
     assert score == pytest.approx(1.0, abs=1e-4), (
@@ -207,6 +215,7 @@ def test_eu_score_not_capped_at_point_eight():
         "insider_conviction", "insider_breadth", "news_sentiment", "news_buzz",
         "momentum_long", "volume_attention", "analyst_consensus", "analyst_revision",
         "quality_piotroski", "price_target_upside",
+        "fcf_yield", "amihud_shock", "pb_value_up", "roic_quality",
     ]}
     high_factors["congress"] = 0.0
     high_factors["transcript_tone"] = 0.0

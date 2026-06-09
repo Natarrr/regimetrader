@@ -110,6 +110,9 @@ class FMPFetcher(BaseMarketFetcher):
             orthogonalize_insider_scores,
         )
         from regime_trader.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
+        from regime_trader.scoring.fundamental_signals import (  # noqa: PLC0415
+            score_fcf_yield, score_amihud_shock, score_pb_value_up, score_roic_quality,
+        )
 
         client = FMPClient(api_key=self._api_key)
         entries: list[TickerEntry] = []
@@ -391,6 +394,71 @@ class FMPFetcher(BaseMarketFetcher):
         except Exception:
             pass  # non-critical — PEAD badge just won't show
 
+        # ── 9. FCF Yield — Damodaran value signal ────────────────────────────
+        from regime_trader.scoring.fundamental_signals import (  # noqa: PLC0415
+            score_fcf_yield, score_amihud_shock, score_pb_value_up, score_roic_quality,
+        )
+        fcf_yield_score: Optional[float] = None
+        try:
+            ev = client.get_enterprise_value(ticker)
+            if ev and ev > 0:
+                cf_stmts = client.get_cash_flow_statements(ticker) or []
+                ttm_fcf = sum(float(q.get("freeCashFlow", 0) or 0) for q in cf_stmts[:4])
+                if ttm_fcf > 0:
+                    fcf_yield_score = score_fcf_yield(ttm_fcf, ev)
+                else:
+                    fcf_yield_score = 0.0
+            else:
+                fcf_yield_score = 0.0
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher fcf_yield ABSENT %s: %s(%s) — excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+
+        # ── 10. Amihud Illiquidity Shock — zero new API calls ─────────────────
+        amihud_shock_score: float = 0.0
+        try:
+            amihud_shock_score = score_amihud_shock(
+                price_history=closes[-25:],
+                volume_history=volumes[-25:],
+            )
+        except Exception as exc:
+            logger.warning("FMPFetcher amihud_shock ABSENT %s: %s", ticker, exc)
+
+        # ── 11. Dynamic P/B — Fama & French value trigger ─────────────────────
+        pb_value_up_score: Optional[float] = None
+        try:
+            if not ratios and "." in ticker:
+                ratios = client.get_ratios_ttm(ticker.split(".")[0])
+            bvps  = float((ratios or {}).get("bookValuePerShareTTM") or 0)
+            price = float((quote or {}).get("price") or 0)
+            if bvps > 0 and price > 0:
+                pb_value_up_score = score_pb_value_up(bvps, price)
+            else:
+                pb_value_up_score = 0.0
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher pb_value_up ABSENT %s: %s(%s) — excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+
+        # ── 12. ROIC / ROE Quality — Greenblatt magic formula ─────────────────
+        roic_quality_score: Optional[float] = None
+        try:
+            roe  = float((ratios or {}).get("returnOnEquityTTM") or 0)
+            roce_raw = (ratios or {}).get("returnOnCapitalEmployedTTM")
+            roce: Optional[float] = float(roce_raw) if roce_raw is not None else None
+            if roe != 0:
+                roic_quality_score = score_roic_quality(roe, roce)
+            else:
+                roic_quality_score = 0.0
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher roic_quality ABSENT %s: %s(%s) — excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+
         return {
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
@@ -402,6 +470,11 @@ class FMPFetcher(BaseMarketFetcher):
             "analyst_revision_score":    analyst_revision_score,
             "quality_piotroski_score":   quality_piotroski_score,
             "price_target_upside_score": price_target_upside_score,
+            # EU/Asia fundamental value + quality signals
+            "fcf_yield_score":           fcf_yield_score,
+            "amihud_shock_score":        amihud_shock_score,
+            "pb_value_up_score":         pb_value_up_score,
+            "roic_quality_score":        roic_quality_score,
             # Structurally absent — always 0.0
             "congress_score":            0.0,
             "transcript_tone_score":     0.0,
@@ -463,6 +536,10 @@ def _build_price_only_factors(
         "analyst_revision_score":    None,
         "quality_piotroski_score":   None,
         "price_target_upside_score": None,
+        "fcf_yield_score":           None,
+        "amihud_shock_score":        0.0,
+        "pb_value_up_score":         None,
+        "roic_quality_score":        None,
         "congress_score":            0.0,
         "transcript_tone_score":     0.0,
         "return_12_1m":              return_12_1m,

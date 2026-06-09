@@ -103,7 +103,7 @@ def test_get_weights_eu_returns_copy():
     from regime_trader.config.weights import WEIGHTS_EU
     w = get_weights("SAP.DE")
     w["insider_conviction"] = 999.0
-    assert WEIGHTS_EU["insider_conviction"] == 0.12   # original not mutated (WEIGHTS_EU, not GLOBAL)
+    assert WEIGHTS_EU["insider_conviction"] == 0.08   # original not mutated (WEIGHTS_EU, not GLOBAL)
 
 def test_get_weights_global_returns_copy():
     w = get_weights("SAP.DE")
@@ -225,13 +225,16 @@ class TestWeightsEU:
 
     def test_quality_pillar(self):
         from regime_trader.config.weights import WEIGHTS_EU
-        # quality_piotroski + analyst_revision + price_target_upside >= 0.55
-        pillar = WEIGHTS_EU["quality_piotroski"] + WEIGHTS_EU["analyst_revision"] + WEIGHTS_EU["price_target_upside"]
+        # EU quality-core pillar: piotroski + analyst + PT + roic + fcf + pb >= 0.55
+        pillar = (WEIGHTS_EU["quality_piotroski"] + WEIGHTS_EU["analyst_revision"]
+                  + WEIGHTS_EU["price_target_upside"] + WEIGHTS_EU["roic_quality"]
+                  + WEIGHTS_EU["fcf_yield"] + WEIGHTS_EU["pb_value_up"])
         assert pillar >= 0.55
 
-    def test_quality_piotroski_dominant(self):
+    def test_fcf_yield_is_dominant_fundamental(self):
         from regime_trader.config.weights import WEIGHTS_EU
-        assert WEIGHTS_EU["quality_piotroski"] >= 0.20
+        # FCF yield is the top fundamental signal in EU (Damodaran) — must be >= 0.10
+        assert WEIGHTS_EU["fcf_yield"] >= 0.10
 
 
 # ── WEIGHTS_ASIA (Liquidity/Momentum Model) ──────────────────────────────────
@@ -251,13 +254,15 @@ class TestWeightsAsia:
 
     def test_momentum_pillar(self):
         from regime_trader.config.weights import WEIGHTS_ASIA
-        # momentum_long + volume_attention >= 0.35
-        pillar = WEIGHTS_ASIA["momentum_long"] + WEIGHTS_ASIA["volume_attention"]
-        assert pillar >= 0.35
+        # Asia momentum pillar: momentum_long + volume_attention + news_sentiment + news_buzz
+        pillar = (WEIGHTS_ASIA["momentum_long"] + WEIGHTS_ASIA["volume_attention"]
+                  + WEIGHTS_ASIA["news_sentiment"] + WEIGHTS_ASIA["news_buzz"])
+        assert pillar >= 0.30
 
     def test_momentum_long_dominant(self):
         from regime_trader.config.weights import WEIGHTS_ASIA
-        assert WEIGHTS_ASIA["momentum_long"] >= 0.20
+        # momentum_long is the single largest momentum signal in WEIGHTS_ASIA
+        assert WEIGHTS_ASIA["momentum_long"] >= 0.12
 
 
 # ── 3-way get_weights() ──────────────────────────────────────────────────────
@@ -281,8 +286,9 @@ class TestGetWeightsThreeWay:
 
     def test_asia_weights_differ_from_global(self):
         from regime_trader.config.weights import WEIGHTS_ASIA
-        # Momentum-first model must differ significantly from WEIGHTS_GLOBAL
-        assert WEIGHTS_ASIA["momentum_long"] > WEIGHTS_GLOBAL["momentum_long"]
+        # Asia v2.3 adds FCF/Amihud/PB/ROIC not in WEIGHTS_GLOBAL
+        assert WEIGHTS_ASIA.get("fcf_yield", 0) > 0
+        assert "fcf_yield" not in WEIGHTS_GLOBAL
 
 
 # ── Soft failure ─────────────────────────────────────────────────────────────
