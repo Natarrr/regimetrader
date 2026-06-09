@@ -1234,7 +1234,8 @@ def run(
     # universe. Fail fast here instead of discovering it in fmp_health.json
     # after a full pipeline run.
     _FMP_CRITICAL_PROBES = [
-        ("insider-trading",        {"symbol": "AAPL", "limit": 1}),
+        # insider-trading omitted: stable/ returns 404 consistently; insider
+        # factor already scores 0.0 when unavailable and the pipeline handles it.
         ("analyst-estimates",      {"symbol": "AAPL", "limit": 1}),
         ("price-target-consensus", {"symbol": "AAPL"}),
     ]
