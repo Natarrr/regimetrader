@@ -8,18 +8,34 @@ everything under https://financialmodelingprep.com/stable/.
 The previous client silently 404'd on insider/news/quote, which zeroed
 insider_conviction_score / news_sentiment_score across the universe.
 
+PHASE-1 ENDPOINT VERIFICATION (2026-06-09, FMP Ultimate, scripts/fmp_endpoint_probe.py)
+----------------------------------------------------------------------------------------
+All active scoring endpoints confirmed HTTP 200:
+  historical-price-eod/full          quote                  batch-quote
+  grades-consensus                   ratios-ttm             enterprise-values
+  cash-flow-statement                earning-call-transcript-latest
+  commitment-of-traders-report       news/stock             institutional-ownership/symbol-positions-summary
+  insider-trading/search             analyst-estimates      price-target-consensus
+  upgrades-downgrades-consensus-bulk ratios-ttm-bulk        key-metrics-ttm-bulk
+
+Confirmed HTTP 404 (quarantined):
+  earnings-surprises    upgrades-downgrades    senate-trading    house-trading
+
+IMPORTANT — insider path distinction:
+  "insider-trading"         → HTTP 404 (bare path, NOT used by this client)
+  "insider-trading/search"  → HTTP 200 LIVE (the actual scoring path)
+  Do not conflate these when reading error logs or editing probes.
+
 CONGRESS ROUTES (senate-trading, house-trading):
-Both returned HTTP 404 in the Phase-0 smoke-test (2026-05-30). These routes
-are not available on the current plan. Congress scoring uses the S3 Stock
-Watcher feeds as primary (run_pipeline.fetch_congress_buys). The FMP
-get_congress_trades() method returns {} so existing callers keep working
-without hitting a dead route.
+Both returned HTTP 404 in Phase-0 (2026-05-30) and Phase-1 (2026-06-09). Congress
+scoring uses S3 Stock Watcher feeds as primary (run_pipeline.fetch_congress_buys).
+The get_congress_trades() method returns {} so callers keep working without the route.
 
 This client:
   1. Uses stable/ routes exclusively (auth: ?apikey=).
   2. Raises FMPEndpointError on 401/403/404 instead of swallowing — a dead
      endpoint is a pipeline integrity event, NOT a sparse-data event.
-  3. Exposes the full Ultimate surface used by the 7-factor model PLUS new
+  3. Exposes the full Ultimate surface used by the 9-factor model PLUS
      premium endpoints (ratings, key-metrics, COT, transcripts, bulk quote).
   4. Tracks per-endpoint failure counts so monitoring can distinguish
      "ticker has no insider trades" (valid 0) from "insider route is down".
@@ -55,12 +71,16 @@ _TIMEOUT = 15
 _DEFAULT_CACHE_ROOT = Path(__file__).parent.parent.parent / ".cache" / "fmp"
 _DEFAULT_MAX_RPS = 30.0
 
-# Endpoints confirmed HTTP 404 on stable/ routes as of 2026-06-03.
+# Endpoints confirmed HTTP 404 on stable/ routes.
 # _get() skips these entirely — no HTTP call, no failure count, no health-report alarm.
-# Remove from this set once FMP confirms the route is live and re-verify with fmp_smoke_test.py.
+# Verified against FMP Ultimate via scripts/fmp_endpoint_probe.py.
+#
+# NOTE: "insider-trading" (bare) also 404s, but is NOT quarantined here because
+# it is never called by this client. The actual scoring path is "insider-trading/search"
+# which returns HTTP 200 (confirmed 2026-06-09). Do not conflate the two.
 _DEAD_ENDPOINTS: frozenset[str] = frozenset({
-    "earnings-surprises",   # HTTP 404 all symbols — not yet migrated to stable/
-    "upgrades-downgrades",  # HTTP 404 all symbols — use grades-consensus instead
+    "earnings-surprises",   # HTTP 404 — not yet migrated to stable/ (confirmed 2026-06-09)
+    "upgrades-downgrades",  # HTTP 404 — renamed to grades-consensus on stable/ (confirmed 2026-06-09)
 })
 
 # Per-bucket cache TTL (seconds).

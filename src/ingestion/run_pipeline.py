@@ -297,16 +297,8 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
             "all tickers will score congress=0.0 this run. "
             "Check S3 bucket access and FMP_API_KEY."
         )
-        # Write sentinel flag to fmp_health.json if it already exists in the
-        # run context; otherwise it will be picked up at the end of the pipeline run.
-        try:
-            _health_path = Path("logs/fmp_health.json")
-            if _health_path.exists():
-                _h = json.loads(_health_path.read_text(encoding="utf-8"))
-                _h["congress_source_failed"] = True
-                save_json_atomic(_health_path, _h)
-        except Exception:
-            pass   # sentinel write failure is non-fatal; the log.error above is the primary alert
+        # congress_source_failed is injected into fmp_health.json at end-of-run
+        # via _congress_source_failed; no mid-run write needed.
 
     # ── Persist cache ─────────────────────────────────────────────────────────
     try:
@@ -1233,9 +1225,12 @@ def run(
     # If any return 403/404 the factor will silently score 0.0 for the entire
     # universe. Fail fast here instead of discovering it in fmp_health.json
     # after a full pipeline run.
+    # Probe the exact stable/ paths used by FMPClient scoring methods.
+    # All three confirmed HTTP 200 on FMP Ultimate (2026-06-09, fmp_endpoint_probe.py).
+    # "insider-trading" (bare) is 404 and is NOT listed here; the scoring path is
+    # "insider-trading/search" which is live and IS probed below.
     _FMP_CRITICAL_PROBES = [
-        # insider-trading omitted: stable/ returns 404 consistently; insider
-        # factor already scores 0.0 when unavailable and the pipeline handles it.
+        ("insider-trading/search", {"symbol": "AAPL", "page": 0, "limit": 1}),
         ("analyst-estimates",      {"symbol": "AAPL", "limit": 1}),
         ("price-target-consensus", {"symbol": "AAPL"}),
     ]
@@ -1295,6 +1290,7 @@ def run(
     # ── Congress feed ─────────────────────────────────────────────────────────
     log.info("Fetching congress trading data…")
     congress_data = fetch_congress_buys()
+    _congress_source_failed: bool = not bool(congress_data)
 
     # ── SPY baseline + regime — fetched once, shared across all worker threads ─
     # PATCH 10: Extended to include 63-day return for momentum regime classification.
@@ -1983,6 +1979,7 @@ def run(
     try:
         fmp_health = _fmp_client.health_report()
         fmp_health["run_timestamp"] = pipeline_run_ts
+        fmp_health["congress_source_failed"] = _congress_source_failed
         save_json_atomic(log_dir / "fmp_health.json", fmp_health)
         if fmp_health.get("has_structural_failure"):
             log.error(
