@@ -1505,13 +1505,7 @@ def build_payload(
         asia_entries = [_normalise_entry(e)
                         for e in (tbm.get("ASIA") or [])[:5]]
 
-        # All results for percentile calculation
         all_results = status.get("results", [])
-        all_scores = sorted([
-            float(r.get("final_score", 0))
-            for r in all_results
-            if r.get("final_score") is not None
-        ])
 
         # Mid caps: non-top-5 entries with cap_tier == "mid", cross-market
         top_tickers = {e["ticker"]

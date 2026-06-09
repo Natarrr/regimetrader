@@ -178,11 +178,13 @@ class TestBuildPayloadSchema:
         assert len(payload["embeds"]) >= 1
 
     def test_status_schema_has_usa_section(self):
+        """5-section format: regional sections render inside field VALUES
+        (GLOBAL FACTOR RADAR), not as field names."""
         from src.delivery.send_discord import build_payload
         payload = build_payload(_make_status())
         fields = payload["embeds"][0]["fields"]
-        names = [f["name"] for f in fields]
-        assert any("USA" in n for n in names)
+        values = [f.get("value") or "" for f in fields]
+        assert any("UNITED STATES" in v or "USA" in v for v in values)
 
     def test_legacy_schema_still_works(self):
         from src.delivery.send_discord import build_payload
@@ -213,13 +215,19 @@ class TestBuildPayloadSchema:
         assert "OLD" in desc
 
     def test_status_schema_preserves_esg_metadata(self):
-        from src.delivery.send_discord import build_payload
-        status = _make_status()
-        status["top_by_market"]["US"][0]["esg_score"] = 22.0
-        status["top_by_market"]["US"][0]["esg_flag"] = True
-        payload = build_payload(status)
-        names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert any("ESG!" in n for n in names)
+        """ESG keys survive entry normalisation, and the per-ticker card
+        renderer still emits the ESG! tag (the 5-section embed itself no
+        longer shows per-ticker detail fields)."""
+        from src.delivery.send_discord import _build_ticker_card, _normalise_entry
+        raw = {
+            "ticker": "AAPL", "final_score": 0.70, "badge": "WATCHLIST",
+            "factors": {}, "esg_score": 22.0, "esg_flag": True,
+        }
+        entry = _normalise_entry(raw)
+        assert entry.get("esg_score") == 22.0
+        assert entry.get("esg_flag") is True
+        card = _build_ticker_card(1, entry)
+        assert "ESG!" in card["name"]
 
     def test_percentile_includes_zero_values(self):
         from src.delivery.send_discord import _compute_percentile
