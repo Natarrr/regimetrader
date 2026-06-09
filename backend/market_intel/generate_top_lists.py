@@ -81,7 +81,12 @@ FACTOR_FIELDS: Dict[str, str] = {
 # zero (i.e. missing / dead API).  Incomplete tickers are scored but flagged;
 # they are NOT excluded from ranking — exclusion would distort cross-sectional
 # normalization.  Instead, validation_metadata carries the signal to consumers.
-_SCHEMA_MISSING_THRESHOLD = 8   # >8 zero factors → is_complete = False (raised from 6: 4 new INTL factors may be None for US tickers)
+_SCHEMA_MISSING_THRESHOLD = 10  # >10 zero factors → is_complete = False
+# Original threshold was 6 (for 12 non-INTL factors).  When 4 INTL-only factors
+# (fcf_yield, amihud_shock, pb_value_up, roic_quality) were added to FACTOR_FIELDS
+# they always score 0.0 for US tickers by architectural design.  Threshold must
+# rise by exactly 4 to preserve the original completeness criterion: a US ticker
+# needs ≤6 of its 12 non-INTL factors missing (6 + 4 always-absent = 10 total).
 # Rationale: after RT-QA-2026-REV6 (FIX 1+2), analyst_consensus and news_sentiment
 # now correctly return 0.0 when absent (instead of the phantom 0.5 they returned
 # before). The structurally-zero factor set for a healthy large-cap ticker is now:
