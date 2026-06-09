@@ -193,6 +193,23 @@ def cook(
     asia_mid_small  = sorted(asia_mid_small, key=lambda x: -x["final_score"])[:1]
     vix_regime      = regime.value
 
+    # Under CAPITULATION, survivors are badged WATCHLIST by apply_capitulation_filter.
+    # Move them OUT of top_buys_* (buy-signal lists) into a dedicated watchlist key
+    # so the Discord embed generator does not render them as "Active Buy Signals."
+    watchlist: list = []
+    if regime == RiskRegime.CAPITULATION:
+        for _lst in (top_buys_usa, top_buys_europe, top_buys_asia):
+            watchlist.extend(_lst)
+        top_buys_usa    = []
+        top_buys_europe = []
+        top_buys_asia   = []
+        eu_mid_small    = []
+        asia_mid_small  = []
+        print(
+            f"[COOK] CAPITULATION REGIME (VIX={vix:.1f}) — "
+            f"top_buys_* emptied; {len(watchlist)} structural anchor(s) moved to watchlist."
+        )
+
     # ── ATR / Batch Floor enrichment ──────────────────────────────────────────
     if _EXTENSIONS_AVAILABLE:
         for entry in top_buys_usa + top_buys_europe + top_buys_asia:
@@ -269,6 +286,7 @@ def cook(
         "top_buys_usa":    top_buys_usa,
         "top_buys_europe": top_buys_europe,
         "top_buys_asia":   top_buys_asia,
+        "watchlist":       watchlist,          # populated under CAPITULATION regime
         "usa_overflow":    usa_overflow,
         "eu_overflow":     eu_overflow,
         "asia_overflow":   asia_overflow,
@@ -284,10 +302,11 @@ def cook(
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(combined, indent=2), encoding="utf-8")
+    watchlist_note = f" | {len(watchlist)} watchlist" if watchlist else ""
     print(
         f"[COOK] Combined payload -> {output} "
         f"({len(top_buys_usa)} US + {len(top_buys_europe)} EU "
-        f"+ {len(top_buys_asia)} Asia)"
+        f"+ {len(top_buys_asia)} Asia{watchlist_note})"
     )
 
 

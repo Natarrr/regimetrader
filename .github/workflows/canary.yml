@@ -108,6 +108,24 @@ jobs:
           END=$(date +%s)
           echo "DURATION_SECONDS=$((END - START))" >> "$GITHUB_ENV"
 
+      # ── Congress data availability gate ─────────────────────────────────────
+      # run_pipeline.py sets congress_source_failed=true in fmp_health.json when
+      # both the S3 House/Senate feed and FMP fallback return no data.
+      # Fail fast here so degraded scores don't propagate to downstream steps.
+      - name: Assert congress data available
+        shell: python
+        run: |
+          import json, sys
+          from pathlib import Path
+          health_path = Path("logs/fmp_health.json")
+          if not health_path.exists():
+              print("::warning::logs/fmp_health.json not found — skipping congress gate")
+              sys.exit(0)
+          h = json.loads(health_path.read_text(encoding="utf-8"))
+          if h.get("congress_source_failed"):
+              print("::error::Congress S3 feed unavailable — all tickers scored congress=0.0 this run")
+              sys.exit(1)
+
       - name: Export metrics
         run: |
           set -euo pipefail

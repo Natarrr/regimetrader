@@ -149,6 +149,16 @@ def _score_bar(score: float, width: int = 8) -> str:
     return "▓" * filled + "░" * (width - filled)
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    """Cast val to float, returning default for None / NaN / Inf / non-numeric strings."""
+    import math as _math  # noqa: PLC0415
+    try:
+        v = float(val)
+        return default if _math.isnan(v) or _math.isinf(v) else v
+    except (TypeError, ValueError):
+        return default
+
+
 def _fmt_cap(market_cap: float) -> str:
     if market_cap >= 1e12:
         return f"${market_cap/1e12:.1f}T"
@@ -453,8 +463,9 @@ def _compute_laureate_regime() -> Optional[dict]:
             blob = json.loads(_CACHE_FILE.read_text())
             if time.time() - blob.get("ts", 0) < _TTL:
                 return blob
-    except Exception:
-        pass
+    except Exception as _cache_exc:
+        log.warning("Laureate regime cache unreadable (%s) — recomputing", _cache_exc)
+        # fall through to recompute (not silent pass)
 
     try:
         from backend.data.market_service import MarketData                     # noqa: PLC0415
@@ -676,9 +687,13 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
     # F6.2: Append top-3 weighted factor contribution line.
     # Format: "Top: momentum_long(0.19) analyst_consensus(0.08) insider_conviction(0.05)"
     # Only appended when entry carries normalized factor scores from top_lists.json.
+    # Limit applied AFTER appending so the 80-char inline truncation doesn't
+    # silently eat the factor line when it follows a long risk-flag suffix.
     factor_line = _factor_contribution_line(entry)
     if factor_line:
-        catalyst_str = f"{catalyst_str}\n{factor_line}"
+        catalyst_str = f"{catalyst_str}\n{factor_line}"[:1024]  # Discord field value limit
+    else:
+        catalyst_str = catalyst_str[:80]
 
     return catalyst_str
 
@@ -1038,7 +1053,7 @@ def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
         "ticker":                    raw.get("ticker", "?"),
         "sector":                    raw.get("sector", "Unknown"),
         "cap_tier":                  raw.get("cap_tier", "large"),
-        "market_cap":                float(raw.get("market_cap", 0) or 0),
+        "market_cap":                _safe_float(raw.get("market_cap", 0)),
         "final_score":               float(raw.get("final_score", 0) or 0),
         "badge":                     raw.get("badge") or _badge_from_score(float(raw.get("final_score", 0) or 0)),
         "ceo_buy":                   bool(raw.get("ceo_buy", False)),
@@ -1294,12 +1309,27 @@ def build_institutional_payload(top_lists: dict) -> list:
     SEP  = "=" * 72
     THIN = "-" * 72
 
+    watchlist = top_lists.get("watchlist", [])
+    panic_note = ""
+    if (kill_switch or vix >= 30) and not (
+        top_lists.get("top_buys_usa") or
+        top_lists.get("top_buys_europe") or
+        top_lists.get("top_buys_asia")
+    ):
+        n = len(watchlist)
+        panic_note = (
+            f"\n[!! PANIC REGIME ACTIVE — ALL NEW BUY SIGNALS SUPPRESSED !!]"
+            f"\n[SELL/EXIT SIGNALS REMAIN ACTIVE — SEE EXIT RULES MODULE  ]"
+            + (f"\n[{n} STRUCTURAL ANCHOR(S) AVAILABLE IN WATCHLIST           ]" if n else "")
+        )
+
     block1 = "\n".join([
         SEP,
         "INSTITUTIONAL RISK & ALPHA DISPATCH",
         SEP,
         f"[REGIME STATUS] DETECTED REGIME: {vix_regime} (VIX: {vix:.2f})",
         f"[RISK OVERLAY]  STRATEGY: {strategy}",
+        panic_note,
         SEP,
         "",
         "TOP REGIONAL EQUITIES",
@@ -1563,6 +1593,10 @@ def build_payload(
             "Archive root: %s | files found: %d",
             _archive_root, len(_archive_files),
         )
+
+        if not _archive_files:
+            log.info("No archive snapshots found — delta tags suppressed (first run)")
+            # _yesterday_scores stays {} — all tickers will show no delta tag
 
         if len(_archive_files) >= 2:
             _prev_file = _archive_files[-2]
@@ -2262,6 +2296,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     webhook: str = args.webhook or os.getenv("DISCORD_WEBHOOK_URL", "")
+    if not webhook:
+        log.critical(
+            "DISCORD_WEBHOOK_URL is not set and --webhook was not supplied. "
+            "Cannot deliver output. Exiting with code 2."
+        )
+        return 2   # non-zero → CI detects failure; 2 distinguishes config error from data error
 
     # Try intel_source_status.json first; fall back to top_lists.json
     input_path = args.input
@@ -2312,6 +2352,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Loaded macro overlay: vix=%s kill_switch=%s vix_multiplier=%s",
             status.get("vix"), status.get("kill_switch"), status.get("vix_multiplier"),
         )
+
+    # Pre-flight schema audit — catches score-range violations, badge mismatches,
+    # sort-order errors, and cross-contamination before they reach Discord.
+    try:
+        from src.delivery.audit_payload import (  # noqa: PLC0415
+            audit as _audit,
+            PipelineAuditError as _PAE,
+        )
+        try:
+            _audit(str(input_path))
+        except _PAE as _schema_exc:
+            log.error("Pre-flight audit FAILED: %s", _schema_exc)
+            _alert = build_alert_payload(f"AUDIT GATE FAILED: {_schema_exc}")
+            if not args.dry_run:
+                send_to_discord(webhook, _alert)
+            return 1
+    except ImportError as _imp_exc:
+        log.warning("audit_payload module not importable — skipping pre-flight: %s", _imp_exc)
 
     satellite = _load_satellite(args.log_dir)
     anomaly_map = _load_anomaly_report(args.log_dir)

@@ -39,9 +39,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import threading
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from regime_trader.utils.io import save_json_atomic
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +140,14 @@ class FMPClient:
         cache_root: Directory for file-based TTL cache. Defaults to .cache/fmp/.
     """
 
+    # Class-level rate-limiter — shared across all instances in the same process.
+    # Prevents 8 scoring threads from collectively exceeding FMP_MAX_RPS.
+    # Cross-runner 429s (US + INTL jobs on separate GitHub Actions VMs) are
+    # handled by exponential backoff inside _get(); a process-level lock cannot
+    # coordinate across VMs.
+    _rate_lock: threading.Lock = threading.Lock()
+    _rate_last_call: float = 0.0
+
     # Class-level flag: congress route probe fires once per process lifetime.
     # Prevents per-ticker spam; can be reset in tests via FMPClient._fmp_congress_probe_done = False.
     _fmp_congress_probe_done: bool = False
@@ -152,7 +164,6 @@ class FMPClient:
         self._session = _make_session() if self._api_key else None
         max_rps = float(os.getenv("FMP_MAX_RPS", _DEFAULT_MAX_RPS))
         self._min_delay = 1.0 / max(max_rps, 0.001)
-        self._last_call = 0.0
         # Observability: count structural failures per endpoint.
         self.endpoint_failures: Dict[str, int] = defaultdict(int)
         self.endpoint_calls: Dict[str, int] = defaultdict(int)
@@ -181,7 +192,7 @@ class FMPClient:
         p = self._cache_path(bucket, key)
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(value, default=str), encoding="utf-8")
+            save_json_atomic(p, value)   # atomic tmp → rename; safe under 8 concurrent threads
         except Exception as exc:
             log.debug("fmp cache write failed %s/%s: %s", bucket, key, exc)
 
@@ -201,19 +212,47 @@ class FMPClient:
             log.debug("_get: skipping quarantined endpoint %r", path)
             return None
 
-        elapsed = time.monotonic() - self._last_call
-        if elapsed < self._min_delay:
-            time.sleep(self._min_delay - elapsed)
-        self._last_call = time.monotonic()
+        # Intra-process rate gate — class-level lock shared across all threads.
+        with FMPClient._rate_lock:
+            elapsed = time.monotonic() - FMPClient._rate_last_call
+            if elapsed < self._min_delay:
+                time.sleep(self._min_delay - elapsed)
+            FMPClient._rate_last_call = time.monotonic()
+        # HTTP call is intentionally outside the lock to preserve parallelism.
 
         url = f"{_STABLE}/{path.lstrip('/')}"
         p = dict(params or {})
         p["apikey"] = self._api_key
         self.endpoint_calls[path] += 1
-        try:
-            resp = self._session.get(url, params=p, timeout=_TIMEOUT)
-        except Exception as exc:
-            log.warning("FMP GET %s network error: %s", path, exc)
+
+        _MAX_429_RETRIES = 4
+        resp = None
+        for _attempt in range(_MAX_429_RETRIES):
+            try:
+                resp = self._session.get(url, params=p, timeout=_TIMEOUT)
+            except Exception as exc:
+                log.warning("FMP GET %s network error: %s", path, exc)
+                return None
+
+            if resp.status_code != 429:
+                break   # success or structural error — exit retry loop
+
+            # 429: read Retry-After from response then back off exponentially.
+            try:
+                _ra = float(resp.json().get("retry_after", 0) or 0)
+            except Exception:
+                _ra = 0.0
+            if not _ra:
+                _ra = float(resp.headers.get("Retry-After", 0) or 0)
+            if not _ra:
+                _ra = float(2 ** _attempt)   # 1s, 2s, 4s, 8s
+            log.warning(
+                "FMP 429 on %s (attempt %d/%d) — backing off %.1fs",
+                path, _attempt + 1, _MAX_429_RETRIES, _ra,
+            )
+            time.sleep(_ra)
+        else:
+            log.error("FMP GET %s: exhausted %d retries on 429", path, _MAX_429_RETRIES)
             return None
 
         if resp.status_code in (401, 403, 404):

@@ -72,7 +72,8 @@ _SEC_RATE_LOCK: threading.Lock = threading.Lock()
 _SEC_RATE_LAST: float = 0.0
 _SEC_MIN_DELAY: float = 0.12   # 1/8 s ≈ 8 req/s globally
 
-_CONGRESS_TTL_HOURS = 24
+_CONGRESS_TTL_HOURS = 48   # was 24 — congress disclosures are weekly; 48h eliminates
+                           # the daily double-fetch race between parallel GH Actions VMs
 _HOUSE_URL   = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 _SENATE_URL  = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 _INVALID_TICKERS = frozenset({"N/A", "--", "", "NONE", "NO TICKER"})
@@ -289,6 +290,24 @@ def fetch_congress_buys(lookback_days: int = 90) -> Dict[str, Dict]:
                 "congress factor will be 0.0 (penalised) for all tickers."
             )
 
+    # ── Congress availability sentinel (checked by canary health gate) ────────
+    if not by_ticker:
+        log.error(
+            "Congress data unavailable from all sources (S3 + FMP) — "
+            "all tickers will score congress=0.0 this run. "
+            "Check S3 bucket access and FMP_API_KEY."
+        )
+        # Write sentinel flag to fmp_health.json if it already exists in the
+        # run context; otherwise it will be picked up at the end of the pipeline run.
+        try:
+            _health_path = Path("logs/fmp_health.json")
+            if _health_path.exists():
+                _h = json.loads(_health_path.read_text(encoding="utf-8"))
+                _h["congress_source_failed"] = True
+                save_json_atomic(_health_path, _h)
+        except Exception:
+            pass   # sentinel write failure is non-fatal; the log.error above is the primary alert
+
     # ── Persist cache ─────────────────────────────────────────────────────────
     try:
         save_json_atomic(CONGRESS_CACHE_PATH, {"_ts": time.time(), "by_ticker": by_ticker})
@@ -438,6 +457,18 @@ def _fetch_spy_full_regime() -> Tuple[float, Optional[float], str]:
         return 0.0, None, "NORMAL"
 
 
+def _price_lag_days(rows: List[Dict]) -> int:
+    """Days between today and the most-recent candle date in FMP rows (newest-first)."""
+    if not rows:
+        return 0
+    try:
+        from datetime import date as _date
+        newest = _date.fromisoformat(str(rows[0].get("date", ""))[:10])
+        return (datetime.now(timezone.utc).date() - newest).days
+    except (ValueError, TypeError):
+        return 0
+
+
 def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
     """Jegadeesh-Titman (1993) — 12-1 month SPY-relative return + volume spike.
 
@@ -468,6 +499,23 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
     try:
         rows = _FC().get_historical_prices(ticker, limit=310)
         closes, volumes, _ = fmp_prices_to_arrays(rows)
+
+        # Staleness gate — use SPY as market baseline to avoid false positives
+        # on weekends/holiday stretches (SPY itself will lag by the same amount).
+        # SPY rows are served from the FMP TTL cache (already populated earlier).
+        ticker_lag = _price_lag_days(rows)
+        if ticker_lag > 3:
+            try:
+                spy_rows = _FC().get_historical_prices("SPY", limit=5)
+                spy_lag  = _price_lag_days(spy_rows)
+            except Exception:
+                spy_lag = ticker_lag   # conservative: assume not uniquely stale
+            if ticker_lag > spy_lag + 1:
+                log.error(
+                    "fetch_price_data %s: newest candle is %dd old vs SPY %dd — "
+                    "momentum factors uniquely stale; flagging entry",
+                    ticker, ticker_lag, spy_lag,
+                )
 
         if len(closes) < 5:
             return _default
@@ -1179,6 +1227,35 @@ def run(
 
     # ── Shared FMP client — created once so health_report() captures all calls ─
     _fmp_client = _FMPClient()
+
+    # ── FMP structural endpoint preflight ────────────────────────────────────
+    # Probe three critical endpoints with a single known-good ticker (AAPL).
+    # If any return 403/404 the factor will silently score 0.0 for the entire
+    # universe. Fail fast here instead of discovering it in fmp_health.json
+    # after a full pipeline run.
+    _FMP_CRITICAL_PROBES = [
+        ("insider-trading",        {"symbol": "AAPL", "limit": 1}),
+        ("analyst-estimates",      {"symbol": "AAPL", "limit": 1}),
+        ("price-target-consensus", {"symbol": "AAPL"}),
+    ]
+    _dead_fmp: list = []
+    from regime_trader.services.fmp_client import FMPEndpointError as _FMPErr  # noqa: PLC0415
+    for _ep_path, _ep_params in _FMP_CRITICAL_PROBES:
+        try:
+            _fmp_client._get(_ep_path, _ep_params)
+            log.info("FMP preflight OK: %s", _ep_path)
+        except _FMPErr as _fmp_exc:
+            log.error("FMP PREFLIGHT FAIL: %s (HTTP %s)", _fmp_exc.path, _fmp_exc.status)
+            _dead_fmp.append(_ep_path)
+        except Exception as _fmp_gen:
+            log.warning("FMP preflight probe %s: %s (non-structural — continuing)", _ep_path, _fmp_gen)
+    if _dead_fmp:
+        log.critical(
+            "Aborting pipeline — %d critical FMP endpoint(s) structurally unavailable: %s. "
+            "Proceeding would silently zero these factors across the entire universe.",
+            len(_dead_fmp), _dead_fmp,
+        )
+        sys.exit(1)
 
     # ── EDGAR connectivity preflight ──────────────────────────────────────────
     _ua = os.getenv("EDGAR_USER_AGENT") or "regime-trader-research n.tardy@hotmail.fr"

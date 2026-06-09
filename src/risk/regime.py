@@ -83,8 +83,10 @@ def _is_capitulation_survivor(entry: dict) -> bool:
 def apply_capitulation_filter(entries: List[dict], vix: float) -> List[dict]:
     """Apply CAPITULATION DISTRESSED REGIME filter when VIX ≥ 30.
 
-    Does NOT blank out all signals — surfaces the highest-quality,
-    lowest-beta structural anchors. Dampens scores by 0.50× multiplier.
+    Surfaces highest-quality, lowest-beta structural anchors with 0.50× dampening.
+    All survivors are force-badged WATCHLIST — no new BUY signals during Panic/Crash.
+    Callers (cook_toplists.py) must move survivors from top_buys_* into a watchlist
+    key so the Discord embed does not render them as "Active Buy Signals."
     Non-capitulation regime: returns entries unchanged.
     """
     if not is_panic(vix):
@@ -97,12 +99,10 @@ def apply_capitulation_filter(entries: List[dict], vix: float) -> List[dict]:
             continue
         e = dict(entry)
         e["final_score"] = round(float(e.get("final_score", 0)) * mult, 4)
-        if e["final_score"] >= 0.80:
-            e["badge"] = "HIGH BUY"
-        elif e["final_score"] >= 0.60:
-            e["badge"] = "TACTICAL BUY"
-        else:
-            e["badge"] = "WATCHLIST"
+        # Force WATCHLIST — no BUY labels during CAPITULATION regime.
+        # (After 0.50× dampening the score is always < 0.60, so HIGH BUY /
+        # TACTICAL BUY thresholds can never trigger anyway; making intent explicit.)
+        e["badge"] = "WATCHLIST"
         e["_capitulation_survivor"] = True
         result.append(e)
     return result
