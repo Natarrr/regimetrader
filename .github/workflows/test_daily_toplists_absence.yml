@@ -63,6 +63,9 @@ jobs:
       - name: Trigger alert path (no top_lists.json)
         env:
           DISCORD_WEBHOOK_URL: "http://localhost:9999"
+          # send_discord.py imports src.risk.regime / src.utils.formatting at
+          # module level — the repo root must be importable.
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/delivery/send_discord.py \
             --input /tmp/nonexistent_top_lists.json \

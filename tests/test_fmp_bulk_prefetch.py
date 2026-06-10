@@ -1,8 +1,8 @@
 """tests/test_fmp_bulk_prefetch.py
 Unit tests for the FMP bulk response parser.
 
-FMP bulk routes serve text/csv as of 2026-06-09 (confirmed live for all
-three endpoints). Earlier snapshots were NDJSON. A format the parser does
+FMP bulk routes serve text/csv as of 2026-06-09 (confirmed live for both
+endpoints). Earlier snapshots were NDJSON. A format the parser does
 not recognize must never silently yield 0 records again — that masked the
 entire bulk pipeline being dead.
 """

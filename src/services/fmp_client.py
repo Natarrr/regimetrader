@@ -16,7 +16,7 @@ All active scoring endpoints confirmed HTTP 200:
   cash-flow-statement                earning-call-transcript-latest
   commitment-of-traders-report       news/stock             institutional-ownership/symbol-positions-summary
   insider-trading/search             analyst-estimates      price-target-consensus
-  upgrades-downgrades-consensus-bulk ratios-ttm-bulk        key-metrics-ttm-bulk
+  upgrades-downgrades-consensus-bulk ratios-ttm-bulk
 
 Confirmed HTTP 404 (quarantined):
   upgrades-downgrades    senate-trading    house-trading

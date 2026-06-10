@@ -54,22 +54,12 @@ except ImportError:
     requests = None  # type: ignore
     _HAS_REQUESTS = False
 
-try:
-    from src.utils.formatting import score_bar as _score_bar_util
-    _HAS_SCORE_BAR = True
-except ImportError:
-    _HAS_SCORE_BAR = False
-
-try:
-    # Canonical thresholds live in src.risk.regime (the old src.risk.regime
-    # module was deleted in the src migration — importing it left _HAS_REGIME
-    # permanently False and silently routed display through the legacy fallback).
-    from src.risk.regime import (  # noqa: E402
-        get_regime as _get_regime,
-    )
-    _HAS_REGIME = True
-except ImportError:
-    _HAS_REGIME = False
+from src.utils.formatting import score_bar as _score_bar_util  # noqa: E402
+from src.risk.regime import (  # noqa: E402
+    BEAR_THRESHOLD as _VIX_BEARISH,
+    CAPITULATION_THRESHOLD as _VIX_CAPITULATION,
+    get_regime as _get_regime,
+)
 
 log = logging.getLogger("discord.send_toplists")
 
@@ -94,12 +84,6 @@ _FACTOR_DISPLAY: List[tuple] = [
     ("analyst_consensus",  "AC"),
     ("analyst_revision",   "AR"),
 ]
-
-# ── VIX regime thresholds ─────────────────────────────────────────────────────
-# Fallback constants only — the live path uses src.risk.regime via _get_regime.
-# Keep aligned with src/risk/regime.py BEAR_THRESHOLD (bear starts at 20).
-_VIX_BEARISH = 20.0
-_VIX_STABLE = 15.0
 
 # ── Sector normalisation ───────────────────────────────────────────────────────
 _SECTOR_SHORT: Dict[str, str] = {
@@ -146,10 +130,7 @@ except Exception:
 # ── Formatting helpers ─────────────────────────────────────────────────────────
 
 def _score_bar(score: float, width: int = 8) -> str:
-    if _HAS_SCORE_BAR:
-        return _score_bar_util(score, width)
-    filled = min(width, max(0, round(score * width)))
-    return "▓" * filled + "░" * (width - filled)
+    return _score_bar_util(score, width)
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -425,23 +406,14 @@ def _truncate(text: str, max_chars: int = 1024) -> str:
 # ── Domain logic ───────────────────────────────────────────────────────────────
 
 def get_market_regime(vix: float) -> str:
-    if _HAS_REGIME:
-        regime = _get_regime(vix)
-        _emoji_map = {
-            "NORMAL":       "🟢",
-            "BEAR":         "🟡",
-            "CAPITULATION": "🔴",
-        }
-        emoji = _emoji_map.get(regime.value, "⚪")
-        return f"VIX `{vix:.1f}` {emoji} **{regime.value}**"
-    # Fallback: legacy 3-state display
-    if vix > _VIX_BEARISH:
-        label, emoji = "BEAR", "🔴"
-    elif vix > _VIX_STABLE:
-        label, emoji = "NORMAL", "🟡"
-    else:
-        label, emoji = "NORMAL", "🟢"
-    return f"VIX `{vix:.1f}` {emoji} **{label}**"
+    regime = _get_regime(vix)
+    _emoji_map = {
+        "NORMAL":       "🟢",
+        "BEAR":         "🟡",
+        "CAPITULATION": "🔴",
+    }
+    emoji = _emoji_map.get(regime.value, "⚪")
+    return f"VIX `{vix:.1f}` {emoji} **{regime.value}**"
 
 
 def _spy_qqq_snapshot() -> str:
@@ -1374,7 +1346,7 @@ def build_institutional_payload(top_lists: dict) -> list:
     kill_switch = top_lists.get("kill_switch", False)
     gen_at      = (top_lists.get("generated_at") or "")[:16]
 
-    if kill_switch or vix >= 30:
+    if kill_switch or vix >= _VIX_CAPITULATION:
         strategy = "CAPITULATION DISTRESSED REGIME / HIGH-QUALITY ANCHORS ONLY"
     elif vix >= _VIX_BEARISH:
         strategy = "DEFENSIVE / GRADUATED POSITIONING ACTIVATED"
@@ -1386,7 +1358,7 @@ def build_institutional_payload(top_lists: dict) -> list:
 
     watchlist = top_lists.get("watchlist", [])
     panic_note = ""
-    if (kill_switch or vix >= 30) and not (
+    if (kill_switch or vix >= _VIX_CAPITULATION) and not (
         top_lists.get("top_buys_usa") or
         top_lists.get("top_buys_europe") or
         top_lists.get("top_buys_asia")
@@ -1457,7 +1429,7 @@ def build_institutional_payload(top_lists: dict) -> list:
         SEP,
     ])
 
-    color = _COLOR_RED if (kill_switch or vix >= 30) else (
+    color = _COLOR_RED if (kill_switch or vix >= _VIX_CAPITULATION) else (
         _COLOR_ORANGE if vix >= _VIX_BEARISH else _COLOR_GREEN
     )
 

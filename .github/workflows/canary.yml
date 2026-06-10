@@ -83,7 +83,6 @@ jobs:
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
                          ratios-ttm-bulk \
-                         key-metrics-ttm-bulk \
             --verbose
 
       # ── Run pipeline ─────────────────────────────────────────────────────────

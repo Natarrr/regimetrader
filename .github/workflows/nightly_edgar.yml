@@ -89,7 +89,6 @@ jobs:
             --ttl-hours  "$TTL" \
             --endpoints  upgrades-downgrades-consensus-bulk \
                          ratios-ttm-bulk \
-                         key-metrics-ttm-bulk \
             --verbose
 
       # ── EDGAR full-universe fetch ─────────────────────────────────────────────

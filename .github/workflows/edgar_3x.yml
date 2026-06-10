@@ -7,7 +7,6 @@ name: edgar_3x
 # Confirmed-working bulk endpoints (stable/ NDJSON, 2026-06-03):
 #   upgrades-downgrades-consensus-bulk → analyst_consensus score
 #   ratios-ttm-bulk                    → Piotroski verification + quality factors
-#   key-metrics-ttm-bulk               → fundamental context
 #
 # Per-ticker FMP (not available as bulk):
 #   quality_piotroski  → FMPClient.get_quality_score() (ratios-ttm per-ticker)
@@ -104,7 +103,6 @@ jobs:
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
                          ratios-ttm-bulk \
-                         key-metrics-ttm-bulk \
             --verbose
 
       # ── 5. EDGAR fetch — 3-attempt retry ────────────────────────────────────

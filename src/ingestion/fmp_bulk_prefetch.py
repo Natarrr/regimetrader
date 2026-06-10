@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# scripts/fmp_bulk_prefetch.py
+# Path: src/ingestion/fmp_bulk_prefetch.py
 """
 FMP Ultimate — Bulk endpoint pre-fetcher.
 
@@ -12,7 +12,6 @@ Confirmed working stable/ routes (verified 2026-06-03):
   ratios-ttm-bulk                    → ratio fields; quality_piotroski score
                                        (score_quality_piotroski tolerates TTM-suffixed
                                        and unsuffixed field names)
-  key-metrics-ttm-bulk               → peRatioTTM, revenuePerShareTTM, etc.
 
 Response format: FMP returns NDJSON (one JSON object per line), not a JSON array.
 The parser handles both formats transparently.
@@ -23,12 +22,14 @@ Removed endpoints (not available or no scoring consumer):
   earnings-surprises-bulk — no scoring consumer; PEAD boost uses per-ticker
                             FMPClient.get_earnings_surprise() (stable/ "earnings")
   price-target-summary-bulk — no scoring consumer; PT upside uses per-ticker FMPClient
+  key-metrics-ttm-bulk    — ~12 MB/day with zero analytical consumers; re-add to
+                            ENDPOINT_ROUTES only when a factor reads its fields
 
 Cache format: {cache_dir}/{endpoint}.json
 Metadata: _cached_at (ISO), _ttl_hours, _record_count.
 
 Usage:
-  python scripts/fmp_bulk_prefetch.py \\
+  python src/ingestion/fmp_bulk_prefetch.py \\
       --cache-dir .cache/bulk_snapshots \\
       --ttl-hours 23 \\
       --endpoints upgrades-downgrades-consensus-bulk ratios-ttm-bulk \\
@@ -65,14 +66,12 @@ FMP_BASE = "https://financialmodelingprep.com/stable"
 ENDPOINT_ROUTES: dict[str, str] = {
     "upgrades-downgrades-consensus-bulk": "upgrades-downgrades-consensus-bulk",
     "ratios-ttm-bulk":                    "ratios-ttm-bulk",
-    "key-metrics-ttm-bulk":               "key-metrics-ttm-bulk",
 }
 
 # Approximate response sizes (for logging)
 ENDPOINT_SIZES_MB: dict[str, float] = {
     "upgrades-downgrades-consensus-bulk": 4.0,
     "ratios-ttm-bulk":                    15.0,
-    "key-metrics-ttm-bulk":               12.0,
 }
 
 
