@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
-from typing import Any
+from typing import Any, Dict, Optional
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,12 @@ _FACTORS_DEFAULT = (
 )
 _SIGMOID_CLIP_LO = 0.01
 _SIGMOID_CLIP_HI = 0.99
+
+# Scores live on a [0, 1] scale; bucket std below this is floating-point
+# noise from non-representable values (e.g., 6 × 0.7 sums inexactly leaving
+# std ≈ 2e-16), NOT genuine cross-sectional spread. An exact `std == 0.0`
+# check amplifies noise/noise into full z-scores.
+_STD_EPS = 1e-9
 
 
 def _sigmoid(z: float) -> float:
@@ -66,6 +72,8 @@ def neutralize_factors(
     min_bucket_size: int = 5,
     fallback_group_by: tuple[str, ...] = ("cap_tier",),
     output_suffix: str = "_neutral",
+    none_passthrough: bool = False,
+    zero_is_dead: Optional[Dict[str, bool]] = None,
 ) -> list[dict[str, Any]]:
     """Apply cross-sectional z-score neutralization within sector × cap_tier buckets.
 
@@ -85,12 +93,23 @@ def neutralize_factors(
                           bucket-level stats (default: 5).
         fallback_group_by: Keys for the fallback bucket (default: cap_tier only).
         output_suffix:    Suffix appended to each neutralized factor key.
+        none_passthrough: v3.0 missing-data semantics (OPT-IN — default False
+                          keeps v2.2 byte-identical): a raw value of None is
+                          "data unavailable", excluded from bucket stats and
+                          emitted as ``{factor}{output_suffix} = None`` so the
+                          pillar aggregator reweights, instead of being
+                          coerced to a bearish dead 0.0.
+        zero_is_dead:     Per-factor override (default: all True = v2.2).
+                          False marks a SIGNED factor (centered at 0.5) whose
+                          true 0.0 is a real worst-case observation: it enters
+                          bucket μ/σ and receives sigmoid(z), never the dead
+                          floor (mass-point defense applies to unsigned only).
 
     Returns:
         New list of dicts with added ``{factor}{output_suffix}`` keys.
         Original score keys are preserved unchanged.
         Each dict also gains ``_neutralization_fallback`` ∈
-        {"sector_cap_tier", "cap_tier", "raw", "zero"}.
+        {"sector_cap_tier", "cap_tier", "raw", "zero", "none"}.
     """
     if not results:
         return results
@@ -107,14 +126,22 @@ def neutralize_factors(
     output = [dict(r) for r in results]  # shallow copy per row
 
     for factor in factors:
-        # Collect non-zero values per primary bucket
+        dead_on_zero = True if zero_is_dead is None else zero_is_dead.get(factor, True)
+
+        # Collect active values per primary bucket
         primary_nonzero: dict[tuple, list[tuple[int, float]]] = defaultdict(list)
         fallback_nonzero: dict[tuple, list[tuple[int, float]]] = defaultdict(list)
         zero_indices: list[int] = []
+        none_indices: list[int] = []
 
         for idx, row in enumerate(output):
-            val = float(row.get(factor, 0.0) or 0.0)
-            if val == 0.0:
+            raw = row.get(factor)
+            if raw is None and none_passthrough:
+                # v3: data unavailable — never enters stats, emits None.
+                none_indices.append(idx)
+                continue
+            val = float(raw or 0.0)
+            if val == 0.0 and dead_on_zero:
                 zero_indices.append(idx)
                 continue
             pk = _bucket_key(row, group_by)
@@ -132,7 +159,7 @@ def neutralize_factors(
             values = [v for _, v in entries]
             mean, std = _bucket_stats(values)
             for idx, val in entries:
-                if std == 0.0:
+                if std <= _STD_EPS:
                     neutral = 0.5
                 else:
                     z = (val - mean) / std
@@ -157,7 +184,7 @@ def neutralize_factors(
             values = [v for _, v in unprocessed]
             mean, std = _bucket_stats(values)
             for idx, val in unprocessed:
-                if std == 0.0:
+                if std <= _STD_EPS:
                     neutral = 0.5
                 else:
                     z = (val - mean) / std
@@ -167,11 +194,17 @@ def neutralize_factors(
                 output[idx]["_neutralization_fallback"] = "cap_tier"
                 processed.add(idx)
 
-        # ── Zero-score tickers ────────────────────────────────────────
+        # ── Zero-score tickers (dead feed) ────────────────────────────
         for idx in zero_indices:
             output[idx][f"{factor}{output_suffix}"] = 0.0
             if "_neutralization_fallback" not in output[idx]:
                 output[idx]["_neutralization_fallback"] = "zero"
+
+        # ── None tickers (data unavailable — v3 passthrough) ──────────
+        for idx in none_indices:
+            output[idx][f"{factor}{output_suffix}"] = None
+            if "_neutralization_fallback" not in output[idx]:
+                output[idx]["_neutralization_fallback"] = "none"
 
     # ------------------------------------------------------------------
     # Diagnostic logging

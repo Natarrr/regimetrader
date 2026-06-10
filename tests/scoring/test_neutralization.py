@@ -205,3 +205,121 @@ class TestNeutralizationFallbackForSmallBucket:
         # US Tech bucket must not be influenced by EU tickers
         us_neutral = [r["congress_score_neutral"] for r in us_tech_large]
         assert max(us_neutral) < 0.99, "US bucket should show spread, not all at ceiling"
+
+
+class TestV3MissingDataSemantics:
+    """v3.0: None passthrough (opt-in) + per-factor zero_is_dead flags.
+
+    None = data unavailable (excluded from stats AND output None);
+    0.0 on a signed factor = real observation entering bucket stats.
+    Default arguments preserve byte-identical v2.2 behavior.
+    """
+
+    def _bucket(self, scores, factor="pead_score", market="USA"):
+        return [
+            {"ticker": f"T{i}", "sector": "Technology", "cap_tier": "large",
+             "market": market, factor: s}
+            for i, s in enumerate(scores)
+        ]
+
+    def test_none_passes_through_as_none(self):
+        rows = self._bucket([0.6, 0.7, 0.8, 0.5, 0.4, None])
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+            none_passthrough=True,
+        )
+        none_row = next(r for r in result if r["ticker"] == "T5")
+        assert none_row["pead_score_neutral"] is None
+        assert none_row["_neutralization_fallback"] == "none"
+
+    def test_none_excluded_from_bucket_stats(self):
+        # Adding a None row must not perturb the other rows' neutral scores.
+        base_scores = [0.6, 0.7, 0.8, 0.5, 0.4]
+        without = neutralize_factors(
+            self._bucket(base_scores), factors=("pead_score",),
+            min_bucket_size=5, none_passthrough=True,
+        )
+        with_none = neutralize_factors(
+            self._bucket(base_scores + [None]), factors=("pead_score",),
+            min_bucket_size=5, none_passthrough=True,
+        )
+        for i in range(5):
+            assert (with_none[i]["pead_score_neutral"]
+                    == without[i]["pead_score_neutral"]), f"row {i} perturbed"
+
+    def test_default_keeps_v22_none_coercion(self):
+        # Without none_passthrough, None must still coerce to dead 0.0 —
+        # v2.2 callers stay byte-identical until cutover.
+        rows = self._bucket([0.6, 0.7, 0.8, 0.5, 0.4, None])
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+        )
+        none_row = next(r for r in result if r["ticker"] == "T5")
+        assert none_row["pead_score_neutral"] == 0.0
+        assert none_row["_neutralization_fallback"] == "zero"
+
+    def test_signed_zero_enters_bucket_stats(self):
+        # zero_is_dead=False: a true 0.0 is a real (worst-in-bucket)
+        # observation — sigmoid(z) output, never the dead-zero floor.
+        rows = self._bucket([0.0, 0.2, 0.4, 0.6, 0.8])
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+            zero_is_dead={"pead_score": False},
+        )
+        zero_row = next(r for r in result if r["ticker"] == "T0")
+        assert zero_row["_neutralization_fallback"] == "sector_cap_tier"
+        assert 0.01 <= zero_row["pead_score_neutral"] < 0.5
+        neutrals = [r["pead_score_neutral"] for r in result]
+        assert neutrals == sorted(neutrals)  # ordering preserved
+
+    def test_unsigned_zero_still_dead_by_default(self):
+        rows = self._bucket([0.0, 0.2, 0.4, 0.6, 0.8])
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+        )
+        zero_row = next(r for r in result if r["ticker"] == "T0")
+        assert zero_row["pead_score_neutral"] == 0.0
+        assert zero_row["_neutralization_fallback"] == "zero"
+
+    def test_all_none_bucket_no_errors(self):
+        rows = self._bucket([None] * 6)
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+            none_passthrough=True,
+        )
+        assert all(r["pead_score_neutral"] is None for r in result)
+
+    def test_all_dead_bucket_no_errors(self):
+        rows = self._bucket([0.0] * 6)
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+        )
+        assert all(r["pead_score_neutral"] == 0.0 for r in result)
+
+    def test_identical_values_neutral_despite_float_noise(self):
+        # 6 × 0.7 doesn't sum exactly in binary floating point, leaving
+        # std ≈ 2e-16 — the exact `std == 0.0` check missed it and amplified
+        # noise/noise into z ≈ 1 (sigmoid 0.731). Identical buckets must
+        # always map to 0.5 (documented degenerate case).
+        rows = self._bucket([0.7] * 6)
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+        )
+        for r in result:
+            assert r["pead_score_neutral"] == pytest.approx(0.5)
+
+    def test_four_identical_plus_one_outlier(self):
+        # Population-std bound: |z| ≤ √(n−1) → n=5 gives z_outlier = 2.0
+        # (sigmoid ≈ 0.8808), the 4 identical names sit at z = −0.5
+        # (sigmoid ≈ 0.3775). Compressed spread, order preserved, no blowup.
+        rows = self._bucket([0.5, 0.5, 0.5, 0.5, 0.9])
+        result = neutralize_factors(
+            rows, factors=("pead_score",), min_bucket_size=5,
+            zero_is_dead={"pead_score": False},
+        )
+        outlier = next(r for r in result if r["ticker"] == "T4")
+        others = [r for r in result if r["ticker"] != "T4"]
+        assert outlier["pead_score_neutral"] == pytest.approx(0.8808, abs=1e-3)
+        for r in others:
+            assert r["pead_score_neutral"] == pytest.approx(0.3775, abs=1e-3)
+        assert all(0.01 <= r["pead_score_neutral"] <= 0.99 for r in result)
