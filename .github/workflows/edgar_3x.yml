@@ -163,7 +163,7 @@ jobs:
 
       # ── 7. Generate top_lists.json ───────────────────────────────────────────
       #
-      # Weights: see regime_trader/config/weights.py (canonical source, v2.0-post-sprint)
+      # Weights: see src/config/weights.py (canonical source, v2.0-post-sprint)
       # quality_piotroski applied as multiplicative gate:
       #   piotroskiScore < 3 → BUY score multiplied by 0.0 (suppressed)
       #   piotroskiScore 3-5 → multiplied by 0.6 (discounted)

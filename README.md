@@ -1,10 +1,10 @@
 # regime_trader
 
-[![market_intel](https://github.com/Natarrr/regimetrader/actions/workflows/market_intel.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/market_intel.yml)
+[![ci](https://github.com/Natarrr/regimetrader/actions/workflows/ci.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/ci.yml)
 [![canary](https://github.com/Natarrr/regimetrader/actions/workflows/canary.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/canary.yml)
 [![nightly_edgar](https://github.com/Natarrr/regimetrader/actions/workflows/nightly_edgar.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/nightly_edgar.yml)
 [![edgar_3x](https://github.com/Natarrr/regimetrader/actions/workflows/edgar_3x.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/edgar_3x.yml)
-[![daily_discord](https://github.com/Natarrr/regimetrader/actions/workflows/daily_toplists_discord.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/daily_toplists_discord.yml)
+[![daily_trading_pipeline](https://github.com/Natarrr/regimetrader/actions/workflows/daily_trading_pipeline.yml/badge.svg)](https://github.com/Natarrr/regimetrader/actions/workflows/daily_trading_pipeline.yml)
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 
 EDGAR-first market intelligence and regime detection pipeline.
@@ -13,11 +13,14 @@ EDGAR-first market intelligence and regime detection pipeline.
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| `market_intel` | push, PR, schedule (3×/day weekdays) | Unit tests + EDGAR data fetch |
+| `ci` | push to main, PR | Lint (ruff) + import sanity + full test suite gate |
 | `canary` | schedule (06:00, 12:00, 18:00 UTC) | End-to-end pipeline health check (10 tickers) |
-| `nightly_edgar` | manual dispatch only | Full 160-ticker EDGAR backfill with retry |
+| `daily_trading_pipeline` | schedule (00:30, 08:30, 16:30 UTC weekdays) | Consolidated US + INTL scoring → Discord delivery |
 | `edgar_3x` | schedule (00:00, 08:00, 16:00 UTC) | 3× daily data fetch + top_lists artifact |
-| `daily_toplists_discord` | schedule (13:00 UTC daily) | Daily 14:00 London market checkup → Discord |
+| `hybrid_pipeline` | schedule (12:30 UTC weekdays) | Claude AI analysis on top of edgar_3x artifact |
+| `nightly_edgar` | manual dispatch only | Full universe EDGAR backfill with retry |
+| `test_daily_toplists_absence` | push (send_discord paths), manual | Live integration test of the DATA UNAVAILABLE alert path |
+| `weekly_backtest` | schedule (Friday 21:00 UTC) | Weekly signal backtest validation |
 
 ## Quick start
 
@@ -33,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File run_canary.ps1  # loads .env values lik
 python -m backend.market_intel.generate_top_lists --log-dir logs --force
 
 # Preview Discord message (no webhook needed)
-python scripts/send_toplists_discord.py --dry-run
+python -m src.delivery.send_discord --dry-run
 ```
 
 ## Test suite
@@ -41,30 +44,46 @@ python scripts/send_toplists_discord.py --dry-run
 ```bash
 # CI-equivalent (lightweight deps)
 pip install -r requirements-ci.txt
-pytest backend/tests/market_intel/ -v --noconftest
 pytest tests/ -v
 ```
 
 ## Project layout
 
 ```text
-backend/market_intel/   EDGAR ingestion pipeline + generate_top_lists.py
-monitoring/             Metrics export, threshold checks, alert state, minsky_alert
-scripts/                send_toplists_discord.py — daily Discord checkup
-tests/                  Canary hardening suite + top_lists tests
-tests/data/             Sample JSON fixtures for unit tests
-config/                 Ticker lists (canary_top10.csv)
-.github/workflows/      CI/CD (market_intel, canary, nightly_edgar, edgar_3x, discord)
+src/                    Core package (single namespace)
+  config/               Factor weights (weights.py — canonical SSOT)
+  core/                 Fetcher base classes (fetchers_base.py)
+  delivery/             audit_payload, cook_toplists, send_discord
+  engine/               StrategyEngine + profile_runner (INTL scoring)
+  fetchers/             Market fetcher orchestrator
+  ingestion/            run_pipeline, fmp_fetcher, fmp_bulk_prefetch
+  monitoring/           In-pipeline QA (factor_orthogonality)
+  research/             historical_loader (run archiving)
+  risk/                 regime.py (VIX thresholds SSOT), exit_rules.py
+  scoring/              Signal modules (insider, momentum, news, analyst, …)
+  services/             FMP API client
+  utils/                io, formatting helpers
+backend/market_intel/   generate_top_lists.py scoring orchestrator + validator
+backend/quant_models/   Economic indicator models
+monitoring/             Ops monitoring: metrics export, threshold checks, alerts
+analysis/               Claude API client + earnings analyzer
+scripts/                CLI utilities (check_imports, backtest_signals, …)
+pages/                  Streamlit dashboard pages
+feature_engineering/    Feature computation (used by dashboard + delivery)
+hmm_engine/             HMM regime classifier
+tests/                  Test suite (pytest)
+config/                 Ticker lists (universe.csv, canary_top10.csv)
+.github/workflows/      CI/CD (ci, canary, daily_trading_pipeline, edgar_3x, …)
 ```
 
 ## Operation — Daily Checkup
 
 ### What it does
 
-Every day at **14:00 London time (BST)**, the `daily_toplists_discord` workflow:
+On weekdays at **00:30, 08:30 and 16:30 UTC** (30 min after each `edgar_3x` cache write), the `daily_trading_pipeline` workflow:
 
-1. Downloads the latest `top-lists` artifact from `edgar_3x` (produced 3× daily)
-2. Runs `scripts/send_toplists_discord.py` to format and POST a Discord embed
+1. Reuses the bulk cache produced by `edgar_3x` (3× daily)
+2. Runs `src/delivery/send_discord.py` to format and POST a Discord embed
 3. The embed contains three ranked lists — Top 5 Buys, Top 5 Mid Caps, Top 5 Small Caps — each with 5-factor breakdown
 
 ### Five-factor scoring formula
@@ -103,16 +122,6 @@ In GitHub → Settings → Secrets → Actions:
 | `FMP_API_KEY` | Optional | Financial Modeling Prep API key (enables congress + institutional factors) |
 | `SLACK_WEBHOOK_URL` | Optional | Slack webhook for Minsky CRITICAL alerts |
 
-### DST note
-
-The schedule `cron: "0 13 * * *"` targets **14:00 BST** (UTC+1, last Sunday March – last Sunday October).
-
-During **winter (GMT, UTC+0)**, 13:00 UTC = 13:00 London. To maintain 14:00 London year-round,
-either:
-
-- Switch to `cron: "0 14 * * *"` in winter and revert in spring (manual update)
-- Use an external scheduler (Inngest, Zapier, AWS EventBridge) that resolves `Europe/London` timezone before calling `workflow_dispatch`
-
 ### Local test
 
 ```bash
@@ -120,16 +129,16 @@ either:
 python -m backend.market_intel.generate_top_lists --log-dir logs --force --verbose
 
 # 2. Preview the Discord embed (no webhook, no network)
-python scripts/send_toplists_discord.py \
+python -m src.delivery.send_discord \
   --input logs/top_lists.json \
   --dry-run
 
 # 3. Send for real (requires DISCORD_WEBHOOK_URL in environment)
 DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." \
-  python scripts/send_toplists_discord.py --input logs/top_lists.json
+  python -m src.delivery.send_discord --input logs/top_lists.json
 
 # 4. Run unit tests
-pytest tests/test_top_lists.py -v
+pytest tests/test_send_toplists_discord.py -v
 ```
 
 ### Artifact retention policy
@@ -138,6 +147,6 @@ pytest tests/test_top_lists.py -v
 | --- | --- | --- |
 | `top-lists` | `edgar_3x` | 7 days |
 | `edgar-3x-debug-*` | `edgar_3x` | 14 days |
-| `discord-send-log-*` | `daily_toplists_discord` | 7 days |
+| `discord-send-log-*` | `daily_trading_pipeline` | 7 days |
 | `nightly-edgar-*` | `nightly_edgar` | 90 days |
 | `canary-*` | `canary` | 14 days |

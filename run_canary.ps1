@@ -46,7 +46,7 @@ if ($env:PYTHONPATH) { $env:PYTHONPATH = "$root;$env:PYTHONPATH" } else { $env:P
 
 # Run pipeline
 Write-Host "Running EDGAR pipeline..."
-& $python .\scripts\run_pipeline.py --tickers-file config/canary_top10.csv --verbose
+& $python src\ingestion\run_pipeline.py --tickers-file config/canary_top10.csv --max-workers 4 --verbose
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Pipeline failed" -ForegroundColor Red
     exit 2
