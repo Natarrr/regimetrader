@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch, call
 import time
 import pytest
 
-from regime_trader.services.fmp_client import FMPClient
+from src.services.fmp_client import FMPClient
 
 
 # ── Fixtures & helpers ──────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ class TestFetchFMPInsiderAll:
         monkeypatch.setenv("FMP_API_KEY", "test-key")
         monkeypatch.setenv("FMP_MAX_RPS", "1000")
         from src.ingestion.run_pipeline import fetch_fmp_insider_all
-        from regime_trader.services.fmp_client import FMPClient
+        from src.services.fmp_client import FMPClient
 
         with patch.object(FMPClient, "get_insider_purchases", return_value=(800_000.0, 5)):
             result = fetch_fmp_insider_all(["NVDA", "AAPL"])
@@ -342,7 +342,7 @@ class TestGetEarningsTranscript:
         assert mock_get.call_count == 1  # second call served from cache
 
     def test_returns_none_on_fmp_endpoint_error(self, client):
-        from regime_trader.services.fmp_client import FMPEndpointError
+        from src.services.fmp_client import FMPEndpointError
         with patch.object(client, "_get", side_effect=FMPEndpointError("earning-call-transcript-latest", 404)):
             result = client.get_earnings_transcript("AAPL")
         assert result is None
@@ -559,12 +559,12 @@ class TestGetEarningsSurprise:
         assert first == second
 
     def test_endpoint_error_soft_fails(self, client):
-        from regime_trader.services.fmp_client import FMPEndpointError
+        from src.services.fmp_client import FMPEndpointError
         with patch.object(client, "_get", side_effect=FMPEndpointError("earnings", 404)):
             assert client.get_earnings_surprise("AAPL") == (None, 0)
 
     def test_endpoint_not_quarantined(self, client):
         """Regression: "earnings" must never join _DEAD_ENDPOINTS by accident."""
-        from regime_trader.services.fmp_client import _DEAD_ENDPOINTS
+        from src.services.fmp_client import _DEAD_ENDPOINTS
         assert "earnings" not in _DEAD_ENDPOINTS
         assert "earnings-surprises" not in _DEAD_ENDPOINTS  # removed — no longer called

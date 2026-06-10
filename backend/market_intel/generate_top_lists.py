@@ -3,7 +3,7 @@ Nine-factor weighted scoring → top_lists_us.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
 and applies Markowitz (1990 Nobel) portfolio ranking. WEIGHTS are imported
-from regime_trader.weights (canonical single source of truth).
+from src.weights (canonical single source of truth).
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -38,12 +38,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from regime_trader.scoring.normalize import normalize_score
-from regime_trader.utils.io import save_json_atomic
+from src.scoring.normalize import normalize_score
+from src.utils.io import save_json_atomic
 from backend.market_intel.validator import detect_anomalies, PipelineIntegrityError  # noqa: F401 (re-exported)
 # Canonical 9-factor weights — v2.1-global, single source of truth.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
-from regime_trader.config.weights import (
+from src.config.weights import (
     WEIGHTS, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
     get_region, _piotroski_gate_multiplier,
 )
@@ -53,7 +53,7 @@ log = logging.getLogger("generate_top_lists")
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
-    "Check regime_trader/config/weights.py."
+    "Check src/config/weights.py."
 )
 
 # Maps factor key → field name in intel_source_status.json results (12-factor schema).
@@ -663,7 +663,7 @@ def _read_vix(log_dir: Path) -> Optional[float]:
 
     # Fallback: FMP stable/quote for ^VIX (real-time, no yfinance needed)
     try:
-        from regime_trader.services.fmp_client import FMPClient as _FC
+        from src.services.fmp_client import FMPClient as _FC
         q = _FC().get_quote("^VIX")
         if q:
             vix = float(q.get("price") or q.get("previousClose") or 0)

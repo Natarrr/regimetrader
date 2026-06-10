@@ -10,7 +10,7 @@ import json
 import pytest
 from pathlib import Path
 
-from regime_trader.scoring.analyst import score_analyst_consensus, _score_record
+from src.scoring.analyst import score_analyst_consensus, _score_record
 
 
 def test_cache_missing_returns_cache_missing_tag(tmp_path):

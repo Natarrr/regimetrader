@@ -1,4 +1,4 @@
-"""regime_trader.research — empirical validation tools for factor weights.
+"""src.research — empirical validation tools for factor weights.
 
 Implements Information Coefficient (IC) backtesting per:
   López de Prado (2018), Advances in Financial Machine Learning, ch. 7-8

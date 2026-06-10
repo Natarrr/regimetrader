@@ -1,5 +1,5 @@
 """tests/test_normalize.py
-Unit tests for regime_trader.scoring.normalize.
+Unit tests for src.scoring.normalize.
 
 Markowitz (1990 Nobel) — signals must be comparable and bounded before
 portfolio construction. Tests validate math against known inputs including
@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from regime_trader.scoring.normalize import (
+from src.scoring.normalize import (
     winsorize,
     normalize_score,
     fallback_reweight,

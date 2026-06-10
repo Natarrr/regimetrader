@@ -1,4 +1,4 @@
-"""regime_trader/scoring/neutralization.py
+"""src/scoring/neutralization.py
 Cross-sectional factor neutralization by sector × cap_tier bucket.
 
 Theory — Grinold & Kahn (2000), "Active Portfolio Management" ch. 7:

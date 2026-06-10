@@ -1,4 +1,4 @@
-"""regime_trader/scoring/insider_signals.py
+"""src/scoring/insider_signals.py
 Orthogonal insider signal decomposition.
 
 Theory — Cohen, Malloy & Pomorski (2012), "Decoding Inside Information"

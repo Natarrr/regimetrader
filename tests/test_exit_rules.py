@@ -2,7 +2,7 @@
 """pytest — validates Batch Floor, PT signal, and breakout extension logic."""
 from __future__ import annotations
 import pytest
-from regime_trader.risk.exit_rules import (
+from src.risk.exit_rules import (
     compute_batch_floor,
     compute_pt_signal,
     compute_breakout_extension,

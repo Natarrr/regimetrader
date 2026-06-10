@@ -8,7 +8,7 @@ fallback chain (sector×cap_tier → cap_tier → raw) works correctly.
 from __future__ import annotations
 
 import pytest
-from regime_trader.scoring.neutralization import neutralize_factors
+from src.scoring.neutralization import neutralize_factors
 
 
 def _make_ticker(

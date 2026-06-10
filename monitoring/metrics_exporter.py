@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from regime_trader.utils.io import atomic_write_json
+from src.utils.io import atomic_write_json
 
 log = logging.getLogger("monitoring.metrics_exporter")
 

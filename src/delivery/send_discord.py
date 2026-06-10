@@ -55,13 +55,13 @@ except ImportError:
     _HAS_REQUESTS = False
 
 try:
-    from regime_trader.utils.formatting import score_bar as _score_bar_util
+    from src.utils.formatting import score_bar as _score_bar_util
     _HAS_SCORE_BAR = True
 except ImportError:
     _HAS_SCORE_BAR = False
 
 try:
-    # Canonical thresholds live in src.risk.regime (the old regime_trader.risk.regime
+    # Canonical thresholds live in src.risk.regime (the old src.risk.regime
     # module was deleted in the src migration — importing it left _HAS_REGIME
     # permanently False and silently routed display through the legacy fallback).
     from src.risk.regime import (  # noqa: E402
@@ -775,7 +775,7 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
 
 def _weights_for_entry(entry: dict) -> dict:
     """Return the correct weight dict based on ticker region."""
-    from regime_trader.config.weights import get_weights as _gw  # noqa: PLC0415
+    from src.config.weights import get_weights as _gw  # noqa: PLC0415
     ticker = entry.get("ticker", "")
     return _gw(ticker)
 
@@ -1305,7 +1305,7 @@ def build_regional_embeds(
 
 def _fmt_region_block(label: str, model_name: str, entries: list, max_entries: int = 3) -> str:
     try:
-        from regime_trader.risk.exit_rules import format_card_line  # noqa: PLC0415
+        from src.risk.exit_rules import format_card_line  # noqa: PLC0415
         _has_exit = True
     except ImportError:
         _has_exit = False
@@ -1326,7 +1326,7 @@ def _fmt_region_block(label: str, model_name: str, entries: list, max_entries: i
 
 def _fmt_mvo_pool(label: str, pool: dict) -> str:
     try:
-        from regime_trader.risk.exit_rules import format_card_line  # noqa: PLC0415
+        from src.risk.exit_rules import format_card_line  # noqa: PLC0415
         _has_exit = True
     except ImportError:
         _has_exit = False

@@ -1,4 +1,4 @@
-"""regime_trader/scoring/normalize.py
+"""src/scoring/normalize.py
 Score normalization, winsorizing, fallback reweighting, and explainability.
 
 Markowitz (1990 Nobel) — portfolio construction requires comparable, bounded
@@ -16,7 +16,7 @@ Public API:
     persist_explain(ticker, explain_dict, cache_root)
 
 Usage:
-    from regime_trader.scoring.normalize import normalize_score, winsorize, fallback_reweight
+    from src.scoring.normalize import normalize_score, winsorize, fallback_reweight
 
     raw = np.array([0.1, 0.5, 100.0, 0.3, 0.9])
     normed = normalize_score(raw)   # [0, 100] with outlier capping

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from regime_trader.utils.io import atomic_write_json
+from src.utils.io import atomic_write_json
 
 
 def test_writes_file_with_exact_content(tmp_path: Path) -> None:

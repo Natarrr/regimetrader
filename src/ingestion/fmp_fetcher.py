@@ -1,4 +1,4 @@
-# Path: regime_trader/fetchers/fmp_fetcher.py
+# Path: src/fetchers/fmp_fetcher.py
 """EU/Asia market data fetcher — FMP Ultimate stable/ routes.
 
 Phase-0 smoke-test (2026-05-30) confirmed FMP stable/ routes work for EU/Asia
@@ -95,21 +95,21 @@ class FMPFetcher(BaseMarketFetcher):
         Returns TickerEntry list with raw_factors containing every factor
         that has a global FMP data source. congress_score is always 0.0.
         """
-        from regime_trader.services.fmp_client import (  # noqa: PLC0415
+        from src.services.fmp_client import (  # noqa: PLC0415
             FMPClient, fmp_prices_to_arrays,
         )
-        from regime_trader.scoring.momentum_signals import (  # noqa: PLC0415
+        from src.scoring.momentum_signals import (  # noqa: PLC0415
             score_momentum_long, score_volume_attention,
             score_quality_piotroski, score_price_target_upside,
         )
-        from regime_trader.scoring.news_signals import (  # noqa: PLC0415
+        from src.scoring.news_signals import (  # noqa: PLC0415
             score_news_sentiment, score_news_buzz,
         )
-        from regime_trader.scoring.insider_signals import (  # noqa: PLC0415
+        from src.scoring.insider_signals import (  # noqa: PLC0415
             score_insider_conviction, score_insider_breadth,
             orthogonalize_insider_scores,
         )
-        from regime_trader.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
+        from src.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
 
         client = FMPClient(api_key=self._api_key)
         entries: list[TickerEntry] = []
@@ -393,7 +393,7 @@ class FMPFetcher(BaseMarketFetcher):
             pass  # non-critical — PEAD badge just won't show
 
         # ── 9. FCF Yield — Damodaran value signal ────────────────────────────
-        from regime_trader.scoring.fundamental_signals import (  # noqa: PLC0415
+        from src.scoring.fundamental_signals import (  # noqa: PLC0415
             score_fcf_yield, score_amihud_shock, score_pb_value_up, score_roic_quality,
         )
         fcf_yield_score: Optional[float] = None

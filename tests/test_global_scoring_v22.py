@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 def test_weights_us_sprint_v23():
     """congress reduced to 0.04 in v2.3 sprint to fund analyst_consensus + quality_piotroski."""
-    from regime_trader.config.weights import WEIGHTS_US
+    from src.config.weights import WEIGHTS_US
     assert WEIGHTS_US["congress"] == 0.04
     assert WEIGHTS_US["analyst_consensus"] == 0.10
     assert WEIGHTS_US["quality_piotroski"] == 0.08
@@ -24,78 +24,78 @@ def test_weights_us_sprint_v23():
 
 
 def test_weights_global_sum():
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.config.weights import WEIGHTS_GLOBAL
     assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6
 
 
 def test_weights_global_congress_zero():
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.config.weights import WEIGHTS_GLOBAL
     assert WEIGHTS_GLOBAL["congress"] == 0.0
 
 
 def test_weights_global_transcript_zero():
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.config.weights import WEIGHTS_GLOBAL
     assert WEIGHTS_GLOBAL.get("transcript_tone", 0.0) == 0.0
 
 
 def test_weights_global_insider_conviction_correct():
     """insider_conviction reduced 0.30→0.28 in v2.3 to fund analyst_revision + price_target_upside."""
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.config.weights import WEIGHTS_GLOBAL
     assert WEIGHTS_GLOBAL["insider_conviction"] == 0.28
 
 
 def test_weights_global_analyst_consensus_positive():
     """analyst_consensus should be > 0 in WEIGHTS_GLOBAL — it's now fetched globally."""
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.config.weights import WEIGHTS_GLOBAL
     assert WEIGHTS_GLOBAL.get("analyst_consensus", 0.0) > 0.0
 
 
 def test_weights_version_is_v22():
-    from regime_trader.config.weights import WEIGHTS_VERSION
+    from src.config.weights import WEIGHTS_VERSION
     assert "v2.2" in WEIGHTS_VERSION
 
 
 # ── 2. Market config factor availability ─────────────────────────────────────
 
 def test_eu_factors_include_insider():
-    from regime_trader.scoring.market_config import MARKET_FACTORS, Market
+    from src.scoring.market_config import MARKET_FACTORS, Market
     assert "insider_conviction_score" in MARKET_FACTORS[Market.EUROPE]
     assert "insider_breadth_score" in MARKET_FACTORS[Market.EUROPE]
 
 
 def test_eu_factors_include_news():
-    from regime_trader.scoring.market_config import MARKET_FACTORS, Market
+    from src.scoring.market_config import MARKET_FACTORS, Market
     assert "news_sentiment_score" in MARKET_FACTORS[Market.EUROPE]
     assert "news_buzz_score" in MARKET_FACTORS[Market.EUROPE]
 
 
 def test_eu_factors_include_analyst():
-    from regime_trader.scoring.market_config import MARKET_FACTORS, Market
+    from src.scoring.market_config import MARKET_FACTORS, Market
     assert "analyst_consensus_score" in MARKET_FACTORS[Market.EUROPE]
 
 
 def test_eu_factors_exclude_congress():
-    from regime_trader.scoring.market_config import MARKET_FACTORS, Market
+    from src.scoring.market_config import MARKET_FACTORS, Market
     assert "congress_score" not in MARKET_FACTORS[Market.EUROPE]
     assert "congress_score" not in MARKET_FACTORS[Market.ASIA]
 
 
 def test_asia_factors_include_insider():
-    from regime_trader.scoring.market_config import MARKET_FACTORS, Market
+    from src.scoring.market_config import MARKET_FACTORS, Market
     assert "insider_conviction_score" in MARKET_FACTORS[Market.ASIA]
 
 
 def test_market_weight_coverage_eu_high():
     """EU/Asia should now have ~100% weight coverage (only congress+transcript absent)."""
-    from regime_trader.scoring.market_config import market_weight_coverage, Market
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.scoring.market_config import market_weight_coverage, Market
+    from src.config.weights import WEIGHTS_GLOBAL
     coverage = market_weight_coverage(Market.EUROPE, WEIGHTS_GLOBAL)
     assert coverage > 0.95, f"Expected >95% coverage, got {coverage:.2%}"
 
 
 def test_renormalize_eu_sums_to_one():
-    from regime_trader.scoring.market_config import renormalize_weights_for_market, Market
-    from regime_trader.config.weights import WEIGHTS_GLOBAL
+    from src.scoring.market_config import renormalize_weights_for_market, Market
+    from src.config.weights import WEIGHTS_GLOBAL
     w = renormalize_weights_for_market(WEIGHTS_GLOBAL, Market.EUROPE)
     assert abs(sum(w.values()) - 1.0) < 1e-6
 
@@ -134,7 +134,7 @@ def test_eu_score_uses_global_weights():
 def test_eu_score_vs_old_penalty():
     """EU score with WEIGHTS_EU must exceed naive WEIGHTS_US score (dead congress weight)."""
     from backend.market_intel._score_compositor import compute_composite_score
-    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_EU
+    from src.config.weights import WEIGHTS_US, WEIGHTS_EU
 
     # Supply all WEIGHTS_EU keys so quality/analyst factors contribute fully
     factors = {k: 0.7 for k in WEIGHTS_EU}

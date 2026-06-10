@@ -1,4 +1,4 @@
-"""regime_trader/utils/formatting.py
+"""src/utils/formatting.py
 Shared display-formatting helpers used by both the Streamlit UI and Discord sender.
 """
 from __future__ import annotations

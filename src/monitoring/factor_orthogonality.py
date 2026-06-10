@@ -1,4 +1,4 @@
-"""regime_trader.monitoring.factor_orthogonality — permanent factor orthogonality monitoring.
+"""src.monitoring.factor_orthogonality — permanent factor orthogonality monitoring.
 
 Fix #8: López de Prado (AFML ch. 8) — "feature engineering is not done after one
 validation, it requires permanent monitoring of the assumed structure."

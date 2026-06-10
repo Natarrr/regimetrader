@@ -39,7 +39,7 @@ class TestGetTopCyclical:
     def _patch_fmp(self, rows: list[dict]):
         """Patch FMPClient.get_historical_prices to return the given rows."""
         return patch(
-            "regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+            "src.services.fmp_client.FMPClient.get_historical_prices",
             return_value=rows,
         )
 
@@ -89,7 +89,7 @@ class TestGetTopCyclical:
             rows.sort(key=lambda r: r["date"], reverse=True)
             return rows
 
-        with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+        with patch("src.services.fmp_client.FMPClient.get_historical_prices",
                    side_effect=_side):
             with patch("backend.market_intel.satellite_factors.datetime") as mock_dt:
                 mock_dt.now.return_value = MagicMock(month=5, tzinfo=timezone.utc)
@@ -99,7 +99,7 @@ class TestGetTopCyclical:
 
     def test_returns_empty_on_fmp_exception(self):
         """Any exception from FMP returns []."""
-        with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+        with patch("src.services.fmp_client.FMPClient.get_historical_prices",
                    side_effect=RuntimeError("network error")):
             result = get_top_cyclical(["AAPL"])
         assert result == []
@@ -147,7 +147,7 @@ class TestGetTopCannibals:
             return_value=self._good_info(),
         ):
             with patch(
-                "regime_trader.services.fmp_client.FMPClient.get_cash_flow_statements",
+                "src.services.fmp_client.FMPClient.get_cash_flow_statements",
                 return_value=quarters,
             ):
                 result = get_top_cannibals(["PLTR"], self._FMP_KEY, {"PLTR": 0.0})
@@ -166,7 +166,7 @@ class TestGetTopCannibals:
             return_value=self._good_info(pe=10.0, price=19.0, low_52w=18.0),
         ):
             with patch(
-                "regime_trader.services.fmp_client.FMPClient.get_cash_flow_statements",
+                "src.services.fmp_client.FMPClient.get_cash_flow_statements",
                 return_value=quarters,
             ):
                 result = get_top_cannibals(

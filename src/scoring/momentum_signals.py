@@ -1,4 +1,4 @@
-"""regime_trader/scoring/momentum_signals.py
+"""src/scoring/momentum_signals.py
 Orthogonal momentum and attention signals.
 
 Theory:

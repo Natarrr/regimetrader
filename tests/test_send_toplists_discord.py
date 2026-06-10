@@ -151,7 +151,7 @@ def test_weights_for_entry_returns_regional_weights():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    from regime_trader.config.weights import WEIGHTS_US, WEIGHTS_EU
+    from src.config.weights import WEIGHTS_US, WEIGHTS_EU
 
     intl_entry = {"ticker": "SAP.DE", "pipeline": "INTL", "factors": {"momentum_long": 0.8}}
     us_entry   = {"ticker": "MSFT",   "pipeline": "US",   "factors": {"congress": 0.5}}

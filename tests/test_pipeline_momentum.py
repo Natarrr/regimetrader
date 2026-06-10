@@ -35,7 +35,7 @@ class TestFetchPriceData:
 
     def _patch(self, rows):
         return patch(
-            "regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+            "src.services.fmp_client.FMPClient.get_historical_prices",
             return_value=rows,
         )
 
@@ -64,7 +64,7 @@ class TestFetchPriceData:
 
     def test_exception_returns_none(self):
         """Exception → default dict with return_12_1m=None."""
-        with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+        with patch("src.services.fmp_client.FMPClient.get_historical_prices",
                    side_effect=Exception("network error")):
             result = fetch_price_data("AAPL")
         assert result["return_12_1m"] is None

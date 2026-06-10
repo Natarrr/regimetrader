@@ -76,7 +76,7 @@ def _fmp_rows(closes: list, volumes: list) -> list:
     return list(reversed(rows))   # newest-first
 
 
-_PRICES = "regime_trader.services.fmp_client.FMPClient.get_historical_prices"
+_PRICES = "src.services.fmp_client.FMPClient.get_historical_prices"
 
 
 class TestFetchPriceDataEnhanced:
@@ -155,7 +155,7 @@ class TestQuiverEvidenceInResults:
 
             ticker_rows = _fmp_rows([100.0 + i / 3 for i in range(30)], [1_000_000.0] * 30)
 
-            with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+            with patch("src.services.fmp_client.FMPClient.get_historical_prices",
                        return_value=ticker_rows), \
                  patch("src.ingestion.run_pipeline._sec_get", side_effect=Exception("no SEC in test")), \
                  patch("src.ingestion.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
@@ -198,7 +198,7 @@ class TestEvidencePassthroughFields:
                            for i, (c, v) in enumerate(zip(closes, volumes))]
             ticker_rows = list(reversed(ticker_rows))
 
-            with patch("regime_trader.services.fmp_client.FMPClient.get_historical_prices",
+            with patch("src.services.fmp_client.FMPClient.get_historical_prices",
                        return_value=ticker_rows), \
                  patch("src.ingestion.run_pipeline._sec_get", side_effect=Exception("no SEC")), \
                  patch("src.ingestion.run_pipeline.fetch_fmp_profiles", return_value={"AAPL": 3e12}), \
@@ -234,7 +234,7 @@ class TestFetchFMPInsiderAllSignals:
         monkeypatch.setenv("FMP_API_KEY", "test-key")
         monkeypatch.setenv("FMP_MAX_RPS", "1000")
         from src.ingestion.run_pipeline import fetch_fmp_insider_all
-        from regime_trader.services.fmp_client import FMPClient
+        from src.services.fmp_client import FMPClient
         with patch.object(FMPClient, "get_insider_purchases", return_value=(250_000.0, 5)):
             result = fetch_fmp_insider_all(["AAPL"])
         assert result["AAPL"][0] == pytest.approx(250_000.0)
@@ -249,7 +249,7 @@ class TestFetchFMPInsiderAllSignals:
         monkeypatch.setenv("FMP_API_KEY", "test-key")
         monkeypatch.setenv("FMP_MAX_RPS", "1000")
         from src.ingestion.run_pipeline import fetch_fmp_insider_all
-        from regime_trader.services.fmp_client import FMPClient
+        from src.services.fmp_client import FMPClient
         with patch.object(FMPClient, "get_insider_purchases", side_effect=RuntimeError("network")):
             result = fetch_fmp_insider_all(["AAPL"])
         assert result["AAPL"] == (0.0, 0)

@@ -1,4 +1,4 @@
-# Path: regime_trader/config/weights.py
+# Path: src/config/weights.py
 #
 # WEIGHTS — canonical source for all scoring weight sets.
 # Version: v2.2-global (2026-06)
