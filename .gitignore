@@ -132,3 +132,9 @@ research/data/
 research/optimal_weights.json
 research/ic_report.json
 research/notebooks/.ipynb_checkpoints/
+
+# ── Root-level runtime output guard ───────────────────────────────────────────
+# Pipeline outputs belong in logs/ (already ignored). /-anchored: does NOT touch
+# tracked json under config/, data/, logs/archive/, tests/fixtures/.
+/*.json
+/junit.xml
