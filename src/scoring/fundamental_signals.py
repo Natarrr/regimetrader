@@ -220,3 +220,148 @@ def score_roic_quality(
 
     clipped = max(0.0, min(0.50, quality_ratio))
     return round(clipped / 0.50, 4)
+
+
+# ── DuPont quality composite (v3.0, US P1 anchor) ─────────────────────────────
+
+def _f(value) -> Optional[float]:
+    """float() that maps None/garbage/NaN to None."""
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(out) else out
+
+
+def score_quality_dupont(
+    roa: Optional[float],
+    npm: Optional[float],
+    asset_turnover: Optional[float],
+    debt_to_equity: Optional[float],
+) -> float:
+    """DuPont-derived quality composite, negative-range preserving.
+
+    roa_eff = returnOnAssetsTTM, else DuPont npm × asset_turnover.
+    roa_c   = (clip(roa_eff, −0.10, +0.20) + 0.10) / 0.30
+    npm_c   = (clip(npm,     −0.10, +0.25) + 0.10) / 0.35
+    lev     = 1.0 if 0 ≤ D/E < 0.5; 0.6 if < 1.0; 0.2 if < 2.0; else 0.0
+    score   = 0.5·roa_c + 0.3·npm_c + 0.2·lev, renormalized over the
+              components that are present.
+
+    The negative clip floor (−10%) preserves downside cross-sectional
+    variance: ROA −0.5% must outrank ROA −45% instead of both flattening
+    to the same 0 (component mass-point). All components missing → 0.0
+    (quality data is universal; total absence = broken feed; UNSIGNED dead).
+    """
+    roa_v = _f(roa)
+    npm_v = _f(npm)
+    at_v = _f(asset_turnover)
+    de_v = _f(debt_to_equity)
+
+    roa_eff = roa_v
+    if roa_eff is None and npm_v is not None and at_v is not None:
+        roa_eff = npm_v * at_v  # DuPont identity fallback
+
+    parts: list[tuple[float, float]] = []  # (weight, component)
+    if roa_eff is not None:
+        roa_c = (max(-0.10, min(0.20, roa_eff)) + 0.10) / 0.30
+        parts.append((0.5, roa_c))
+    if npm_v is not None:
+        npm_c = (max(-0.10, min(0.25, npm_v)) + 0.10) / 0.35
+        parts.append((0.3, npm_c))
+    if de_v is not None:
+        if 0.0 <= de_v < 0.5:
+            lev = 1.0
+        elif de_v < 1.0:
+            lev = 0.6
+        elif de_v < 2.0:
+            lev = 0.2
+        else:
+            lev = 0.0  # includes negative equity (D/E < 0) — distressed
+        parts.append((0.2, lev))
+
+    if not parts:
+        return 0.0
+    total_w = sum(w for w, _ in parts)
+    score = sum(w * c for w, c in parts) / total_w
+    return max(0.0, min(1.0, score))
+
+
+# ── Operating margin expansion (v3.0, ASIA P1 anchor) ─────────────────────────
+
+_QTR_GAP_MIN_DAYS = 70
+_QTR_GAP_MAX_DAYS = 110
+
+
+def _valid_statement_rows(rows: list[dict]) -> list[dict]:
+    """Rows with the fields margin math needs, newest-first by period end."""
+    out = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if not row.get("date") or not row.get("filingDate"):
+            continue  # filingDate required — look-ahead anchoring (CLAUDE.md)
+        if _f(row.get("revenue")) is None or _f(row.get("operatingIncome")) is None:
+            continue
+        out.append(row)
+    return sorted(out, key=lambda r: str(r["date"]), reverse=True)
+
+
+def _ttm_opm(rows: list[dict]) -> Optional[float]:
+    rev = sum(_f(r["revenue"]) for r in rows)
+    op = sum(_f(r["operatingIncome"]) for r in rows)
+    return op / rev if rev and rev > 0 else None
+
+
+def score_margin_expansion(
+    quarterly_rows: list[dict],
+    annual_rows: list[dict],
+) -> Optional[float]:
+    """TTM operating-margin trajectory: Δ = OPM(q0–3) − OPM(q4–7).
+
+    score = 0.5 + clip(Δ, −0.10, +0.10) / 0.20
+
+    Discrete-quarter validation BEFORE any summation: international rows can
+    be cumulative YTD (HKEX semi-annual mandates, JP tanshin) — consecutive
+    period-ends must be 70–110 days apart and strictly decreasing, else the
+    quarterly track is rejected (no heuristic differencing; mis-detection
+    risk exceeds the benefit at 0.13 weight) and the ticker drops to the
+    annual track: Δ = OPM(FY0) − OPM(FY−1), filingDate-anchored.
+
+    SIGNED factor: None only when BOTH tracks are unavailable.
+    """
+    from datetime import date as _date
+
+    quarters = _valid_statement_rows(quarterly_rows)
+    if len(quarters) >= 8:
+        window = quarters[:8]
+        try:
+            ends = [_date.fromisoformat(str(r["date"])[:10]) for r in window]
+            gaps = [(ends[i] - ends[i + 1]).days for i in range(len(ends) - 1)]
+            discrete = all(_QTR_GAP_MIN_DAYS <= g <= _QTR_GAP_MAX_DAYS
+                           for g in gaps)
+        except ValueError:
+            discrete = False
+        if discrete:
+            opm_now = _ttm_opm(window[:4])
+            opm_prior = _ttm_opm(window[4:8])
+            if opm_now is not None and opm_prior is not None:
+                delta = max(-0.10, min(0.10, opm_now - opm_prior))
+                return 0.5 + delta / 0.20
+        else:
+            log.debug(
+                "margin_expansion: quarterly rows fail discrete-window "
+                "validation (cumulative/semi-annual suspected) — annual track"
+            )
+
+    annuals = _valid_statement_rows(annual_rows)
+    if len(annuals) >= 2 and str(annuals[0]["date"]) != str(annuals[1]["date"]):
+        opm_now = _ttm_opm(annuals[:1])
+        opm_prior = _ttm_opm(annuals[1:2])
+        if opm_now is not None and opm_prior is not None:
+            delta = max(-0.10, min(0.10, opm_now - opm_prior))
+            return 0.5 + delta / 0.20
+
+    return None
