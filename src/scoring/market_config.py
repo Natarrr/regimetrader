@@ -1,4 +1,4 @@
-# Path: regime_trader/scoring/market_config.py
+# Path: src/scoring/market_config.py
 """Per-market factor availability and weight renormalization.
 
 PATCH v2.2-global (2026-06):

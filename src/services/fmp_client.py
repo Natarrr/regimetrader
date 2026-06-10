@@ -1,4 +1,4 @@
-"""regime_trader/services/fmp_client.py
+"""src/services/fmp_client.py
 FMP Ultimate unified client — migrated to stable/ routes (2026-05).
 
 WHY THIS REWRITE
@@ -16,7 +16,7 @@ All active scoring endpoints confirmed HTTP 200:
   cash-flow-statement                earning-call-transcript-latest
   commitment-of-traders-report       news/stock             institutional-ownership/symbol-positions-summary
   insider-trading/search             analyst-estimates      price-target-consensus
-  upgrades-downgrades-consensus-bulk ratios-ttm-bulk        key-metrics-ttm-bulk
+  upgrades-downgrades-consensus-bulk ratios-ttm-bulk
 
 Confirmed HTTP 404 (quarantined):
   upgrades-downgrades    senate-trading    house-trading
@@ -65,7 +65,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from regime_trader.utils.io import save_json_atomic
+from src.utils.io import save_json_atomic
 
 log = logging.getLogger(__name__)
 
@@ -921,7 +921,7 @@ class FMPClient:
         if not self._api_key:
             return 0.0, 0
         try:
-            from regime_trader.scoring.momentum_signals import score_quality_piotroski  # noqa: PLC0415
+            from src.scoring.momentum_signals import score_quality_piotroski  # noqa: PLC0415
             ratios = self.get_ratios_ttm(ticker)
             score, raw_count = score_quality_piotroski(ratios)
             return score, raw_count
@@ -1005,7 +1005,7 @@ class FMPClient:
         if not self._api_key:
             return None
         try:
-            from regime_trader.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
+            from src.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
             from datetime import date as _date  # noqa: PLC0415
             target_data = self.get_price_target_consensus(ticker)
             quote_data = self.get_quote(ticker)

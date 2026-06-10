@@ -1,8 +1,8 @@
 """tests/test_fmp_bulk_prefetch.py
 Unit tests for the FMP bulk response parser.
 
-FMP bulk routes serve text/csv as of 2026-06-09 (confirmed live for all
-three endpoints). Earlier snapshots were NDJSON. A format the parser does
+FMP bulk routes serve text/csv as of 2026-06-09 (confirmed live for both
+endpoints). Earlier snapshots were NDJSON. A format the parser does
 not recognize must never silently yield 0 records again — that masked the
 entire bulk pipeline being dead.
 """
@@ -141,7 +141,7 @@ class TestPiotroskiFromBulkSnapshot:
         )
 
     def test_bulk_record_scores_full_piotroski(self, tmp_path):
-        from regime_trader.scoring.momentum_signals import score_quality_piotroski
+        from src.scoring.momentum_signals import score_quality_piotroski
 
         self._write_snapshot(tmp_path)
         idx, _ = build_ticker_index_with_ambiguous(tmp_path, "ratios-ttm-bulk")
@@ -153,7 +153,7 @@ class TestPiotroskiFromBulkSnapshot:
     def test_junk_record_yields_dead_signal_for_fallback(self):
         """A record with no recognizable ratio fields must return (0.0, 0) so
         run_pipeline falls back to per-ticker FMP instead of scoring garbage."""
-        from regime_trader.scoring.momentum_signals import score_quality_piotroski
+        from src.scoring.momentum_signals import score_quality_piotroski
 
         score, raw = score_quality_piotroski({"symbol": "X", "unknownField": 1.0})
         assert (score, raw) == (0.0, 0)

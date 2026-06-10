@@ -191,7 +191,7 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
     #     error (also caught by check A above for > 1.0).
     # ------------------------------------------------------------------
     try:
-        from regime_trader.config.weights import get_weights as _get_weights
+        from src.config.weights import get_weights as _get_weights
         _weights_import_ok = True
     except ImportError:
         _weights_import_ok = False

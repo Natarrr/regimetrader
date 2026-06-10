@@ -4,7 +4,7 @@
 # Run: pytest tests/test_regional_weights.py -v
 
 import pytest
-from regime_trader.config.weights import (
+from src.config.weights import (
     WEIGHTS_US,
     WEIGHTS_GLOBAL,
     get_region,
@@ -100,7 +100,7 @@ def test_get_weights_us_returns_copy():
     assert WEIGHTS_US["congress"] == 0.04   # original not mutated
 
 def test_get_weights_eu_returns_copy():
-    from regime_trader.config.weights import WEIGHTS_EU
+    from src.config.weights import WEIGHTS_EU
     w = get_weights("SAP.DE")
     w["insider_conviction"] = 999.0
     assert WEIGHTS_EU["insider_conviction"] == 0.08   # original not mutated (WEIGHTS_EU, not GLOBAL)
@@ -124,7 +124,7 @@ def test_us_ticker_uses_us_weights():
 
 def test_eu_ticker_uses_eu_weights():
     """EU ticker with perfect scores should reach 1.0 (WEIGHTS_EU sums to 1)."""
-    from regime_trader.config.weights import WEIGHTS_EU
+    from src.config.weights import WEIGHTS_EU
     perfect = {k: 1.0 for k in WEIGHTS_EU}
     perfect["congress"] = 0.0   # EU: congress structurally absent — not contamination
     score, meta = compute_composite_score("SAP.DE", perfect, piotroski_raw=9)
@@ -136,7 +136,7 @@ def test_eu_ticker_uses_eu_weights():
 def test_eu_ticker_congress_contamination_guard():
     """If upstream scorer accidentally passes congress_score > 0 for an EU ticker,
     the compositor must zero it and log a warning."""
-    from regime_trader.config.weights import WEIGHTS_EU
+    from src.config.weights import WEIGHTS_EU
     contaminated = {k: 0.5 for k in WEIGHTS_EU}
     contaminated["congress"] = 0.8   # upstream contamination
     score, meta = compute_composite_score("SAP.DE", contaminated, piotroski_raw=7)
@@ -169,7 +169,7 @@ def test_us_score_unaffected_by_patch():
 def test_eu_score_higher_than_penalty_score():
     """An EU ticker must score higher with WEIGHTS_EU (proper redistribution)
     than it would with WEIGHTS_US where congress is present but absent for EU."""
-    from regime_trader.config.weights import WEIGHTS_EU
+    from src.config.weights import WEIGHTS_EU
     factors = {k: 0.6 for k in WEIGHTS_EU}
     factors["congress"] = 0.0   # absent
 
@@ -212,19 +212,19 @@ def test_piotroski_gate_suppresses_eu_buy():
 
 class TestWeightsEU:
     def test_sums_to_one(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         assert abs(sum(WEIGHTS_EU.values()) - 1.0) < 1e-6
 
     def test_congress_absent(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         assert WEIGHTS_EU["congress"] == 0.0
 
     def test_transcript_tone_absent(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         assert WEIGHTS_EU["transcript_tone"] == 0.0
 
     def test_quality_pillar(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         # EU quality-core pillar: piotroski + analyst + PT + roic + fcf + pb >= 0.55
         pillar = (WEIGHTS_EU["quality_piotroski"] + WEIGHTS_EU["analyst_revision"]
                   + WEIGHTS_EU["price_target_upside"] + WEIGHTS_EU["roic_quality"]
@@ -232,7 +232,7 @@ class TestWeightsEU:
         assert pillar >= 0.55
 
     def test_fcf_yield_is_dominant_fundamental(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         # FCF yield is the top fundamental signal in EU (Damodaran) — must be >= 0.10
         assert WEIGHTS_EU["fcf_yield"] >= 0.10
 
@@ -241,26 +241,26 @@ class TestWeightsEU:
 
 class TestWeightsAsia:
     def test_sums_to_one(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         assert abs(sum(WEIGHTS_ASIA.values()) - 1.0) < 1e-6
 
     def test_congress_absent(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         assert WEIGHTS_ASIA["congress"] == 0.0
 
     def test_transcript_tone_absent(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         assert WEIGHTS_ASIA["transcript_tone"] == 0.0
 
     def test_momentum_pillar(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         # Asia momentum pillar: momentum_long + volume_attention + news_sentiment + news_buzz
         pillar = (WEIGHTS_ASIA["momentum_long"] + WEIGHTS_ASIA["volume_attention"]
                   + WEIGHTS_ASIA["news_sentiment"] + WEIGHTS_ASIA["news_buzz"])
         assert pillar >= 0.30
 
     def test_momentum_long_dominant(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         # momentum_long is the single largest momentum signal in WEIGHTS_ASIA
         assert WEIGHTS_ASIA["momentum_long"] >= 0.12
 
@@ -269,23 +269,23 @@ class TestWeightsAsia:
 
 class TestGetWeightsThreeWay:
     def test_eu_ticker_returns_eu_weights(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         assert get_weights("SAP.DE") == dict(WEIGHTS_EU)
 
     def test_asia_ticker_returns_asia_weights(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         assert get_weights("9984.T") == dict(WEIGHTS_ASIA)
 
     def test_us_ticker_returns_us_weights(self):
         assert get_weights("AAPL") == dict(WEIGHTS_US)
 
     def test_eu_weights_differ_from_global(self):
-        from regime_trader.config.weights import WEIGHTS_EU
+        from src.config.weights import WEIGHTS_EU
         # Quality-core model must differ significantly from WEIGHTS_GLOBAL
         assert WEIGHTS_EU["quality_piotroski"] > WEIGHTS_GLOBAL["quality_piotroski"]
 
     def test_asia_weights_differ_from_global(self):
-        from regime_trader.config.weights import WEIGHTS_ASIA
+        from src.config.weights import WEIGHTS_ASIA
         # Asia v2.3 adds FCF/Amihud/PB/ROIC not in WEIGHTS_GLOBAL
         assert WEIGHTS_ASIA.get("fcf_yield", 0) > 0
         assert "fcf_yield" not in WEIGHTS_GLOBAL

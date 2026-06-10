@@ -12,13 +12,13 @@ from datetime import date, timedelta
 
 import pytest
 
-from regime_trader.scoring.momentum_signals import (
+from src.scoring.momentum_signals import (
     score_momentum_long,
     score_volume_attention,
     score_price_target_upside,
     score_quality_piotroski,
 )
-from regime_trader.scoring.news_signals import score_news_sentiment, score_news_buzz
+from src.scoring.news_signals import score_news_sentiment, score_news_buzz
 
 
 def _article(sentiment: str, days_ago: int) -> dict:

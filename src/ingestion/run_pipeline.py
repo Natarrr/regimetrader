@@ -1,4 +1,4 @@
-"""scripts/run_pipeline.py
+"""src/ingestion/run_pipeline.py
 EDGAR + FMP + yfinance daily data pipeline.
 
 Stiglitz (2001 Nobel) — asymmetric information: insider filing activity is a
@@ -6,13 +6,13 @@ credible, costly-to-fake signal. This pipeline sources it from two layers:
   1. FMP Ultimate            — pre-parsed insider trades + congress (FMP_API_KEY)
   2. SEC EDGAR direct        — Form 4 count + CEO buy flag (always, free)
 
-Bulk cache: pass --bulk-cache <dir> (written by scripts/fmp_bulk_prefetch.py)
+Bulk cache: pass --bulk-cache <dir> (written by src/ingestion/fmp_bulk_prefetch.py)
 to replace per-ticker FMP calls for quality_piotroski (ratios-ttm-bulk)
 and analyst_consensus (upgrades-downgrades-consensus-bulk).
 
 Usage:
-  python scripts/run_pipeline.py --tickers-file config/universe.csv --log-dir logs
-  python scripts/run_pipeline.py --tickers-file config/universe.csv \\
+  python src/ingestion/run_pipeline.py --tickers-file config/universe.csv --log-dir logs
+  python src/ingestion/run_pipeline.py --tickers-file config/universe.csv \\
       --bulk-cache .cache/bulk_snapshots --verbose
 """
 from __future__ import annotations
@@ -37,14 +37,14 @@ try:
 except ImportError:
     pass
 
-from regime_trader.utils.io import save_json_atomic
-from regime_trader.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError
+from src.utils.io import save_json_atomic
+from src.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError
 from backend.market_intel.validator import validate_raw
-from regime_trader.config.weights import WEIGHTS_US as WEIGHTS, get_weights
+from src.config.weights import WEIGHTS_US as WEIGHTS, get_weights
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 # Aligned with generate_top_lists.py — both now use config/weights.py as SSOT.
-# regime_trader/weights.py (12-factor) is DEPRECATED; kept for git history only.
+# src/weights.py (12-factor) is DEPRECATED; kept for git history only.
 
 log = logging.getLogger("run_pipeline")
 
@@ -364,7 +364,7 @@ def _fetch_spy_return() -> float:
     Returns 0.0 on failure (symmetrical with ticker fallback).
     Reference: Jegadeesh & Titman (1993), Journal of Finance 48(1).
     """
-    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
+    from src.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
     try:
         rows = _FC().get_historical_prices("SPY", limit=310)
         closes, _, _ = fmp_prices_to_arrays(rows)
@@ -421,7 +421,7 @@ def _fetch_spy_full_regime() -> Tuple[float, Optional[float], str]:
         (spy_return_12_1m, spy_return_63d, regime_label)
         spy_return_63d is None if < 63 bars available.
     """
-    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays  # noqa: PLC0415
+    from src.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays  # noqa: PLC0415
     try:
         rows = _FC().get_historical_prices("SPY", limit=310)
         closes, _, _ = fmp_prices_to_arrays(rows)
@@ -491,7 +491,7 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
 
     Reference: Jegadeesh & Titman (1993), Journal of Finance 48(1).
     """
-    from regime_trader.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
+    from src.services.fmp_client import FMPClient as _FC, fmp_prices_to_arrays
 
     _default: Dict[str, Any] = {
         "return_12_1m":     None,
@@ -733,7 +733,7 @@ def score_news_sentiment_combined(
 
     source label: "fmp+eps" when EPS data was used, "fmp" otherwise.
     """
-    from regime_trader.scoring.news_signals import score_news_sentiment  # noqa: PLC0415
+    from src.scoring.news_signals import score_news_sentiment  # noqa: PLC0415
 
     client = _FMPClient()
     articles = client.get_news_raw_articles(ticker)
@@ -774,7 +774,7 @@ def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
     Returns (score, source) where source ∈ {"fmp", "none"}.
     Uses FMP stable/news/stock exclusively.
     """
-    from regime_trader.scoring.news_signals import score_news_buzz  # noqa: PLC0415
+    from src.scoring.news_signals import score_news_buzz  # noqa: PLC0415
 
     client = _FMPClient()
     articles = client.get_news_raw_articles(ticker)
@@ -1252,7 +1252,7 @@ def run(
     ]
     _dead_fmp: list = []
     _auth_failure = False
-    from regime_trader.services.fmp_client import FMPEndpointError as _FMPErr  # noqa: PLC0415
+    from src.services.fmp_client import FMPEndpointError as _FMPErr  # noqa: PLC0415
     for _ep_path, _ep_params in _FMP_CRITICAL_PROBES:
         try:
             _fmp_client._get(_ep_path, _ep_params)
@@ -1369,12 +1369,12 @@ def run(
     errors  = 0
 
     def _score_ticker(row: Dict[str, str]) -> Dict[str, Any]:
-        from regime_trader.scoring.insider_signals import (  # noqa: PLC0415
+        from src.scoring.insider_signals import (  # noqa: PLC0415
             score_insider_conviction,
             score_insider_breadth,
             orthogonalize_insider_scores,
         )
-        from regime_trader.scoring.momentum_signals import (  # noqa: PLC0415
+        from src.scoring.momentum_signals import (  # noqa: PLC0415
             score_momentum_long,
             score_volume_attention,
         )
@@ -1452,7 +1452,7 @@ def run(
 
             # ── Analyst consensus — bulk index with per-ticker FMP fallback ────
             # Primary: O(1) bulk lookup. Fallback: grades-consensus (confirmed 200).
-            from regime_trader.scoring.analyst import _score_record as _ac_score_record  # noqa: PLC0415
+            from src.scoring.analyst import _score_record as _ac_score_record  # noqa: PLC0415
             _bulk_cons_rec = _bulk_consensus_idx.get(ticker.upper())
             if _bulk_cons_rec:
                 analyst_consensus_score, analyst_consensus_source = _ac_score_record(
@@ -1482,7 +1482,7 @@ def run(
             _pio_source = "fmp_per_ticker"
             quality_piotroski_score, quality_piotroski_raw = 0.0, 0
             if _bulk_ratios_rec:
-                from regime_trader.scoring.momentum_signals import score_quality_piotroski as _pio_score  # noqa: PLC0415
+                from src.scoring.momentum_signals import score_quality_piotroski as _pio_score  # noqa: PLC0415
                 quality_piotroski_score, quality_piotroski_raw = _pio_score(_bulk_ratios_rec)
                 _pio_source = "bulk"
             if _pio_source != "bulk" or (quality_piotroski_score == 0.0 and quality_piotroski_raw == 0):
@@ -1760,7 +1760,7 @@ def run(
 
     # ── Orthogonality diagnostics (Fix #2 + Fix #3) ──────────────────────────
     log.info("Weights (9-factor schema): %s", WEIGHTS)
-    from regime_trader.scoring.insider_signals import log_conviction_breadth_correlation  # noqa: PLC0415
+    from src.scoring.insider_signals import log_conviction_breadth_correlation  # noqa: PLC0415
     _us_results = [r for r in results if r.get("market", "USA") == "USA"]
     log_conviction_breadth_correlation(_us_results)
 
@@ -1862,8 +1862,8 @@ def run(
         raise
 
     # ── Cross-sectional neutralization (clean tickers only) ───────────────────
-    from regime_trader.scoring.neutralization import neutralize_factors  # noqa: PLC0415
-    from regime_trader.scoring.market_config import (  # noqa: PLC0415
+    from src.scoring.neutralization import neutralize_factors  # noqa: PLC0415
+    from src.scoring.market_config import (  # noqa: PLC0415
         Market, PIPELINE_MARKET_MAP, renormalize_weights_for_market, LOW_COVERAGE_THRESHOLD,
     )
 
@@ -1988,7 +1988,7 @@ def run(
     # López de Prado (AFML ch. 8): monitor that engineered features remain
     # structurally independent on live data after every run.
     try:
-        from regime_trader.monitoring.factor_orthogonality import (  # noqa: PLC0415
+        from src.monitoring.factor_orthogonality import (  # noqa: PLC0415
             compute_factor_correlation_matrix,
         )
         orthogonality_report = compute_factor_correlation_matrix(results, market_filter="US")
@@ -2039,7 +2039,7 @@ def run(
 
     # ── Auto-archive: copy today's snapshot to logs/historical/YYYY-MM-DD/ ───
     try:
-        from regime_trader.research.historical_loader import archive_current_run
+        from src.research.historical_loader import archive_current_run
         archived = archive_current_run(log_dir)
         if archived:
             log.info("Snapshot archived → %s", archived)

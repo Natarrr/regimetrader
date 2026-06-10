@@ -1,4 +1,4 @@
-"""regime_trader/utils/io.py
+"""src/utils/io.py
 Atomic JSON I/O helpers.
 
 Write-temp-then-rename guarantees readers never see a half-written file,

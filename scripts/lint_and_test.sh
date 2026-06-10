@@ -41,7 +41,7 @@ python scripts/check_imports.py || fail "sanity imports failed"
 # ── 2. Ruff (optional) ────────────────────────────────────────────────────────
 if command -v ruff >/dev/null 2>&1; then
     step "Ruff"
-    ruff check regime_trader/ analysis/ regime/ tests/ scripts/ \
+    ruff check src/ backend/ monitoring/ analysis/ tests/ scripts/ \
         --exit-non-zero-on-fix \
         || fail "ruff reported issues"
 else
@@ -51,14 +51,14 @@ fi
 # ── 3. mypy (non-blocking) ────────────────────────────────────────────────────
 if command -v mypy >/dev/null 2>&1; then
     step "mypy (non-blocking)"
-    mypy regime_trader/ analysis/ regime/ --ignore-missing-imports || warn "mypy found type issues (non-blocking)"
+    mypy src/ analysis/ --ignore-missing-imports || warn "mypy found type issues (non-blocking)"
 else
     warn "mypy not installed — skipping (pip install mypy)"
 fi
 
 # ── 4. Pytest ─────────────────────────────────────────────────────────────────
 step "pytest"
-TARGETS="${*:-tests/ backend/tests/}"
+TARGETS="${*:-tests/}"
 pytest $TARGETS -q --tb=short || fail "pytest failed"
 
 step "All checks passed."

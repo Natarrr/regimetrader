@@ -24,7 +24,7 @@ PE_MAX                   = 25.0  # P/E ratio ceiling for cannibal filter
 PRICE_VS_52W_LOW_MAX     = 1.25  # price must be < 125% of 52-week low
 TOP_N                    = 3     # tickers returned by each function
 
-from regime_trader.services.fmp_client import FMPClient as _FMPClient  # noqa: E402
+from src.services.fmp_client import FMPClient as _FMPClient  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ def get_top_cyclical(tickers: list[str]) -> list[dict]:
     Monthly returns computed from first/last close of each month's trading days.
     Replaces yfinance batch monthly download.
     """
-    from regime_trader.services.fmp_client import FMPClient, fmp_prices_to_arrays  # noqa: PLC0415
+    from src.services.fmp_client import FMPClient, fmp_prices_to_arrays  # noqa: PLC0415
 
     client = FMPClient()
     current_month = datetime.now(timezone.utc).month
@@ -107,7 +107,7 @@ def _fetch_fmp_info(ticker: str, fmp_key: str) -> dict:
         currentPrice   ← price from quote
         fiftyTwoWeekLow ← yearLow from quote
     """
-    from regime_trader.services.fmp_client import FMPClient  # noqa: PLC0415
+    from src.services.fmp_client import FMPClient  # noqa: PLC0415
 
     client = FMPClient(api_key=fmp_key)
     quote   = client.get_quote(ticker)

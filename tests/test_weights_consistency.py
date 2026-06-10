@@ -173,10 +173,10 @@ class TestWeightsValues:
     def test_config_congress_weight_is_intentional(self):
         """config/weights.py congress=0.04 per v2.3 sprint (WEIGHTS_US).
         Reduced from 0.22 to fund analyst_consensus=0.10 and quality_piotroski=0.08.
-        Change only by updating the canonical source in regime_trader/config/weights.py.
+        Change only by updating the canonical source in src/config/weights.py.
         """
-        from regime_trader.config.weights import WEIGHTS as CONFIG_WEIGHTS
+        from src.config.weights import WEIGHTS as CONFIG_WEIGHTS
         assert CONFIG_WEIGHTS["congress"] == 0.04, (
             "US congress weight must be 0.04 per v2.3 sprint spec (WEIGHTS_US). "
-            "Change only by updating the canonical source in regime_trader/config/weights.py."
+            "Change only by updating the canonical source in src/config/weights.py."
         )

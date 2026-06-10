@@ -142,7 +142,7 @@ class TestFetchCongressBuys:
 
         with patch("requests.get", side_effect=mock_s3_get), \
              patch(
-                 "regime_trader.services.fmp_client.FMPClient.get_congress_trades",
+                 "src.services.fmp_client.FMPClient.get_congress_trades",
                  return_value=fmp_result,
              ):
             result = fetch_congress_buys(lookback_days=90)

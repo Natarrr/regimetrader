@@ -1,5 +1,5 @@
-# Path: regime_trader/scoring/fundamental_signals.py
-"""regime_trader/scoring/fundamental_signals.py
+# Path: src/scoring/fundamental_signals.py
+"""src/scoring/fundamental_signals.py
 Fundamental value and quality signals for EU/Asia INTL pipeline.
 
 Theory:

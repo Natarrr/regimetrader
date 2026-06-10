@@ -6,7 +6,7 @@ name: CI
 # Jobs:
 #   sanity  — import probe + secrets presence check (< 30 s)
 #   smoke   — fast Streamlit / service smoke tests (needs: sanity)
-#   test    — full pytest run: tests/ + backend/tests/ (needs: smoke)
+#   test    — full pytest run: tests/ (needs: smoke)
 #
 # Requirements: requirements-ci.txt (no dashboard/broker packages)
 # Secrets:      FMP_API_KEY, ALPACA_API_KEY, ALPACA_SECRET_KEY injected
@@ -59,7 +59,7 @@ jobs:
       - name: Lint (ruff)
         run: |
           pip install ruff>=0.4.0
-          ruff check scripts/ src/ regime_trader/ backend/ monitoring/ \
+          ruff check scripts/ src/ backend/ monitoring/ \
             --select E,F,W --ignore E501
 
       # Inject secrets into environment for presence check only.
@@ -147,17 +147,6 @@ jobs:
             --cov --cov-config=.coveragerc \
             --cov-report=term-missing --cov-fail-under=60
 
-      - name: Run test suite — backend/tests/
-        # backend/tests/ is optional — skip gracefully if directory absent
-        env:
-          CI: "true"
-        run: |
-          if [ -d backend/tests ]; then
-            pytest backend/tests/ -q --tb=short -m "not slow" --timeout=60
-          else
-            echo "backend/tests/ not found — skipping"
-          fi
-
       - name: Upload coverage / junit (optional)
         if: always()
         uses: actions/upload-artifact@v4
@@ -175,7 +164,6 @@ jobs:
           echo "| Suite | Path |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|------|" >> $GITHUB_STEP_SUMMARY
           echo "| Core + Regime + Analysis | \`tests/\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend quant models | \`backend/tests/\` |" >> $GITHUB_STEP_SUMMARY
 
   # ── 4. Stress test — Stage 1 gate rejects 100% toxic dataset ─────────────────
   stress-test:

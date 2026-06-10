@@ -26,7 +26,7 @@ try:
         run_optimizer as _run_optimizer,
         build_large_cap_anchors as _build_anchors,
     )
-    from regime_trader.risk.exit_rules import enrich_with_exit_anchors as _enrich_exits
+    from src.risk.exit_rules import enrich_with_exit_anchors as _enrich_exits
     _EXTENSIONS_AVAILABLE = True
 except ImportError:
     _EXTENSIONS_AVAILABLE = False

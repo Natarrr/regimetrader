@@ -15,7 +15,12 @@ from __future__ import annotations
 
 import importlib
 import sys
+from pathlib import Path
 from typing import Iterable
+
+# Script runs as `python scripts/check_imports.py`, so sys.path[0] is scripts/;
+# project-module probes need the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 # (module_name, package_name_in_pip)
@@ -33,6 +38,23 @@ REQUIRED: tuple[tuple[str, str], ...] = (
     ("yfinance",     "yfinance"),
 )
 
+# Project modules — fail fast if the src/ package layout breaks.
+PROJECT: tuple[str, ...] = (
+    "src.config.weights",
+    "src.risk.regime",
+    "src.risk.exit_rules",
+    "src.scoring.normalize",
+    "src.services.fmp_client",
+    "src.utils.io",
+    "src.fetchers.orchestrator",
+    "src.monitoring.factor_orthogonality",
+    "src.ingestion.run_pipeline",
+    "src.delivery.send_discord",
+    "src.delivery.cook_toplists",
+    "backend.market_intel.generate_top_lists",
+    "monitoring.metrics_exporter",
+)
+
 
 def check(modules: Iterable[tuple[str, str]] = REQUIRED) -> int:
     failures: list[str] = []
@@ -44,6 +66,13 @@ def check(modules: Iterable[tuple[str, str]] = REQUIRED) -> int:
         except ImportError as exc:
             failures.append(f"  FAIL {pkg:<14} {exc}")
 
+    for mod in PROJECT:
+        try:
+            importlib.import_module(mod)
+            print(f"  OK   {mod}")
+        except ImportError as exc:
+            failures.append(f"  FAIL {mod:<40} {exc}")
+
     if failures:
         print("\nMissing or broken packages:", file=sys.stderr)
         for line in failures:
@@ -54,7 +83,7 @@ def check(modules: Iterable[tuple[str, str]] = REQUIRED) -> int:
         )
         return 1
 
-    print(f"\nAll {len(REQUIRED)} sanity imports passed.")
+    print(f"\nAll {len(REQUIRED) + len(PROJECT)} sanity imports passed.")
     return 0
 
 

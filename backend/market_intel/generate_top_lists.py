@@ -3,7 +3,7 @@ Nine-factor weighted scoring → top_lists_us.json + top5.csv
 
 Reads  logs/intel_source_status.json  (written by scripts/run_pipeline.py)
 and applies Markowitz (1990 Nobel) portfolio ranking. WEIGHTS are imported
-from regime_trader.weights (canonical single source of truth).
+from src.weights (canonical single source of truth).
 
 Badge thresholds (Sharpe-inspired):
   HIGH BUY     ≥ 0.80
@@ -38,22 +38,24 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from regime_trader.scoring.normalize import normalize_score
-from regime_trader.utils.io import save_json_atomic
+from src.scoring.normalize import normalize_score
+from src.utils.io import save_json_atomic
 from backend.market_intel.validator import detect_anomalies, PipelineIntegrityError  # noqa: F401 (re-exported)
 # Canonical 9-factor weights — v2.1-global, single source of truth.
 # Grinold & Kahn (2000): scores must be consistent across all pipeline stages.
-from regime_trader.config.weights import (
+from src.config.weights import (
     WEIGHTS, WEIGHTS_GLOBAL, WEIGHTS_VERSION,  # noqa: F401
     get_region, _piotroski_gate_multiplier,
 )
+# VIX regime thresholds — src.risk.regime is the single source of truth.
+from src.risk.regime import BEAR_THRESHOLD, CAPITULATION_THRESHOLD, get_regime, is_panic
 from backend.market_intel.portfolio_optimizer import run_optimizer
 
 log = logging.getLogger("generate_top_lists")
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-6, (
     f"WEIGHTS must sum to 1.0, got {sum(WEIGHTS.values()):.8f}. "
-    "Check regime_trader/config/weights.py."
+    "Check src/config/weights.py."
 )
 
 # Maps factor key → field name in intel_source_status.json results (12-factor schema).
@@ -363,7 +365,6 @@ def _apply_vix_overlay(score: float, vix: Optional[float]) -> float:
     """
     if vix is None:
         return score
-    from src.risk.regime import BEAR_THRESHOLD, CAPITULATION_THRESHOLD  # noqa: PLC0415
     if vix >= 40:
         return score * 0.20
     if vix >= CAPITULATION_THRESHOLD:
@@ -663,7 +664,7 @@ def _read_vix(log_dir: Path) -> Optional[float]:
 
     # Fallback: FMP stable/quote for ^VIX (real-time, no yfinance needed)
     try:
-        from regime_trader.services.fmp_client import FMPClient as _FC
+        from src.services.fmp_client import FMPClient as _FC
         q = _FC().get_quote("^VIX")
         if q:
             vix = float(q.get("price") or q.get("previousClose") or 0)
@@ -681,7 +682,6 @@ def _vix_regime_label(vix: Optional[float]) -> str:
     if vix is None:
         return "UNKNOWN"
     try:
-        from src.risk.regime import get_regime  # noqa: PLC0415
         return get_regime(float(vix)).value
     except Exception:
         return "UNKNOWN"
@@ -898,7 +898,7 @@ def generate(
     _portfolio_tickers = list(_portfolio_tickers)
     _portfolio_scores = list(_portfolio_scores)
     _portfolio_sectors = list(_portfolio_sectors)
-    _vix = current_vix if current_vix is not None else 20.0
+    _vix = current_vix if current_vix is not None else BEAR_THRESHOLD
 
     try:
         _opt_weights, _opt_method = run_optimizer(
@@ -955,20 +955,22 @@ def generate(
         key=score_desc, reverse=True,
     )[:5]
 
-    kill_switch = current_vix is not None and current_vix >= 30
+    kill_switch = current_vix is not None and is_panic(current_vix)
     if kill_switch:
         log.warning(
-            "KILL SWITCH ACTIVE — VIX=%.1f >= 30.0. "
+            "KILL SWITCH ACTIVE — VIX=%.1f >= %.1f. "
             "Score multiplier: %.2f. All final_scores dampened. "
             "BUY signals suppressed in Discord output. "
             "SELL signals remain active (asymmetric protection).",
             current_vix,
+            CAPITULATION_THRESHOLD,
             _apply_vix_overlay(1.0, current_vix),
         )
     else:
         log.info(
-            "Kill switch INACTIVE — VIX=%.1f < 30.0. Normal scoring active.",
+            "Kill switch INACTIVE — VIX=%.1f < %.1f. Normal scoring active.",
             current_vix if current_vix is not None else 0.0,
+            CAPITULATION_THRESHOLD,
         )
 
     _log_kill_switch_state(

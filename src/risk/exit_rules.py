@@ -1,4 +1,4 @@
-# Path: regime_trader/risk/exit_rules.py
+# Path: src/risk/exit_rules.py
 """Batch Rebalancing Stop Floors, PT profit-taking, and breakout extension logic.
 
 OPERATIONAL CONSTRAINT:

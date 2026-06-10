@@ -1,4 +1,4 @@
-"""regime_trader.research.historical_loader — snapshot I/O and schema normalization.
+"""src.research.historical_loader — snapshot I/O and schema normalization.
 
 Responsibilities:
   1. archive_current_run()   — copies today's intel_source_status.json to

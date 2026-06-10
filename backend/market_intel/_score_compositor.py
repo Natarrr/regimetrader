@@ -45,7 +45,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from regime_trader.config.weights import get_weights, get_region, is_congress_eligible
+from src.config.weights import get_weights, get_region, is_congress_eligible
 
 logger = logging.getLogger(__name__)
 

@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
-from regime_trader.scoring.normalize import (
+from src.scoring.normalize import (
     normalize_score,
     winsorize as _winsorize_np,
 )

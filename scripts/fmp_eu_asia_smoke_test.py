@@ -18,7 +18,7 @@ import sys
 # Ensure repo root is on PYTHONPATH
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from regime_trader.services.fmp_client import FMPClient
+from src.services.fmp_client import FMPClient
 
 SAMPLE_TICKERS = [
     "ASML.AS",   # Netherlands — semiconductors

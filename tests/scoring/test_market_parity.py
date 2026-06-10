@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from regime_trader.scoring.market_config import (
+from src.scoring.market_config import (
     Market,
     MARKET_FACTORS,
     renormalize_weights_for_market,

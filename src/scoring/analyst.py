@@ -1,4 +1,4 @@
-# Path: regime_trader/scoring/analyst.py
+# Path: src/scoring/analyst.py
 """Analyst consensus scoring from bulk NDJSON snapshot.
 
 Reads upgrades-downgrades-consensus-bulk.ndjson pre-fetched by

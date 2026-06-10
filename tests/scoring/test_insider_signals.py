@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from datetime import date, timedelta
 
-from regime_trader.scoring.insider_signals import (
+from src.scoring.insider_signals import (
     score_insider_conviction,
     score_insider_breadth,
 )

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from regime_trader.scoring.insider_signals import _ceo_purchase_significance, score_insider_conviction
+from src.scoring.insider_signals import _ceo_purchase_significance, score_insider_conviction
 
 
 class TestCEOPurchaseSignificance:

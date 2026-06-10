@@ -1,4 +1,4 @@
-"""regime_trader/scoring/news_signals.py
+"""src/scoring/news_signals.py
 Orthogonal news signals: directional sentiment (recency-decayed) and buzz.
 
 Theory:

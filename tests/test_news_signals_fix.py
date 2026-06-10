@@ -8,7 +8,7 @@ content at all. Fix: track has_directional and return 0.0 if no articles had Pos
 """
 from __future__ import annotations
 
-from regime_trader.scoring.news_signals import score_news_sentiment
+from src.scoring.news_signals import score_news_sentiment
 
 
 def test_all_neutral_articles_returns_zero():

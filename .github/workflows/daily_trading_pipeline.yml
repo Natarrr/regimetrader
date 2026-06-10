@@ -172,7 +172,6 @@ jobs:
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
                          ratios-ttm-bulk \
-                         key-metrics-ttm-bulk \
             --verbose
 
       # ── 6. EDGAR fetch — 3-attempt retry ────────────────────────────────────
@@ -450,7 +449,6 @@ jobs:
             --ttl-hours  "$BULK_CACHE_TTL_HOURS" \
             --endpoints  upgrades-downgrades-consensus-bulk \
                          ratios-ttm-bulk \
-                         key-metrics-ttm-bulk \
             --verbose
 
       # ── 6. Fetch INTL raw factor metrics (FMP Ultimate — EU + Asia) ──────────
