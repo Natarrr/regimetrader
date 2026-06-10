@@ -30,6 +30,9 @@ if not API_KEY:
 BASE    = "https://financialmodelingprep.com/stable"
 TICKER  = "AAPL"
 EU_TICK = "ASML.AS"
+GB_TICK = "VOD.L"     # LSE — pence (GBX) quote vs GBP target audit
+JP_TICK = "7203.T"    # Toyota — tanshin quarterly cadence audit
+HK_TICK = "0700.HK"   # Tencent — HKEX semi-annual interim audit
 
 _session = requests.Session()
 _session.headers["User-Agent"] = "regime-trader-probe/1.0"
@@ -106,6 +109,21 @@ PROBES: list[tuple[str, str, dict]] = [
     ("upgrades-downgrades-consensus-bulk",  "upgrades-downgrades-consensus-bulk", {}),
     ("ratios-ttm-bulk",                     "ratios-ttm-bulk",              {}),
     ("key-metrics-ttm-bulk",                "key-metrics-ttm-bulk",         {}),
+    # ── v3.0 additions: margin_expansion / universes / intl 13F coverage ────
+    ("income-statement [US qtr]",           "income-statement",             {"symbol": TICKER, "period": "quarter", "limit": 8}),
+    ("income-statement [JP qtr]",           "income-statement",             {"symbol": JP_TICK, "period": "quarter", "limit": 8}),
+    ("income-statement [HK qtr]",           "income-statement",             {"symbol": HK_TICK, "period": "quarter", "limit": 8}),
+    ("income-statement [JP annual]",        "income-statement",             {"symbol": JP_TICK, "period": "annual", "limit": 2}),
+    ("company-screener [XETRA]",            "company-screener",             {"exchange": "XETRA", "limit": 5}),
+    ("  alt: stock-screener",               "stock-screener",               {"exchange": "XETRA", "limit": 5}),
+    ("institutional-ownership [EU local]",  "institutional-ownership/symbol-positions-summary",
+                                            {"symbol": EU_TICK, "year": "2025", "quarter": "4", "page": 0, "limit": 1}),
+    ("institutional-ownership [EU base]",   "institutional-ownership/symbol-positions-summary",
+                                            {"symbol": "ASML", "year": "2025", "quarter": "4", "page": 0, "limit": 1}),
+    ("institutional-ownership [JP]",        "institutional-ownership/symbol-positions-summary",
+                                            {"symbol": JP_TICK, "year": "2025", "quarter": "4", "page": 0, "limit": 1}),
+    ("price-target-consensus [GB .L]",      "price-target-consensus",       {"symbol": GB_TICK}),
+    ("quote [GB .L]",                       "quote",                        {"symbol": GB_TICK}),
 ]
 
 W = 46
@@ -123,3 +141,53 @@ for label, path, params in PROBES:
 
 print()
 print("Legend: OK=live  XX=dead(4xx)  ??=unexpected  indent=alternative name")
+
+
+# ── v3.0 schema audits — run after the endpoint sweep ─────────────────────────
+
+def _fetch(path: str, params: dict):
+    try:
+        r = _session.get(f"{BASE}/{path}", params={**params, "apikey": API_KEY},
+                         timeout=12)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+def audit_income_gaps(symbol: str) -> None:
+    """Discrete-vs-cumulative audit: consecutive period-end gaps should be
+    ~70–110 days for discrete quarters. ~180d gaps = semi-annual rows;
+    overlapping/duplicate dates = cumulative YTD reporting."""
+    rows = _fetch("income-statement",
+                  {"symbol": symbol, "period": "quarter", "limit": 8}) or []
+    dates = [r.get("date", "?") for r in rows if isinstance(r, dict)]
+    print(f"\n  {symbol} quarterly period-ends ({len(dates)} rows): {dates}")
+    try:
+        from datetime import date
+        ds = sorted(date.fromisoformat(d) for d in dates if d and d != "?")
+        gaps = [(ds[i + 1] - ds[i]).days for i in range(len(ds) - 1)]
+        verdict = ("DISCRETE-OK" if gaps and all(70 <= g <= 110 for g in gaps)
+                   else "REVIEW (semi-annual/cumulative suspected)")
+        print(f"  {symbol} gaps (days): {gaps}  -> {verdict}")
+        if rows and isinstance(rows[0], dict):
+            print(f"  {symbol} filingDate present: {'filingDate' in rows[0]}  "
+                  f"sample keys: {[k for k in rows[0] if 'ate' in k]}")
+    except Exception as exc:
+        print(f"  {symbol} gap audit failed: {exc}")
+
+
+def audit_dividend_fields(symbol: str) -> None:
+    """Field-name drift audit: dividend_sustain reads dividendYieldTTM /
+    payoutRatioTTM — verify what the live route actually calls them."""
+    rows = _fetch("ratios-ttm", {"symbol": symbol}) or []
+    row = rows[0] if isinstance(rows, list) and rows else {}
+    hits = sorted(k for k in row if "ividend" in k or "ayout" in k)
+    print(f"\n  {symbol} ratios-ttm dividend/payout fields: {hits or 'NONE'}")
+
+
+print("\n" + "=" * 100)
+print("v3.0 SCHEMA AUDITS (margin_expansion discrete-quarter + dividend fields)")
+for _sym in (TICKER, JP_TICK, HK_TICK, EU_TICK):
+    audit_income_gaps(_sym)
+for _sym in (TICKER, EU_TICK, JP_TICK):
+    audit_dividend_fields(_sym)
