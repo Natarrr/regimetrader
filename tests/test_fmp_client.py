@@ -621,6 +621,27 @@ class TestGetIncomeStatements:
 
 
 class TestInstitutionalOwnershipFallback:
+    def test_prior_quarter_fallback_when_current_unfiled(self, client):
+        # now − 45d frequently lands in the CURRENT, not-yet-ended quarter
+        # (e.g., June 11 → Apr 27 → Q2), where no 13F exists yet. The client
+        # must retry the previous quarter before giving up.
+        calls = []
+
+        def _route_by_quarter(url, params=None, timeout=None, **kw):
+            params = params or {}
+            calls.append((params.get("year"), params.get("quarter")))
+            if len(calls) == 1:
+                return _empty_resp()  # current quarter: unfiled
+            return _ok_resp([{"symbol": "AAPL", "investorsHolding": 5000}])
+
+        with patch.object(client._session, "get", side_effect=_route_by_quarter):
+            result = client.get_institutional_ownership("AAPL")
+        assert result.get("investorsHolding") == 5000
+        assert len(calls) == 2
+        y0, q0 = calls[0]
+        y1, q1 = calls[1]
+        assert (y1, q1) == ((y0, q0 - 1) if q0 > 1 else (y0 - 1, 4))
+
     def test_base_symbol_fallback_on_empty(self, client):
         base_row = {"symbol": "ASML", "investorsHolding": 1200,
                     "increasedPositions": 300, "reducedPositions": 200}

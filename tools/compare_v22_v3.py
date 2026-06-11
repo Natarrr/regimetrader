@@ -89,13 +89,20 @@ def sparsity_map(rows: List[Dict], factors: List[str]) -> Dict[str, Dict]:
         n = len(group)
         stats: Dict[str, Dict] = {}
         for factor in factors:
-            key = f"{factor}_score"
-            present = [r for r in group if key in r]
-            if not present:
+            # Collision factors (analyst_revision, congress, PT) carry BOTH
+            # a v2.2 column (dead-coerced 0.0) and a _v3 column (None =
+            # unavailable). Shadow gates must read the v3 semantics.
+            v3_key, base_key = f"{factor}_score_v3", f"{factor}_score"
+            values = [
+                r[v3_key] if v3_key in r else r[base_key]
+                for r in group
+                if v3_key in r or base_key in r
+            ]
+            if not values:
                 continue
-            nones = sum(1 for r in present if r.get(key) is None)
-            deads = sum(1 for r in present
-                        if r.get(key) is not None and float(r[key]) == 0.0)
+            nones = sum(1 for v in values if v is None)
+            deads = sum(1 for v in values
+                        if v is not None and float(v) == 0.0)
             stats[factor] = {
                 "none_rate": round(nones / n, 4),
                 "dead_rate": round(deads / n, 4),

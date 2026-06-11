@@ -947,31 +947,38 @@ class FMPClient:
         if cached is not None:
             return cached
 
-        # Determine most recently completed quarter (13F lags ~45 days)
+        # Determine the target quarter (13F filings lag ~45 days). The naive
+        # now−45d frequently lands inside the CURRENT, not-yet-ended quarter
+        # (e.g., June 11 → Apr 27 → Q2, unfiled) — so on an empty response
+        # retry the PREVIOUS quarter before concluding "no coverage".
         now = datetime.now(timezone.utc)
-        # Back off 45 days to ensure the quarter has been filed
         as_of = now.date() - timedelta(days=45)
         year = as_of.year
         quarter = (as_of.month - 1) // 3 + 1
+        prev_year, prev_quarter = (
+            (year, quarter - 1) if quarter > 1 else (year - 1, 4)
+        )
 
-        data = self._get(
-            "institutional-ownership/symbol-positions-summary",
-            {"symbol": ticker, "year": year,
-                "quarter": quarter, "page": 0, "limit": 1},
-            bucket="f13",
-        ) or []
-        result = data[0] if isinstance(data, list) and data else {}
         # 13F filings are SEC-mandated, keyed to US listings — EU/Asia local
         # lines often only have data under the base (ADR) symbol.
-        if not result and "." in ticker:
-            base = ticker.split(".")[0]
-            data2 = self._get(
-                "institutional-ownership/symbol-positions-summary",
-                {"symbol": base, "year": year,
-                    "quarter": quarter, "page": 0, "limit": 1},
-                bucket="f13",
-            ) or []
-            result = data2[0] if isinstance(data2, list) and data2 else {}
+        symbols = [ticker]
+        if "." in ticker:
+            symbols.append(ticker.split(".")[0])
+
+        result: Dict = {}
+        for y, q in ((year, quarter), (prev_year, prev_quarter)):
+            for sym in symbols:
+                data = self._get(
+                    "institutional-ownership/symbol-positions-summary",
+                    {"symbol": sym, "year": y,
+                        "quarter": q, "page": 0, "limit": 1},
+                    bucket="f13",
+                ) or []
+                result = data[0] if isinstance(data, list) and data else {}
+                if result:
+                    break
+            if result:
+                break
         if result:
             self._cache_write("f13", ticker, result)
         return result

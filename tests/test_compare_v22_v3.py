@@ -52,6 +52,19 @@ class TestSparsityMap:
         assert usa["pead_surprise"]["none_rate"] == pytest.approx(0.5)
         assert usa["insider_alpha"]["dead_rate"] == pytest.approx(0.5)
 
+    def test_prefers_v3_column_for_collision_factors(self):
+        # US rows carry BOTH analyst_revision_score (v2.2, dead-coerced 0.0)
+        # and analyst_revision_score_v3 (None = unavailable). The shadow
+        # gates must read the v3 semantics, not v2.2's downward coercion.
+        rows = [
+            {"market": "USA", "analyst_revision_score": 0.0,
+             "analyst_revision_score_v3": None},
+        ]
+        result = sparsity_map(rows, ["analyst_revision"])
+        usa = result["USA"]
+        assert usa["analyst_revision"]["none_rate"] == pytest.approx(1.0)
+        assert usa["analyst_revision"]["dead_rate"] == pytest.approx(0.0)
+
 
 class TestRankTurnover:
     def _rows(self, scores, key="final_score_v3"):
