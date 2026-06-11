@@ -40,7 +40,12 @@ except ImportError:
 from src.utils.io import save_json_atomic
 from src.services.fmp_client import FMPClient as _FMPClient, FMPEndpointError
 from backend.market_intel.validator import validate_raw
-from src.config.weights import WEIGHTS_US as WEIGHTS, get_weights
+from src.config.weights import WEIGHTS_US as WEIGHTS, get_weights, get_region
+from src.ingestion.v3_shadow import (
+    apply_v3_shadow,
+    compute_v3_raw_columns,
+    v3_shadow_enabled,
+)
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 # Aligned with generate_top_lists.py — both now use config/weights.py as SSOT.
@@ -1174,11 +1179,45 @@ def fetch_edgar_data(
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+# Region-conditional universe guard (v3.0). US keeps the historical message
+# byte-for-byte; EU/ASIA invert the assert (only that region's suffixes
+# allowed). NOTE: EU/ASIA *scoring* stays on the FMPFetcher→StrategyEngine
+# path in v3.0 — full unification under run_pipeline is the v3.1 candidate.
+_INTL_SUFFIXES = frozenset({
+    ".DE", ".PA", ".L", ".AS", ".MI", ".MC", ".VX", ".BR", ".LS",
+    ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
+    ".T", ".HK", ".KS", ".KQ", ".SS", ".SZ", ".NS", ".BO", ".SI", ".BK", ".JK",
+})
+
+
+def _validate_universe_region(ticker_rows: List[Dict], region: str = "US") -> None:
+    """Reject tickers that don't belong to the requested region's universe."""
+    if region == "US":
+        _intl_leaks = [t["ticker"] for t in ticker_rows
+                       if any(t["ticker"].endswith(s) for s in _INTL_SUFFIXES)]
+        if _intl_leaks:
+            raise ValueError(
+                f"run_pipeline.py is US-only. International tickers found in universe: {_intl_leaks}. "
+                "Check config/universe.csv — INTL tickers belong in config/ticker_registry.json."
+            )
+        return
+    if region not in ("EU", "ASIA"):
+        raise ValueError(f"--region must be US, EU, or ASIA — got {region!r}")
+    misplaced = [t["ticker"] for t in ticker_rows
+                 if get_region(t["ticker"]) != region]
+    if misplaced:
+        raise ValueError(
+            f"--region {region}: universe contains non-{region} tickers "
+            f"(suffix misclassification at the door): {misplaced[:10]}"
+        )
+
+
 def run(
     tickers_file: Path,
     log_dir: Path,
     max_workers: int = 8,
     bulk_cache: Optional[Path] = None,
+    region: str = "US",
 ) -> Dict[str, Any]:
     """Run the full scoring pipeline; return status dict.
 
@@ -1190,18 +1229,8 @@ def run(
     log_dir.mkdir(parents=True, exist_ok=True)
     ticker_rows = load_tickers(tickers_file)
 
-    # Guard: run_pipeline.py is US-only. Reject international tickers at startup.
-    _INTL_SUFFIXES = frozenset({
-        ".DE", ".PA", ".L", ".AS", ".MI", ".MC", ".VX", ".BR", ".LS",
-        ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
-        ".T", ".HK", ".KS", ".KQ", ".SS", ".SZ", ".NS", ".BO", ".SI", ".BK", ".JK",
-    })
-    _intl_leaks = [t["ticker"] for t in ticker_rows if any(t["ticker"].endswith(s) for s in _INTL_SUFFIXES)]
-    if _intl_leaks:
-        raise ValueError(
-            f"run_pipeline.py is US-only. International tickers found in universe: {_intl_leaks}. "
-            "Check config/universe.csv — INTL tickers belong in config/ticker_registry.json."
-        )
+    # Guard: region-conditional universe validation (US default unchanged).
+    _validate_universe_region(ticker_rows, region)
 
     tickers     = [r["ticker"] for r in ticker_rows]
     cap_tier    = {r["ticker"]: r.get("cap_tier", "large") for r in ticker_rows}
@@ -1554,7 +1583,7 @@ def run(
                 "none"
             )
 
-            return {
+            row = {
                 "ticker":                  ticker,
                 "sector":                  sector.get(ticker, "Unknown"),
                 "cap_tier":                cap_tier.get(ticker, "large"),
@@ -1617,6 +1646,29 @@ def run(
                     0.05 if (conviction_score > 0.50 and c_score > 0.50) else 0.0
                 ),
             }
+            # ── v3.0 shadow columns (SCORING_V3_SHADOW=1; v2.2 untouched) ──
+            if v3_shadow_enabled():
+                try:
+                    row.update(compute_v3_raw_columns(
+                        ticker=ticker,
+                        fmp_client=_fmp_client,
+                        ratios_row=_bulk_ratios_rec,
+                        p_transactions=p_transactions,
+                        conviction_score=conviction_score,
+                        breadth_score=breadth_score,
+                        revision_pct=_rev_pct,
+                        n_analysts=_rev_n,
+                        eps_surprise_pct=_eps_pct,
+                        eps_surprise_days=_eps_days,
+                        congress_score=c_score,
+                    ))
+                except Exception as v3_exc:
+                    log.warning(
+                        "v3 shadow columns failed for %s: %s — v3 factors "
+                        "unavailable for this ticker, v2.2 unaffected",
+                        ticker, v3_exc,
+                    )
+            return row
         except FMPEndpointError as fmp_exc:
             # PATCH 08: FMPEndpointError is a structural failure (HTTP 4xx),
             # NOT a data-absence event. Log the broken endpoint and track it
@@ -1930,6 +1982,14 @@ def run(
         r["weight_coverage"] = round(weight_sum_applied, 4)
         r["_low_coverage"]   = weight_sum_applied < LOW_COVERAGE_THRESHOLD
 
+    # ── v3.0 shadow scoring (SCORING_V3_SHADOW=1) ─────────────────────────────
+    # Emits final_score_v3 / pillar_*_score / weight_coverage_v3 alongside the
+    # untouched v2.2 fields above. v2.2 stays authoritative until cutover.
+    if v3_shadow_enabled():
+        results = apply_v3_shadow(results)
+        log.info("v3 shadow: final_score_v3 + pillar columns emitted on %d rows",
+                 len(results))
+
     # ── Fix #5: top_by_market — separate Top-20 per market ───────────────────
     # Excludes _low_coverage tickers (weight_coverage < LOW_COVERAGE_THRESHOLD).
     # Consumers (Discord report, dashboard) use these lists for per-market sections.
@@ -2056,6 +2116,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--max-workers",  type=int,  default=8)
     parser.add_argument("--bulk-cache",   type=Path, default=None,
                         help="Path to bulk snapshot dir (from fmp_bulk_prefetch.py)")
+    parser.add_argument("--region",       choices=["US", "EU", "ASIA"], default="US",
+                        help="Universe region (default US, byte-identical legacy "
+                             "behavior). EU/ASIA validate the universe file only — "
+                             "intl scoring stays on the StrategyEngine path in v3.0.")
     parser.add_argument("--verbose",      action="store_true")
     args = parser.parse_args(argv)
 
@@ -2066,7 +2130,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     try:
-        run(args.tickers_file, args.log_dir, args.max_workers, bulk_cache=args.bulk_cache)
+        run(args.tickers_file, args.log_dir, args.max_workers,
+            bulk_cache=args.bulk_cache, region=args.region)
         return 0
     except Exception as exc:
         log.exception("Pipeline failed: %s", exc)
