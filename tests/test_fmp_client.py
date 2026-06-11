@@ -568,3 +568,154 @@ class TestGetEarningsSurprise:
         from src.services.fmp_client import _DEAD_ENDPOINTS
         assert "earnings" not in _DEAD_ENDPOINTS
         assert "earnings-surprises" not in _DEAD_ENDPOINTS  # removed — no longer called
+
+
+# ── v3.0 client additions ────────────────────────────────────────────────────
+
+def _route(responses):
+    """side_effect router: (url_tail, symbol) → payload; everything else []."""
+    def _side_effect(url, params=None, timeout=None, **kw):
+        params = params or {}
+        path = url.split("?")[0]
+        for (url_tail, symbol), payload in responses.items():
+            if path.endswith(url_tail) and params.get("symbol") == symbol:
+                return _ok_resp(payload)
+        return _empty_resp()
+    return _side_effect
+
+
+def _fresh_date():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+class TestGetIncomeStatements:
+    def test_returns_empty_without_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        c = FMPClient(api_key="", cache_root=tmp_path / "fmp")
+        assert c.get_income_statements("7203.T") == []
+
+    def test_fetches_quarterly_with_limit(self, client):
+        rows = [{"date": "2026-03-31", "revenue": 100, "operatingIncome": 10}]
+        with patch.object(client._session, "get",
+                          return_value=_ok_resp(rows)) as mock_get:
+            result = client.get_income_statements("7203.T", period="quarter", limit=8)
+        assert result == rows
+        url = mock_get.call_args[0][0]
+        params = mock_get.call_args[1]["params"]
+        assert url.split("?")[0].endswith("/income-statement")
+        assert params["symbol"] == "7203.T"
+        assert params["period"] == "quarter"
+        assert params["limit"] == 8
+
+    def test_supports_annual_period(self, client):
+        with patch.object(client._session, "get",
+                          return_value=_ok_resp([])) as mock_get:
+            client.get_income_statements("7203.T", period="annual", limit=2)
+        assert mock_get.call_args[1]["params"]["period"] == "annual"
+
+    def test_non_list_response_returns_empty(self, client):
+        with patch.object(client._session, "get",
+                          return_value=_ok_resp({"error": "x"})):
+            assert client.get_income_statements("7203.T") == []
+
+
+class TestInstitutionalOwnershipFallback:
+    def test_prior_quarter_fallback_when_current_unfiled(self, client):
+        # now − 45d frequently lands in the CURRENT, not-yet-ended quarter
+        # (e.g., June 11 → Apr 27 → Q2), where no 13F exists yet. The client
+        # must retry the previous quarter before giving up.
+        calls = []
+
+        def _route_by_quarter(url, params=None, timeout=None, **kw):
+            params = params or {}
+            calls.append((params.get("year"), params.get("quarter")))
+            if len(calls) == 1:
+                return _empty_resp()  # current quarter: unfiled
+            return _ok_resp([{"symbol": "AAPL", "investorsHolding": 5000}])
+
+        with patch.object(client._session, "get", side_effect=_route_by_quarter):
+            result = client.get_institutional_ownership("AAPL")
+        assert result.get("investorsHolding") == 5000
+        assert len(calls) == 2
+        y0, q0 = calls[0]
+        y1, q1 = calls[1]
+        assert (y1, q1) == ((y0, q0 - 1) if q0 > 1 else (y0 - 1, 4))
+
+    def test_base_symbol_fallback_on_empty(self, client):
+        base_row = {"symbol": "ASML", "investorsHolding": 1200,
+                    "increasedPositions": 300, "reducedPositions": 200}
+        responses = {
+            ("/institutional-ownership/symbol-positions-summary", "ASML"): [base_row],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            result = client.get_institutional_ownership("ASML.AS")
+        assert result.get("investorsHolding") == 1200
+
+    def test_no_fallback_when_exact_hit(self, client):
+        exact_row = {"symbol": "ASML.AS", "investorsHolding": 50}
+        responses = {
+            ("/institutional-ownership/symbol-positions-summary", "ASML.AS"): [exact_row],
+        }
+        with patch.object(client._session, "get",
+                          side_effect=_route(responses)) as mock_get:
+            result = client.get_institutional_ownership("ASML.AS")
+        assert result.get("investorsHolding") == 50
+        assert mock_get.call_count == 1
+
+
+class TestUpsideToTargetGuards:
+    """Same-symbol pairing + GBX rescue + order-of-magnitude backstop."""
+
+    def test_same_symbol_pairing_on_base_fallback(self, client):
+        # PT only exists for the base symbol → the quote MUST also come from
+        # the base symbol (USD/USD), never base-target × local-quote (USD/EUR).
+        from src.scoring.momentum_signals import score_price_target_upside
+        responses = {
+            ("/price-target-consensus", "ASML"): [
+                {"symbol": "ASML", "targetConsensus": 900.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "ASML"): [{"symbol": "ASML", "price": 850.0}],
+            # Local-line quote present but must NOT be used for this pairing:
+            ("/quote", "ASML.AS"): [{"symbol": "ASML.AS", "price": 620.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            score = client.get_upside_to_target("ASML.AS")
+        assert score == pytest.approx(score_price_target_upside(900.0, 850.0))
+
+    def test_gbx_rescue_for_l_lines(self, client):
+        # LSE quote in pence (GBX), consensus target in pounds (GBP):
+        # ratio 3/250 = 0.012 ∈ [0.005, 0.02] → target ×100 → 300 vs 250.
+        from src.scoring.momentum_signals import score_price_target_upside
+        responses = {
+            ("/price-target-consensus", "VOD.L"): [
+                {"symbol": "VOD.L", "targetConsensus": 3.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "VOD.L"): [{"symbol": "VOD.L", "price": 250.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            score = client.get_upside_to_target("VOD.L")
+        assert score == pytest.approx(score_price_target_upside(300.0, 250.0))
+
+    def test_l_line_normal_ratio_not_rescued(self, client):
+        from src.scoring.momentum_signals import score_price_target_upside
+        responses = {
+            ("/price-target-consensus", "VOD.L"): [
+                {"symbol": "VOD.L", "targetConsensus": 280.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "VOD.L"): [{"symbol": "VOD.L", "price": 250.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            score = client.get_upside_to_target("VOD.L")
+        assert score == pytest.approx(score_price_target_upside(280.0, 250.0))
+
+    def test_order_of_magnitude_backstop_returns_none(self, client):
+        # 20× target/price on a non-.L symbol: unrescuable scale mismatch.
+        responses = {
+            ("/price-target-consensus", "AAPL"): [
+                {"symbol": "AAPL", "targetConsensus": 2000.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "AAPL"): [{"symbol": "AAPL", "price": 100.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            assert client.get_upside_to_target("AAPL") is None

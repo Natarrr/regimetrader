@@ -1,10 +1,35 @@
-# Path: backend/market_intel/engine.py
+# Path: src/engine/engine.py
 import os
 import json
 import logging
 from typing import Dict, List, Any
 
+from src.config.factor_matrix import FACTOR_MATRIX_V3
+from src.config.weights import get_region
+from src.ingestion.v3_shadow import _V3_OUTPUT_KEYS, v3_shadow_enabled
+from src.scoring.engine_v3 import score_universe_v3
+
 logger = logging.getLogger("QuantEngine")
+
+# v3.0 shadow: engine factor name → INTL metrics column carrying its raw value.
+# Superset across EU+ASIA; each region's engine input only reads its own 9.
+_V3_INTL_INPUT_MAP: Dict[str, str] = {
+    "quality_piotroski": "quality_piotroski_score",
+    "fcf_yield": "fcf_yield_score",
+    "pb_value_up": "pb_value_up_score",
+    "roic_quality": "roic_quality_score",
+    "amihud_shock": "amihud_shock_score",
+    "analyst_consensus": "analyst_consensus_score",
+    "margin_expansion": "margin_expansion_score",
+    "inst_concentration": "inst_concentration_score",
+    "dividend_sustain": "dividend_sustain_score",
+    "revision_velocity": "revision_velocity_score",
+    # v3-specific keys — v2.2 same-named factors use different math:
+    "analyst_revision": "analyst_revision_score_v3",
+    # v2.2 stores 0.0 for a missing PT (downward bias on a signed factor);
+    # the _v3 key preserves None = unavailable.
+    "price_target_upside": "price_target_upside_score_v3",
+}
 
 class StrategyEngine:
     def __init__(self, profile_path: str):
@@ -122,7 +147,69 @@ class StrategyEngine:
 
         # Sort universe descending by final quantitative output ranking
         processed_rankings.sort(key=lambda x: x["composite_score"], reverse=True)
+
+        # ── v3.0 shadow (SCORING_V3_SHADOW=1): split the co-mingled INTL ──
+        # pool into separate EU/ASIA engine_v3 runs and attach final_score_v3
+        # alongside the untouched composite_score (v2.2 authoritative).
+        if v3_shadow_enabled():
+            self._attach_v3_shadow(raw_universe_data, processed_rankings)
+
         return processed_rankings
+
+    def _attach_v3_shadow(
+        self,
+        raw_universe_data: List[Dict[str, Any]],
+        rankings: List[Dict[str, Any]],
+    ) -> None:
+        """Score EU and ASIA as SEPARATE engine_v3 pools (never co-mingled —
+        bucket statistics across regions are meaningless) and merge the v3
+        output columns onto the matching v2.2 ranking rows in place."""
+        by_ticker = {r.get("ticker"): r for r in rankings}
+        pools: Dict[str, List[Dict[str, Any]]] = {"EU": [], "ASIA": []}
+
+        for asset in raw_universe_data:
+            ticker = asset.get("ticker") or ""
+            region = get_region(ticker)
+            if region not in pools:
+                logger.warning(
+                    "v3 shadow: %s resolves to region %s — not an INTL "
+                    "ticker, skipped (v2.2 composite unaffected)",
+                    ticker, region,
+                )
+                continue
+            metrics = asset.get("metrics", {}) or {}
+            row: Dict[str, Any] = {
+                "ticker": ticker,
+                "sector": (asset.get("sector")
+                           or metrics.get("_v3_sector") or "Unknown"),
+                "cap_tier": metrics.get("_v3_cap_tier") or "large",
+                "market": "EUROPE" if region == "EU" else "ASIA",
+                "quality_piotroski_raw": metrics.get("quality_piotroski_raw"),
+            }
+            for factor in FACTOR_MATRIX_V3[region]:
+                row[f"{factor}_score"] = metrics.get(_V3_INTL_INPUT_MAP[factor])
+            pools[region].append(row)
+
+        for region, rows in pools.items():
+            if not rows:
+                continue
+            try:
+                scored = score_universe_v3(rows, region)
+            except ValueError as exc:
+                logger.error(
+                    "v3 shadow %s pool failed: %s — composite_score "
+                    "unaffected", region, exc,
+                )
+                continue
+            for s in scored:
+                target = by_ticker.get(s.get("ticker"))
+                if target is None:
+                    continue
+                for key in _V3_OUTPUT_KEYS:
+                    target[key] = s.get(key)
+                for key in ("_factor_blackout", "_contamination_masked"):
+                    if key in s:
+                        target[key] = s[key]
 
     def save_results(self, output_dir: str, data: List[Dict[str, Any]]):
         os.makedirs(output_dir, exist_ok=True)

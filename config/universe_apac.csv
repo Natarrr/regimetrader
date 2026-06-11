@@ -1,0 +1,523 @@
+ticker,name,sector,cap_tier,exchange,adv_usd
+005930.KS,"Samsung Electronics Co., Ltd.",Technology,large,KSC,1073883092150
+000660.KS,SK hynix Inc.,Technology,large,KSC,504127255250
+035420.KS,NAVER Corporation,Communication Services,large,KSC,162145344000
+006400.KS,"Samsung SDI Co., Ltd.",Technology,large,KSC,142552542089
+005380.KS,Hyundai Motor Company,Consumer Cyclical,large,KSC,140893783250
+005490.KS,POSCO Holdings Inc.,Basic Materials,large,KSC,124080690750
+373220.KS,"LG Energy Solution, Ltd.",Industrials,large,KSC,122378788000
+051910.KS,"LG Chem, Ltd.",Basic Materials,large,KSC,118994364000
+034020.KS,"Doosan Enerbility Co., Ltd.",Industrials,large,KSC,116766181384
+247540.KQ,"Ecopro BM. Co., Ltd.",Industrials,large,KOE,116749893600
+000270.KS,Kia Corporation,Consumer Cyclical,large,KSC,109037013100
+035720.KS,Kakao Corp.,Communication Services,large,KSC,106125448350
+086520.KQ,"Ecopro Co., Ltd.",Basic Materials,large,KOE,101816836795
+012450.KS,"Hanwha Aerospace Co., Ltd.",Industrials,large,KSC,89445073413
+068270.KS,"Celltrion, Inc.",Healthcare,large,KSC,88094475803
+003670.KS,"Posco Future M Co., Ltd.",Basic Materials,large,KSC,83359659750
+9984.T,SoftBank Group Corp.,Unknown,large,JPX,81291006400
+066970.KQ,"L&F Co., Ltd.",Industrials,large,KOE,80006404900
+105560.KS,KB Financial Group Inc.,Financial Services,large,KSC,79562612100
+196170.KQ,ALTEOGEN Inc.,Healthcare,large,KOE,74706448500
+005935.KS,"Samsung Electronics Co., Ltd.",Technology,large,KSC,72179202750
+064350.KS,Hyundai Rotem Company,Industrials,large,KSC,70265996675
+278470.KS,"APR Co., Ltd.",Consumer Defensive,large,KOE,69690217500
+066570.KS,LG Electronics Inc.,Technology,large,KSC,68939284750
+7203.T,Toyota Motor Corporation,Unknown,large,JPX,62445107200
+042700.KS,"HANMI Semiconductor Co., Ltd.",Technology,large,KSC,62402657800
+009150.KS,"Samsung Electro-Mechanics Co., Ltd.",Technology,large,KSC,60434491950
+096770.KS,"SK Innovation Co., Ltd.",Energy,large,KSC,59208737774
+055550.KS,"Shinhan Financial Group Co., Ltd.",Financial Services,large,KSC,56254486950
+207940.KS,"Samsung Biologics Co.,Ltd.",Healthcare,large,KSC,53433515923
+352820.KS,"HYBE Co., Ltd.",Communication Services,large,KSC,53141040500
+086790.KS,Hana Financial Group Inc.,Financial Services,large,KSC,52076763250
+007660.KS,"ISU Petasys Co., Ltd.",Technology,large,KSC,50384150380
+0126Z0.KS,Samsung Epis Holdings,Healthcare,large,KOE,48772880000
+012330.KS,"Hyundai Mobis Co.,Ltd",Consumer Cyclical,large,KSC,46460390750
+011070.KS,"LG Innotek Co., Ltd.",Technology,large,KSC,45706976250
+6758.T,Sony Group Corporation,Unknown,large,JPX,43874137500
+010140.KS,"Samsung Heavy Industries Co., Ltd.",Industrials,large,KSC,43408841715
+047810.KS,"Korea Aerospace Industries, Ltd.",Industrials,large,KSC,39985584700
+091990.KQ,"Celltrion Healthcare Co., Ltd.",Healthcare,large,KOE,39495365700
+064400.KS,Lg Cns,Technology,large,KSC,38076545000
+011200.KS,"HMM Co.,Ltd",Industrials,large,KSC,37989040500
+329180.KS,"Hd Hyundai Heavy Industries Co., Ltd.",Industrials,large,KSC,35857736250
+028300.KQ,"HLB Co., Ltd.",Healthcare,large,KOE,35402803800
+015760.KS,Korea Electric Power Corporation,Utilities,large,KSC,34430857230
+259960.KS,"KRAFTON, Inc.",Technology,large,KSC,34308084300
+017670.KS,"SK Telecom Co.,Ltd",Communication Services,large,KSC,33532309450
+028260.KS,Samsung C&T Corporation,Industrials,large,KSC,33110302500
+009540.KS,"Korea Shipbuilding & Offshore Engineering Co., Ltd.",Industrials,large,KSC,32746387250
+079550.KS,"LIG Nex1 Co., Ltd.",Industrials,large,KSC,32155461600
+042660.KS,"Hanwha Ocean Co., Ltd.",Industrials,large,KSC,30467881900
+316140.KS,Woori Financial Group Inc.,Financial Services,large,KSC,30277181710
+403870.KQ,"HPSP Co., Ltd.",Technology,large,KOE,29895565150
+267260.KS,"HD Hyundai Electric Co., Ltd.",Industrials,large,KSC,29793708500
+277810.KQ,"Rainbow Robotics Co.,Ltd.",Industrials,large,KOE,29703264000
+6501.T,"Hitachi, Ltd.",Unknown,large,JPX,29037800000
+003490.KS,"Korean Air Lines Co., Ltd.",Industrials,large,KSC,28406974675
+033780.KS,KT&G Corporation,Consumer Defensive,large,KSC,28134769000
+402340.KS,"SK Square Co., Ltd.",Technology,large,KSC,27804015200
+034730.KS,SK Inc.,Technology,large,KSC,27515180000
+347850.KQ,D&D Pharmatech,Healthcare,large,KOE,27456615000
+323410.KS,KakaoBank Corp.,Financial Services,large,KSC,27026648550
+035900.KQ,JYP Entertainment Corporation,Communication Services,large,KOE,26524511800
+047050.KS,Posco International Corporation,Industrials,large,KSC,25374636200
+000250.KQ,"Sam Chun Dang Pharm. Co., Ltd",Healthcare,large,KOE,25159956500
+030200.KS,KT Corporation,Communication Services,large,KSC,24746631425
+010130.KS,"Korea Zinc Company, Ltd.",Basic Materials,large,KSC,24559924000
+010620.KS,Hd Hyundai Mipo Co. Ltd.,Industrials,large,KSC,24417445800
+000810.KS,"Samsung Fire & Marine Insurance Co., Ltd.",Financial Services,large,KSC,23997130000
+028050.KS,"Samsung Engineering Co., Ltd.",Industrials,large,KSC,23830378850
+141080.KQ,LigaChem Biosciences Inc.,Healthcare,large,KOE,23799015200
+041510.KQ,"SM Entertainment Co., Ltd.",Communication Services,large,KOE,23381554700
+443060.KS,HD Hyundai Marine Solution Co,Industrials,large,KSC,23076075000
+000720.KS,"Hyundai Engineering & Construction Co., Ltd.",Industrials,large,KSC,23036978450
+010950.KS,S-Oil Corporation,Energy,large,KSC,22832481700
+138040.KS,Meritz Financial Group Inc.,Financial Services,large,KSC,22249695800
+010120.KS,"LS ELECTRIC Co., Ltd.",Industrials,large,KSC,21051612500
+272210.KS,"Hanwha Systems Co., Ltd.",Industrials,large,KSC,20915109980
+005290.KQ,"Dongjin Semichem Co., Ltd.",Basic Materials,large,KOE,20033597350
+032830.KS,"Samsung Life Insurance Co., Ltd.",Financial Services,large,KSC,19885965750
+298380.KQ,ABL Bio Inc.,Healthcare,large,KOE,19631760900
+000150.KS,Doosan Corporation,Industrials,large,KSC,19419776200
+086280.KS,"Hyundai Glovis Co., Ltd.",Industrials,large,KSC,18761570800
+087010.KQ,"Peptron, Inc.",Healthcare,large,KOE,18324094828
+HDFCBANK.NS,HDFC Bank Limited,Financial Services,large,NSE,17824578381
+006260.KS,LS Corp.,Industrials,large,KSC,17512656700
+018260.KS,"Samsung SDS Co.,Ltd.",Technology,large,KSC,17442911750
+048260.KQ,"Osstem Implant Co., Ltd.",Healthcare,large,KOE,17223076000
+298040.KS,Hyosung Heavy Industries Corporation,Industrials,large,KSC,17168502400
+003550.KS,LG Corp.,Technology,large,KSC,17146899200
+222800.KQ,"SIMMTECH Co., Ltd.",Technology,large,KOE,16703618100
+475830.KQ,"Orum Therapeutics, Inc.",Healthcare,large,KOE,16484225200
+036930.KQ,"JUSUNG ENGINEERING Co., Ltd.",Technology,large,KOE,16350345000
+328130.KQ,Lunit Inc.,Technology,large,KOE,16171680200
+078600.KQ,"Daejoo Electronic Materials Co., Ltd.",Industrials,large,KOE,15942598800
+039030.KQ,"EO Technics Co., Ltd.",Technology,large,KOE,15496137500
+067310.KQ,HANA Micron Inc.,Technology,large,KOE,15234350799
+214450.KQ,"PharmaResearch Co., Ltd.",Healthcare,large,KOE,15160544000
+122870.KQ,YG Entertainment Inc.,Communication Services,large,KOE,15003324800
+RELIANCE.NS,Reliance Industries Limited,Energy,large,NSE,14750263559
+003230.KS,"Samyang Foods Co., Ltd.",Consumer Defensive,large,KSC,14449626250
+4661.T,"Oriental Land Co., Ltd.",Unknown,large,JPX,14136192000
+058470.KQ,LEENO Industrial Inc.,Technology,large,KOE,13766051750
+310210.KQ,"Voronoi, Inc.",Healthcare,large,KOE,13457668709
+005830.KS,"DB Insurance Co., Ltd.",Financial Services,large,KSC,13256844300
+090460.KQ,"BH Co., Ltd.",Technology,large,KOE,12914129250
+024110.KS,Industrial Bank of Korea,Financial Services,large,KSC,12839709725
+ICICIBANK.NS,ICICI Bank Limited,Financial Services,large,NSE,12518695332
+267250.KS,"HD Hyundai Co., Ltd.",Industrials,large,KSC,12037851900
+071050.KS,"Korea Investment Holdings Co., Ltd.",Financial Services,large,KSC,11801338800
+263750.KQ,Pearl Abyss Corp.,Technology,large,KOE,11662613050
+048410.KQ,"Hyundai Bioscience Co., Ltd.",Healthcare,large,KOE,11534941550
+161390.KS,"Hankook Tire & Technology Co., Ltd.",Consumer Cyclical,large,KSC,11490984025
+016360.KS,"Samsung Securities Co., Ltd.",Financial Services,large,KSC,11468189500
+095340.KQ,"ISC Co., Ltd.",Technology,large,KOE,11399110800
+137400.KQ,People & Technology Inc.,Basic Materials,large,KOE,11087653650
+145020.KQ,"Hugel, Inc.",Healthcare,large,KOE,10841595150
+005387.KS,Hyundai Motor Company,Consumer Cyclical,large,KSC,10835409600
+237690.KQ,"ST Pharm Co.,Ltd.",Healthcare,large,KOE,10632733100
+307950.KS,Hyundai Autoever Corporation,Technology,large,KSC,10532223000
+295310.KQ,"HVM Co., Ltd.",Industrials,large,KOE,10085582000
+240810.KQ,"Wonik Ips Co., Ltd",Industrials,large,KOE,9859710600
+INFY.NS,Infosys Limited,Technology,large,NSE,9743208216
+068760.KQ,"Celltrion Pharm, Inc.",Healthcare,large,KOE,9381149083
+089030.KQ,"Techwing, Inc.",Technology,large,KOE,9341654250
+358570.KQ,"GI Innovation, Inc.",Healthcare,large,KOE,9086215360
+065350.KQ,"Shinsung Delta Tech Co.,Ltd.",Technology,large,KOE,9021030600
+214150.KQ,CLASSYS Inc.,Healthcare,large,KOE,8900743000
+SBIN.NS,State Bank of India,Financial Services,large,NSE,8890562373
+131970.KQ,Tesna Inc.,Technology,large,KOE,8802801600
+058610.KQ,"SPG Co., Ltd.",Industrials,large,KOE,8589410250
+096530.KQ,"Seegene, Inc.",Healthcare,large,KOE,8485695900
+0700.HK,Tencent Holdings Limited,Communication Services,large,HKSE,8433256988
+032820.KQ,"Woori Technology, Inc.",Consumer Cyclical,large,KOE,8275074570
+000880.KS,Hanwha Corporation,Industrials,large,KSC,8265099650
+108490.KQ,"ROBOTIS Co., Ltd.",Industrials,large,KOE,8166095900
+007390.KQ,"NatureCell Co.,Ltd.",Consumer Defensive,large,KOE,8044758800
+178320.KQ,"Seojin System Co.,Ltd",Technology,large,KOE,8013275200
+437730.KQ,Samhyun,Industrials,large,KOE,7931422175
+039490.KS,"Kiwoom Securities Co., Ltd.",Financial Services,large,KSC,7849441250
+034230.KQ,"Paradise Co., Ltd.",Consumer Cyclical,large,KOE,7745079925
+195940.KQ,HK inno.N Corporation,Healthcare,large,KOE,7720173600
+AXISBANK.NS,Axis Bank Limited,Financial Services,large,NSE,7615955250
+222080.KQ,Creative & Innovative System Corporation,Industrials,large,KOE,7523012240
+101490.KQ,S&S Tech Corporation,Technology,large,KOE,7492396800
+TCS.NS,Tata Consultancy Services Limited,Technology,large,NSE,7472739284
+293490.KQ,Kakao Games Corp.,Technology,large,KOE,7469222800
+HDFC.NS,Housing Development Finance Corporation Limited,Financial Services,large,NSE,7409537636
+090710.KQ,"Hyulim ROBOT Co.,Ltd.",Industrials,large,KOE,7246956288
+084370.KQ,"Eugene Technology Co.,Ltd.",Technology,large,KOE,7199703225
+074600.KQ,Wonik QnC Corporation,Technology,large,KOE,7131830400
+098460.KQ,Koh Young Technology Inc.,Technology,large,KOE,7109838450
+TATAMOTORS.NS,Tata Motors Limited,Consumer Cyclical,large,NSE,7091930404
+TMPV.NS,Tata Motors Passenger Vehicles Limited,Consumer Cyclical,large,NSE,7091930404
+006800.KS,Mirae Asset Securities Co. Ltd.,Financial Services,large,KSC,7007056930
+319660.KQ,PSK Inc.,Technology,large,KOE,6865383900
+BAJFINANCE.NS,Bajaj Finance Limited,Financial Services,large,NSE,6846145996
+005940.KS,"NH Investment & Securities Co., Ltd.",Financial Services,large,KSC,6670339345
+005385.KS,Hyundai Motor Company,Consumer Cyclical,large,KSC,6616927050
+357780.KQ,"Soulbrain Co., Ltd.",Basic Materials,large,KOE,6590144000
+ETERNAL.NS,Eternal Ltd.,Communication Services,large,NSE,6521233745
+085370.KQ,Lutronic Corporation,Healthcare,large,KOE,6512186850
+BHARTIARTL.NS,Bharti Airtel Limited,Communication Services,large,NSE,6407483734
+039200.KQ,Oscotec Inc.,Healthcare,large,KOE,6373136000
+KOTAKBANK.NS,Kotak Mahindra Bank Limited,Financial Services,large,NSE,6151780659
+213420.KQ,"DukSan Neolux Co.,Ltd",Technology,large,KOE,6081031200
+035760.KQ,CJ ENM Co. Ltd.,Communication Services,large,KOE,6062331200
+287410.KQ,Jeisys Medical Inc.,Healthcare,large,KOE,5946885450
+047040.KS,"Daewoo Engineering & Construction Co., Ltd.",Industrials,large,KSC,5922050147
+166090.KQ,Hana Materials Inc.,Technology,large,KOE,5889762000
+ZOMATO.NS,Zomato Limited,Consumer Cyclical,large,NSE,5784332565
+051915.KS,"LG Chem, Ltd.",Basic Materials,large,KSC,5648196000
+TATASTEEL.NS,Tata Steel Limited,Basic Materials,large,NSE,5481252341
+189300.KQ,"Intellian Technologies, Inc.",Technology,large,KOE,5464626300
+281740.KQ,"Lake Materials Co., Ltd.",Basic Materials,large,KOE,5435408235
+M&M.NS,Mahindra & Mahindra Limited,Consumer Cyclical,large,NSE,5411284535
+033100.KQ,"Cheryong Electric Co.,Ltd.",Industrials,large,KOE,5326623375
+140410.KQ,"Mezzion Pharma Co.,Ltd.",Healthcare,large,KOE,5298914050
+3659.T,"NEXON Co., Ltd.",Unknown,large,JPX,5239584000
+214370.KQ,"Caregen Co., Ltd.",Basic Materials,large,KOE,5198510400
+9988.HK,Alibaba Group Holding Limited,Consumer Cyclical,large,HKSE,5197033072
+LT.NS,Larsen & Toubro Limited,Industrials,large,NSE,5109408126
+140860.KQ,Park Systems Corp.,Technology,large,KOE,4850257000
+180640.KS,Hanjin Kal,Industrials,large,KSC,4825647400
+MARUTI.NS,Maruti Suzuki India Limited,Consumer Cyclical,large,NSE,4724269302
+290650.KQ,"L&C Bio Co., Ltd",Healthcare,large,KOE,4720296000
+ITC.NS,ITC Limited,Consumer Defensive,large,NSE,4612337340
+036540.KQ,"SFA Semicon Co., Ltd.",Technology,large,KOE,4508280600
+3690.HK,Meituan,Consumer Cyclical,large,HKSE,4419108335
+183300.KQ,KoMiCo Ltd.,Technology,large,KOE,4382372800
+950160.KQ,"Kolon TissueGene, Inc.",Healthcare,large,KOE,4366129040
+JIOFIN.NS,Jio Financial Services Limited,Financial Services,large,NSE,4305966572
+TMCV.NS,Tata Motors Ltd.,Consumer Cyclical,large,NSE,4185398260
+064760.KQ,"Tokai Carbon Korea Co., Ltd.",Technology,large,KOE,4046130000
+085660.KQ,"Chabiotech Co.,Ltd.",Healthcare,large,KOE,4023933600
+ADANIENT.NS,Adani Enterprises Limited,Energy,large,NSE,3995704442
+022100.KQ,Posco Dx Company Ltd.,Technology,large,KOE,3846153600
+HAL.NS,Hindustan Aeronautics Limited,Industrials,large,NSE,3687574414
+HINDUNILVR.NS,Hindustan Unilever Limited,Consumer Defensive,large,NSE,3633494008
+HINDALCO.NS,Hindalco Industries Limited,Basic Materials,large,NSE,3607778617
+218410.KQ,RFHIC Corporation,Technology,large,KOE,3607186260
+ADANIPORTS.NS,Adani Ports and Special Economic Zone Limited,Industrials,large,NSE,3600495825
+VEDL.NS,Vedanta Limited,Basic Materials,large,NSE,3584887213
+HCLTECH.NS,HCL Technologies Limited,Technology,large,NSE,3554392733
+420770.KQ,"GigaVis Co., Ltd.",Technology,large,KOE,3528860850
+108320.KQ,"LX Semicon Co., Ltd.",Technology,large,KOE,3502037900
+095610.KQ,"TES Co., Ltd",Technology,large,KOE,3313464000
+BEL.NS,Bharat Electronics Limited,Industrials,large,NSE,3190304176
+204270.KQ,"JNTC Co., Ltd.",Technology,large,KOE,3056441760
+BANKBARODA.NS,Bank of Baroda Limited,Financial Services,large,NSE,3048055150
+IDEA.NS,Vodafone Idea Limited,Communication Services,large,NSE,3044431032
+226950.KQ,"OliX Pharmaceuticals,Inc",Healthcare,large,KOE,3011796400
+TATAPOWER.NS,The Tata Power Company Limited,Utilities,large,NSE,2965263023
+NTPC.NS,NTPC Limited,Utilities,large,NSE,2875730212
+032500.KQ,Kmw Inc.,Technology,large,KOE,2872872450
+POWERGRID.NS,Power Grid Corporation of India Limited,Utilities,large,NSE,2819586446
+TECHM.NS,Tech Mahindra Limited,Technology,large,NSE,2810300182
+TITAN.NS,Titan Company Limited,Consumer Cyclical,large,NSE,2809282560
+ASIANPAINT.NS,Asian Paints Limited,Basic Materials,large,NSE,2786837041
+099320.KQ,"Satrec Initiative Co., Ltd.",Technology,large,KOE,2769892000
+090360.KQ,"Robostar Co., Ltd.",Industrials,large,KOE,2746810400
+WIPRO.NS,Wipro Limited,Technology,large,NSE,2739877840
+SUNPHARMA.NS,Sun Pharmaceutical Industries Limited,Healthcare,large,NSE,2739401990
+ULTRACEMCO.NS,UltraTech Cement Limited,Basic Materials,large,NSE,2693211964
+BAJAJFINSV.NS,Bajaj Finserv Ltd.,Financial Services,large,NSE,2660295058
+601318.SS,"Ping An Insurance (Group) Company of China, Ltd.",Unknown,large,SHH,2641667034
+CANBK.NS,Canara Bank,Financial Services,large,NSE,2564031347
+ONGC.NS,Oil and Natural Gas Corporation Limited,Energy,large,NSE,2521615342
+COALINDIA.NS,Coal India Limited,Energy,large,NSE,2444762492
+INDIGO.NS,InterGlobe Aviation Limited,Industrials,large,NSE,2426254636
+036830.KQ,"Soulbrain Holdings Co., Ltd.",Basic Materials,large,KOE,2406810600
+PNB.NS,Punjab National Bank,Financial Services,large,NSE,2380898693
+BSE.NS,BSE Limited,Financial Services,large,NSE,2373367360
+APOLLOHOSP.NS,Apollo Hospitals Enterprise Limited,Healthcare,large,NSE,2336209368
+SHRIRAMFIN.NS,Shriram Finance Limited,Financial Services,large,NSE,2332256441
+BHEL.NS,Bharat Heavy Electricals Limited,Industrials,large,NSE,2294509854
+BAJAJ-AUTO.NS,Bajaj Auto Limited,Consumer Cyclical,large,NSE,2250770843
+003380.KQ,"Harim Holdings Co., Ltd.",Consumer Defensive,large,KOE,2234121870
+EICHERMOT.NS,Eicher Motors Limited,Consumer Cyclical,large,NSE,2173836923
+PFC.NS,Power Finance Corporation Limited,Financial Services,large,NSE,2119828021
+DLF.NS,DLF Limited,Real Estate,large,NSE,2107405899
+086450.KQ,"DongKook Pharmaceutical Co., Ltd.",Healthcare,large,KOE,2103846000
+KBANK.BK,Kasikornbank Public Company Limited,Financial Services,large,SET,2089551480
+BPCL.NS,Bharat Petroleum Corporation Limited,Energy,large,NSE,2029119744
+ADANIGREEN.NS,Adani Green Energy Limited,Utilities,large,NSE,1977270301
+082920.KQ,"VITZROCELL Co.,Ltd.",Technology,large,KOE,1968154785
+VBL.NS,Varun Beverages Limited,Consumer Defensive,large,NSE,1944056117
+KBANK-R.BK,Kasikornbank Public Company Limited,Financial Services,large,SET,1905322808
+000815.KS,"Samsung Fire & Marine Insurance Co., Ltd.",Financial Services,large,KSC,1881298750
+HDFCLIFE.NS,HDFC Life Insurance Company Limited,Financial Services,large,NSE,1869641429
+TRENT.NS,Trent Limited,Consumer Cyclical,large,NSE,1857957360
+CIPLA.NS,Cipla Limited,Healthcare,large,NSE,1857042376
+1299.HK,AIA Group Limited,Financial Services,large,HKSE,1839641947
+1810.HK,Xiaomi Corporation,Technology,large,HKSE,1825042210
+1211.HK,BYD Company Limited,Consumer Cyclical,large,HKSE,1814884181
+JSWSTEEL.NS,JSW Steel Limited,Basic Materials,large,NSE,1813182651
+ADANIPOWER.NS,Adani Power Limited,Utilities,large,NSE,1806817059
+DIVISLAB.NS,Divi's Laboratories Limited,Healthcare,large,NSE,1769386932
+LTIM.NS,LTIMindtree Limited,Technology,large,NSE,1695939943
+066575.KS,LG Electronics Inc.,Technology,large,KSC,1646441350
+CHOLAFIN.NS,Cholamandalam Investment and Finance Company Limited,Financial Services,large,NSE,1640050335
+JINDALSTEL.NS,Jindal Steel & Power Limited,Basic Materials,large,NSE,1634420883
+2318.HK,"Ping An Insurance (Group) Company of China, Ltd.",Financial Services,large,HKSE,1634410837
+INDUSTOWER.NS,Indus Towers Limited,Communication Services,large,NSE,1630047328
+1024.HK,Kuaishou Technology,Communication Services,large,HKSE,1579392952
+0939.HK,China Construction Bank Corporation,Financial Services,large,HKSE,1547681666
+TVSMOTOR.NS,TVS Motor Company Limited,Consumer Cyclical,large,NSE,1532728559
+POLYCAB.NS,Polycab India Limited,Industrials,large,NSE,1528996423
+PTT.BK,PTT Public Company Limited,Energy,large,SET,1528131003
+PTT-R.BK,PTT Public Company Limited,Energy,large,SET,1522766250
+0388.HK,Hong Kong Exchanges and Clearing Limited,Financial Services,large,HKSE,1516158470
+IOC.NS,Indian Oil Corporation Limited,Energy,large,NSE,1509683633
+HYUNDAI.NS,Hyundai Motor India Ltd.,Consumer Cyclical,large,NSE,1491772386
+SBILIFE.NS,SBI Life Insurance Company Limited,Financial Services,large,NSE,1487964753
+NESTLEIND.NS,Nestlé India Limited,Consumer Defensive,large,NSE,1475882436
+9618.HK,"JD.com, Inc.",Consumer Cyclical,large,HKSE,1475810482
+DELTA-R.BK,Delta Electronics (Thailand) Public Company Limited,Industrials,large,SET,1471739020
+DELTA.BK,Delta Electronics (Thailand) Public Company Limited,Industrials,large,SET,1436451650
+DMART.NS,Avenue Supermarts Limited,Consumer Defensive,large,NSE,1434784203
+MOTHERSON.NS,Samvardhana Motherson International Limited,Consumer Cyclical,large,NSE,1432391325
+ENRIN.NS,Siemens Energy India Ltd.,Utilities,large,NSE,1416409260
+CPALL.BK,CP ALL Public Company Limited,Consumer Defensive,large,SET,1399483507
+CPALL-R.BK,CP ALL Public Company Limited,Consumer Defensive,large,SET,1393002150
+GRASIM.NS,Grasim Industries Limited,Basic Materials,large,NSE,1386129482
+IRFC.NS,Indian Railway Finance Corporation Limited,Financial Services,large,NSE,1369812326
+BRITANNIA.NS,Britannia Industries Limited,Consumer Defensive,large,NSE,1366764722
+LTM.NS,LTM Limited,Technology,large,NSE,1328953920
+PTTEP-R.BK,PTT Exploration and Production Public Company Limited,Energy,large,SET,1316856450
+PTTEP.BK,PTT Exploration and Production Public Company Limited,Energy,large,SET,1316848280
+005389.KS,Hyundai Motor Company,Consumer Cyclical,large,KSC,1295973000
+0941.HK,China Mobile Limited,Communication Services,large,HKSE,1288830631
+2513.HK,Knowledge Atlas Technology Joint Stock Company Limited,Technology,large,HKSE,1285735320
+AOT-R.BK,Airports of Thailand Public Company Limited,Industrials,large,SET,1272030886
+AOT.BK,Airports of Thailand Public Company Limited,Industrials,large,SET,1271904246
+ADANIENSOL.NS,Adani Energy Solutions Limited,Utilities,large,NSE,1267918097
+0883.HK,CNOOC Limited,Energy,large,HKSE,1230045914
+ADVANC-R.BK,Advanced Info Service Public Company Limited,Communication Services,large,SET,1226363500
+ADVANC.BK,Advanced Info Service Public Company Limited,Communication Services,large,SET,1222854659
+3750.HK,"Contemporary Amperex Technology Co., Limited",Industrials,large,HKSE,1218999747
+UNIONBANK.NS,Union Bank of India,Financial Services,large,NSE,1209550814
+030530.KQ,"Wonik Holdings Co., Ltd",Technology,large,KOE,1201773360
+CUMMINSIND.NS,Cummins India Limited,Industrials,large,NSE,1201629429
+SIEMENS.NS,Siemens Limited,Industrials,large,NSE,1132452377
+SCB-R.BK,SCB X Public Company Limited,Financial Services,large,SET,1128964050
+027360.KQ,"Aju IB Investment Co., Ltd.",Financial Services,large,KOE,1119962125
+SCB.BK,SCB X Public Company Limited,Financial Services,large,SET,1119675480
+ABB.NS,ABB India Limited,Industrials,large,NSE,1106348338
+0005.HK,HSBC Holdings plc,Financial Services,large,HKSE,1102521583
+BBL.BK,Bangkok Bank Public Company Limited,Financial Services,large,SET,1059404432
+BBL-R.BK,Bangkok Bank Public Company Limited,Financial Services,large,SET,1057126000
+BDMS.BK,Bangkok Dusit Medical Services Public Company Limited,Healthcare,large,SET,1012743220
+BDMS-R.BK,Bangkok Dusit Medical Services Public Company Limited,Healthcare,large,SET,1011705450
+1398.HK,Industrial and Commercial Bank of China Limited,Financial Services,large,HKSE,1005481751
+010170.KQ,"Taihan Fiber Optics Co., Ltd",Technology,large,KOE,993010231
+006405.KS,"Samsung SDI Co., Ltd.",Technology,large,KSC,976808450
+LICI.NS,Life Insurance Corporation of India,Financial Services,large,NSE,951647250
+CGPOWER.NS,CG Power and Industrial Solutions Limited,Industrials,large,NSE,940718326
+031330.KQ,"SAMT Co., Ltd.",Technology,large,KOE,935184680
+347700.KQ,Sphere Corp.,Healthcare,large,KOE,921243180
+MUTHOOTFIN.NS,Muthoot Finance Limited,Financial Services,large,NSE,916818375
+9999.HK,"NetEase, Inc.",Technology,large,HKSE,900578985
+000155.KS,Doosan Corporation,Industrials,large,KSC,889907200
+GULF.BK,Gulf Energy Development Public Company Limited,Utilities,large,SET,887485616
+GULF-R.BK,Gulf Energy Development Public Company Limited,Utilities,large,SET,886597650
+PIDILITIND.NS,Pidilite Industries Limited,Basic Materials,large,NSE,844126130
+0981.HK,Semiconductor Manufacturing International Corporation,Technology,large,HKSE,830779385
+ZYDUSLIFE.NS,Zydus Lifesciences Limited,Healthcare,large,NSE,811764388
+2259.HK,Zijin Gold International Company Limited,Basic Materials,large,HKSE,804646654
+9888.HK,"Baidu, Inc.",Communication Services,large,HKSE,788464769
+3988.HK,Bank of China Limited,Financial Services,large,HKSE,778565244
+0175.HK,Geely Automobile Holdings Limited,Consumer Cyclical,large,HKSE,757845200
+KTB-R.BK,Krung Thai Bank Public Company Limited,Financial Services,large,SET,742930450
+KTB.BK,Krung Thai Bank Public Company Limited,Financial Services,large,SET,741448442
+3986.HK,Gigadevice,Technology,large,HKSE,735317056
+3968.HK,"China Merchants Bank Co., Ltd.",Financial Services,large,HKSE,725406966
+071055.KS,"Korea Investment Holdings Co., Ltd.",Financial Services,large,KSC,717047650
+TATAMTRDVR.NS,Tata Motors Passenger Vehicles Ltd. - Ordinary Shares - DVR (Class A),Consumer Cyclical,large,NSE,694898981
+2020.HK,ANTA Sports Products Limited,Consumer Cyclical,large,HKSE,686134905
+00680K.KS,Mirae Asset Securities Co. Ltd.,Financial Services,large,KSC,677149345
+INDIANB.NS,Indian Bank,Financial Services,large,NSE,655845857
+TRUE.BK,True Corporation Public Company Limited,Communication Services,large,SET,652868064
+2382.HK,Sunny Optical Technology (Group) Company Limited,Unknown,large,HKSE,640713474
+0857.HK,PetroChina Company Limited,Energy,large,HKSE,613127177
+SCC.BK,The Siam Cement Public Company Limited,Industrials,large,SET,611644108
+SCC-R.BK,The Siam Cement Public Company Limited,Industrials,large,SET,611210477
+TORNTPHARM.NS,Torrent Pharmaceuticals Limited,Healthcare,large,NSE,610105583
+005945.KS,"NH Investment & Securities Co., Ltd.",Financial Services,large,KSC,595722405
+BOSCHLTD.NS,Bosch Limited,Consumer Cyclical,large,NSE,578949721
+6809.HK,Montage Tech,Technology,large,HKSE,568475061
+PTTGC.BK,PTT Global Chemical Public Company Limited,Basic Materials,large,SET,557528213
+010955.KS,S-Oil Corporation,Energy,large,KSC,551287000
+BANPU.BK,Banpu Public Company Limited,Energy,large,SET,543340061
+BANPU-R.BK,Banpu Public Company Limited,Energy,large,SET,542112945
+009155.KS,"Samsung Electro-Mechanics Co., Ltd.",Technology,large,KSC,527965200
+TOP-R.BK,Thai Oil Public Company Limited,Energy,large,SET,527572830
+TOP.BK,Thai Oil Public Company Limited,Energy,large,SET,525787608
+BH.BK,Bumrungrad Hospital Public Company Limited,Healthcare,large,SET,520301364
+BH-R.BK,Bumrungrad Hospital Public Company Limited,Healthcare,large,SET,520260000
+1088.HK,China Shenhua Energy Company Limited,Energy,large,HKSE,505905359
+2899.HK,Zijin Mining Group Company Limited,Basic Materials,large,HKSE,503682721
+IVL-R.BK,Indorama Ventures Public Company Limited,Basic Materials,large,SET,500682000
+IVL.BK,Indorama Ventures Public Company Limited,Basic Materials,large,SET,497058692
+MINT.BK,Minor International Public Company Limited,Consumer Cyclical,large,SET,482605455
+MINT-R.BK,Minor International Public Company Limited,Consumer Cyclical,large,SET,482076490
+0992.HK,Lenovo Group Limited,Technology,large,HKSE,456771792
+0386.HK,China Petroleum & Chemical Corporation,Energy,large,HKSE,454609354
+SOLARINDS.NS,Solar Industries India Limited,Basic Materials,large,NSE,450920177
+0669.HK,Techtronic Industries Company Limited,Industrials,large,HKSE,449152413
+9961.HK,Trip.com Group Limited,Consumer Cyclical,large,HKSE,448825238
+2628.HK,China Life Insurance Company Limited,Financial Services,large,HKSE,437784911
+CPN-R.BK,Central Pattana Public Company Limited,Real Estate,large,SET,433724100
+CPN.BK,Central Pattana Public Company Limited,Real Estate,large,SET,433686743
+TRUE-R.BK,True Corporation Public Company Limited,Communication Services,large,SET,428563366
+CPF-R.BK,Charoen Pokphand Foods Public Company Limited,Consumer Defensive,large,SET,422206360
+CPF.BK,Charoen Pokphand Foods Public Company Limited,Consumer Defensive,large,SET,421564347
+TTB.BK,TMBThanachart Bank Public Company Limited,Financial Services,large,SET,421520080
+HINDZINC.NS,Hindustan Zinc Limited,Basic Materials,large,NSE,406875318
+1109.HK,China Resources Land Limited,Real Estate,large,HKSE,381961438
+GPSC.BK,Global Power Synergy Public Company Limited,Utilities,large,SET,373275369
+GPSC-R.BK,Global Power Synergy Public Company Limited,Utilities,large,SET,369489637
+1288.HK,Agricultural Bank of China Limited,Financial Services,large,HKSE,365162541
+MTC.BK,Muangthai Capital Public Company Limited,Financial Services,large,SET,345122846
+MTC-R.BK,Muangthai Capital Public Company Limited,Financial Services,large,SET,345113413
+CRC-R.BK,Central Retail Corporation Public Company Limited,Consumer Cyclical,large,SET,341895125
+CRC.BK,Central Retail Corporation Public Company Limited,Consumer Cyclical,large,SET,341771556
+BAJAJHLDNG.NS,Bajaj Holdings & Investment Limited,Financial Services,large,NSE,335481276
+02826K.KS,Samsung C&T Corporation,Industrials,large,KSC,333217800
+MAKRO.BK,Siam Makro Public Company Limited,Consumer Cyclical,large,SET,329785162
+TISCO-R.BK,TISCO Financial Group Public Company Limited,Financial Services,large,SET,326285388
+SCGP-R.BK,SCG Packaging Public Company Limited,Consumer Cyclical,large,SET,325791260
+096775.KS,"SK Innovation Co., Ltd.",Energy,large,KSC,325002600
+SCGP.BK,SCG Packaging Public Company Limited,Consumer Cyclical,large,SET,324432614
+0300.HK,Midea Group,Consumer Cyclical,large,HKSE,324113261
+TISCO.BK,TISCO Financial Group Public Company Limited,Financial Services,large,SET,321567950
+INTUCH.BK,Intouch Holdings Public Company Limited,Communication Services,large,SET,314312941
+0688.HK,China Overseas Land & Investment Limited,Real Estate,large,HKSE,314270647
+0016.HK,Sun Hung Kai Properties Limited,Real Estate,large,HKSE,314197896
+INTUCH-R.BK,Intouch Holdings Public Company Limited,Communication Services,large,SET,313814500
+1919.HK,"COSCO SHIPPING Holdings Co., Ltd.",Industrials,large,HKSE,312890302
+1347.HK,Hua Hong Semiconductor Limited,Technology,large,HKSE,312352145
+OR.BK,PTT Oil and Retail Business Public Company Limited,Energy,large,SET,309025063
+OR-R.BK,PTT Oil and Retail Business Public Company Limited,Energy,large,SET,308888760
+COM7.BK,Com7 Public Company Limited,Consumer Cyclical,large,SET,305784981
+2359.HK,"WuXi AppTec Co., Ltd.",Healthcare,large,HKSE,303922976
+1171.HK,Yankuang Energy Group Company Limited,Energy,large,HKSE,302427140
+THAI.BK,Thai Airways International Public Company Limited,Industrials,large,SET,301908763
+1928.HK,Sands China Ltd.,Unknown,large,HKSE,300918251
+003555.KS,LG Corp.,Technology,large,KSC,294462150
+HMPRO.BK,Home Product Center Public Company Limited,Consumer Cyclical,large,SET,290529445
+HMPRO-R.BK,Home Product Center Public Company Limited,Consumer Cyclical,large,SET,289230340
+TIDLOR.BK,Tidlor Holdings Public Company Limited,Financial Services,large,SET,287140215
+COM7-R.BK,Com7 Public Company Limited,Consumer Cyclical,large,SET,286620595
+6690.HK,"Haier Smart Home Co., Ltd.",Consumer Cyclical,large,HKSE,280898432
+2388.HK,BOC Hong Kong (Holdings) Limited,Financial Services,large,HKSE,279367546
+KTC-R.BK,Krungthai Card Public Company Limited,Financial Services,large,SET,278235000
+KTC.BK,Krungthai Card Public Company Limited,Financial Services,large,SET,278146145
+POWERINDIA.NS,Hitachi Energy India Limited,Technology,large,NSE,276503412
+2328.HK,PICC Property and Casualty Company Limited,Financial Services,large,HKSE,268859561
+WHA-R.BK,WHA Corporation Public Company Limited,Real Estate,large,SET,266781034
+WHA.BK,WHA Corporation Public Company Limited,Real Estate,large,SET,266512855
+2601.HK,"China Pacific Insurance (Group) Co., Ltd.",Financial Services,large,HKSE,266029729
+0728.HK,China Telecom Corporation Limited,Communication Services,large,HKSE,256769471
+9992.HK,Pop Mart International Group Limited,Consumer Cyclical,large,HKSE,251346782
+0001.HK,CK Hutchison Holdings Limited,Industrials,large,HKSE,243051790
+1378.HK,China Hongqiao Group Limited,Basic Materials,large,HKSE,239050154
+BEM-R.BK,Bangkok Expressway and Metro Public Company Limited,Industrials,large,SET,237948975
+BEM.BK,Bangkok Expressway and Metro Public Company Limited,Industrials,large,SET,237546795
+1276.HK,"Jiangsu Hengrui Pharmaceuticals Co.,Ltd",Healthcare,large,HKSE,219031007
+9633.HK,"Nongfu Spring Co., Ltd.",Consumer Defensive,large,HKSE,218063707
+03473K.KS,SK Inc.,Technology,large,KSC,215642350
+1658.HK,"Postal Savings Bank of China Co., Ltd.",Financial Services,large,HKSE,213955132
+OSP-R.BK,Osotspa Public Company Limited,Consumer Defensive,large,SET,208634285
+0762.HK,China Unicom (Hong Kong) Limited,Communication Services,large,HKSE,202310509
+BCP-R.BK,Bangchak Corporation Public Company Limited,Energy,large,SET,200068700
+000157.KS,Doosan Corporation,Industrials,large,KSC,200051500
+BCP.BK,Bangchak Corporation Public Company Limited,Energy,large,SET,200036463
+OSP.BK,Osotspa Public Company Limited,Consumer Defensive,large,SET,199395417
+KKP.BK,Kiatnakin Phatra Bank Public Company Limited,Financial Services,large,SET,185390158
+AWC.BK,Asset World Corp Public Company Limited,Real Estate,large,SET,181261761
+AWC-R.BK,Asset World Corp Public Company Limited,Real Estate,large,SET,181141788
+0002.HK,CLP Holdings Limited,Utilities,large,HKSE,180644230
+0011.HK,Hang Seng Bank Limited,Financial Services,large,HKSE,174228661
+6160.HK,BeOne Medicines AG,Healthcare,large,HKSE,170114772
+6030.HK,CITIC Securities Company Limited,Financial Services,large,HKSE,167648070
+0763.HK,ZTE Corporation,Technology,large,HKSE,167270879
+3993.HK,CMOC Group Limited,Basic Materials,large,HKSE,162115805
+D05.SI,DBS Group Holdings Ltd,Financial Services,large,SES,145572775
+0788.HK,China Tower Corporation Limited,Communication Services,large,HKSE,135546971
+1898.HK,China Coal Energy Company Limited,Energy,large,HKSE,133504736
+EGCO.BK,Electricity Generating Public Company Limited,Utilities,large,SET,126984732
+EGCO-R.BK,Electricity Generating Public Company Limited,Utilities,large,SET,125644365
+2338.HK,"Weichai Power Co., Ltd.",Industrials,large,HKSE,124142157
+TLI.BK,Thai Life Insurance Public Company Limited,Financial Services,large,SET,123880871
+CENTEL-R.BK,Central Plaza Hotel Public Company Limited,Consumer Cyclical,large,SET,119282289
+0267.HK,CITIC Limited,Industrials,large,HKSE,118811762
+3328.HK,"Bank of Communications Co., Ltd.",Financial Services,large,HKSE,114762825
+2714.HK,Muyuan,Consumer Defensive,large,HKSE,114581316
+0998.HK,China CITIC Bank Corporation Limited,Financial Services,large,HKSE,114127583
+0066.HK,MTR Corporation Limited,Industrials,large,HKSE,112774576
+1336.HK,New China Life Insurance Company Ltd.,Financial Services,large,HKSE,110858786
+ITC.BK,i-Tail Corporation Public Company Limited,Consumer Defensive,large,SET,110667219
+ITC-R.BK,i-Tail Corporation Public Company Limited,Consumer Defensive,large,SET,110421939
+BJC.BK,Berli Jucker Public Company Limited,Industrials,large,SET,109524107
+BJC-R.BK,Berli Jucker Public Company Limited,Industrials,large,SET,109481780
+RATCH.BK,Ratch Group Public Company Limited,Utilities,large,SET,108116847
+RATCH-R.BK,Ratch Group Public Company Limited,Utilities,large,SET,107497172
+TCAP.BK,Thanachart Capital Public Company Limited,Financial Services,large,SET,106509923
+006805.KS,Mirae Asset Securities Co. Ltd.,Financial Services,large,KSC,105838155
+TCAP-R.BK,Thanachart Capital Public Company Limited,Financial Services,large,SET,105517250
+1816.HK,"CGN Power Co., Ltd.",Utilities,large,HKSE,96671659
+1339.HK,The People's Insurance Company (Group) of China Limited,Financial Services,large,HKSE,87396650
+3692.HK,Hansoh Pharmaceutical Group Company Limited,Healthcare,large,HKSE,86910014
+U11.SI,United Overseas Bank Limited,Financial Services,large,SES,77687740
+6936.HK,"S.F. Holding Co., Ltd.",Industrials,large,HKSE,77091111
+003495.KS,"Korean Air Lines Co., Ltd.",Industrials,large,KSC,75727400
+Z74.SI,Singapore Telecommunications Limited,Communication Services,large,SES,69256540
+O39.SI,Oversea-Chinese Banking Corporation Limited,Financial Services,large,SES,68264910
+1766.HK,CRRC Corporation Limited,Industrials,large,HKSE,62596261
+GVT&D.NS,GE Vernova T&D India Limited,Industrials,large,NSE,59830268
+3288.HK,Haitian Flav,Industrials,large,HKSE,53780211
+C38U.SI,CapitaLand Integrated Commercial Trust,Real Estate,large,SES,41320780
+CCET.BK,Cal-Comp Electronics (Thailand) Public Company Limited,Technology,large,SET,40904210
+1888.HK,Kingboard Laminates Holdings Limited,Technology,large,HKSE,40220400
+2888.HK,Standard Chartered PLC,Financial Services,large,HKSE,38143912
+BS6.SI,Yangzijiang Shipbuilding (Holdings) Ltd.,Industrials,large,SES,37904287
+6818.HK,China Everbright Bank Company Limited,Financial Services,large,HKSE,31098018
+A17U.SI,CapitaLand Ascendas REIT,Real Estate,large,SES,30780205
+C6L.SI,Singapore Airlines Limited,Industrials,large,SES,28882605
+TFG-R.BK,Thaifoods Group Public Company Limited,Consumer Defensive,large,SET,27635670
+TFG.BK,Thaifoods Group Public Company Limited,Consumer Defensive,large,SET,27412382
+5E2.SI,Seatrium Ltd,Industrials,mid,SES,24494619
+6869.HK,Yangtze Optical Fibre And Cable Joint Stock Limited Company,Technology,large,HKSE,24424106
+9CI.SI,CapitaLand Investment Limited,Real Estate,large,SES,24242970
+S68.SI,Singapore Exchange Limited,Financial Services,large,SES,22772199
+BN4.SI,Keppel Corporation Limited,Industrials,large,SES,22610600
+S51.SI,Sembcorp Marine Ltd,Industrials,mid,SES,22008211
+M44U.SI,Mapletree Logistics Trust,Real Estate,mid,SES,21492240
+CPNREIT.BK,CPN Retail Growth Leasehold REIT,Real Estate,large,SET,20352821
+G13.SI,Genting Singapore Limited,Consumer Cyclical,mid,SES,20347933
+F34.SI,Wilmar International Limited,Consumer Defensive,large,SES,19330797
+S63.SI,Singapore Technologies Engineering Ltd,Industrials,large,SES,19035905
+2611.HK,"Guotai Junan Securities Co., Ltd.",Financial Services,large,HKSE,19009411
+U96.SI,Sembcorp Industries Ltd,Industrials,large,SES,15723926
+N2IU.SI,Mapletree Pan Asia Commercial Trust,Real Estate,mid,SES,15044396
+ME8U.SI,Mapletree Industrial Trust,Real Estate,mid,SES,13504356
+J36.SI,Jardine Matheson Holdings Limited,Industrials,large,SES,12278859
+C09.SI,City Developments Limited,Real Estate,mid,SES,12121204
+AJBU.SI,Keppel DC REIT,Real Estate,mid,SES,12092267
+V03.SI,Venture Corporation Limited,Technology,mid,SES,11612225
+Y92.SI,Thai Beverage Public Company Limited,Consumer Defensive,large,SES,11189040
+BUOU.SI,Frasers Logistics & Commercial Trust,Real Estate,mid,SES,10967328
+S58.SI,SATS Ltd.,Industrials,mid,SES,10356804
+C52.SI,ComfortDelGro Corporation Limited,Industrials,mid,SES,9955799
+T82U.SI,Suntec Real Estate Investment Trust,Real Estate,mid,SES,9101308
+U14.SI,UOL Group Limited,Real Estate,mid,SES,7763646
+K71U.SI,Keppel REIT,Real Estate,mid,SES,7501025
+J69U.SI,Frasers Centrepoint Trust,Real Estate,mid,SES,6827450
+AWX.SI,AEM Holdings Ltd.,Technology,mid,SES,5259272
+HMN.SI,CapitaLand Ascott Trust,Real Estate,mid,SES,4996754
+8YZ.SI,Yangzijiang Maritime Development Ltd.,Financial Services,mid,SES,4990701
+AIY.SI,iFAST Corporation Ltd.,Technology,mid,SES,3936262
+OV8.SI,Sheng Siong Group Ltd,Consumer Defensive,mid,SES,3162046
