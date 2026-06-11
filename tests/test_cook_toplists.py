@@ -519,6 +519,19 @@ class TestSegmentByMarketCap:
         large, mid, small = cook_mod._segment_by_market_cap([])
         assert large == mid == small == []
 
+    def test_intl_entries_excluded_regardless_of_cap(self, cook_mod):
+        """INTL market_cap is listing-currency (no FX normalization upstream) —
+        a raw ¥/€ value treated as USD would skew MVO bracketing, so INTL
+        entries are excluded from all pools until FX normalization exists."""
+        intl = self._make_cap_entry("7203.T", 45_000_000_000_000)  # ¥45T raw
+        intl["pipeline"] = "INTL"
+        eu = self._make_cap_entry("ASML.AS", 5_000_000_000)
+        eu["pipeline"] = "INTL"
+        us = self._make_cap_entry("MSFT", 3_000_000_000_000)
+        large, mid, small = cook_mod._segment_by_market_cap([intl, eu, us])
+        assert [e["ticker"] for e in large] == ["MSFT"]
+        assert mid == [] and small == []
+
     def test_mvo_pools_key_in_output(self, cook_mod, registry, tmp_path):
         """cook() output must include mvo_pools key."""
         us_path = tmp_path / "us.json"

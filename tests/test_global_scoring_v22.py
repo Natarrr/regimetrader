@@ -339,3 +339,100 @@ def test_strategy_engine_injects_pipeline_key():
         )
     finally:
         os.unlink(profile_path)
+
+
+# ── 6. Display-meta passthrough (EU/Asia insider $ fix) ──────────────────────
+# FMPFetcher computes insider_usd / market_cap / return_12_1m etc. for intl
+# tickers, but score_ticker_pool() historically projected them away, so
+# cook_toplists._normalize_intl_entry always defaulted them to 0.0 and the
+# Discord desk lines could never show intl insider dollar volume.
+
+def _meta_engine(tmp_profile_factors=None):
+    import json
+    import tempfile
+    from src.engine.engine import StrategyEngine
+
+    profile = {
+        "region": "INTL",
+        "active_factors": tmp_profile_factors or {
+            "momentum_long": 0.60, "news_sentiment": 0.40,
+        },
+        "output_filename": "test_out.json",
+    }
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
+        json.dump(profile, f)
+        path = f.name
+    return StrategyEngine(path), path
+
+
+def test_engine_forwards_display_meta():
+    """insider_usd / market_cap / return_12_1m must survive into engine output."""
+    import os
+
+    engine, profile_path = _meta_engine()
+    raw = [{
+        "ticker": "ASML.AS",
+        "metrics": {
+            "momentum_long_score":  0.8,
+            "news_sentiment_score": 0.6,
+            "insider_usd":          150_000.0,
+            "market_cap":           5e9,
+            "return_12_1m":         0.18,
+            "target_price":         980.0,
+            "current_price":        851.0,
+            "earnings_surprise_pct": 0.05,
+            "earnings_surprise_days": 12,
+            "analyst_consensus_source": "bulk",
+        },
+    }]
+    try:
+        entry = engine.score_ticker_pool(raw)[0]
+        assert entry.get("insider_usd") == 150_000.0
+        assert entry.get("market_cap") == 5e9
+        assert entry.get("return_12_1m") == 0.18
+        assert entry.get("target_price") == 980.0
+        assert entry.get("current_price") == 851.0
+        assert entry.get("earnings_surprise_pct") == 0.05
+        assert entry.get("earnings_surprise_days") == 12
+        assert entry.get("analyst_consensus_source") == "bulk"
+    finally:
+        os.unlink(profile_path)
+
+
+def test_engine_absent_meta_keys_stay_absent():
+    """Metrics without display-meta keys must not spray None into the output."""
+    import os
+
+    engine, profile_path = _meta_engine()
+    raw = [{"ticker": "SAP.DE",
+            "metrics": {"momentum_long_score": 0.8, "news_sentiment_score": 0.6}}]
+    try:
+        entry = engine.score_ticker_pool(raw)[0]
+        assert "insider_usd" not in entry
+        assert "market_cap" not in entry
+        assert "return_12_1m" not in entry
+    finally:
+        os.unlink(profile_path)
+
+
+def test_engine_meta_does_not_clobber_scoring_keys():
+    """Passthrough must never overwrite composite_score / factor_snapshots."""
+    import os
+
+    engine, profile_path = _meta_engine()
+    raw = [{
+        "ticker": "SAP.DE",
+        "metrics": {
+            "momentum_long_score":  1.0,
+            "news_sentiment_score": 1.0,
+            "insider_usd":          1.0,
+        },
+    }]
+    try:
+        entry = engine.score_ticker_pool(raw)[0]
+        assert entry["composite_score"] == pytest.approx(1.0, abs=1e-4)
+        assert entry["factor_snapshots"]["momentum_long"] == 1.0
+    finally:
+        os.unlink(profile_path)
