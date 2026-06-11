@@ -947,20 +947,38 @@ class FMPClient:
         if cached is not None:
             return cached
 
-        # Determine most recently completed quarter (13F lags ~45 days)
+        # Determine the target quarter (13F filings lag ~45 days). The naive
+        # now−45d frequently lands inside the CURRENT, not-yet-ended quarter
+        # (e.g., June 11 → Apr 27 → Q2, unfiled) — so on an empty response
+        # retry the PREVIOUS quarter before concluding "no coverage".
         now = datetime.now(timezone.utc)
-        # Back off 45 days to ensure the quarter has been filed
         as_of = now.date() - timedelta(days=45)
         year = as_of.year
         quarter = (as_of.month - 1) // 3 + 1
+        prev_year, prev_quarter = (
+            (year, quarter - 1) if quarter > 1 else (year - 1, 4)
+        )
 
-        data = self._get(
-            "institutional-ownership/symbol-positions-summary",
-            {"symbol": ticker, "year": year,
-                "quarter": quarter, "page": 0, "limit": 1},
-            bucket="f13",
-        ) or []
-        result = data[0] if isinstance(data, list) and data else {}
+        # 13F filings are SEC-mandated, keyed to US listings — EU/Asia local
+        # lines often only have data under the base (ADR) symbol.
+        symbols = [ticker]
+        if "." in ticker:
+            symbols.append(ticker.split(".")[0])
+
+        result: Dict = {}
+        for y, q in ((year, quarter), (prev_year, prev_quarter)):
+            for sym in symbols:
+                data = self._get(
+                    "institutional-ownership/symbol-positions-summary",
+                    {"symbol": sym, "year": y,
+                        "quarter": q, "page": 0, "limit": 1},
+                    bucket="f13",
+                ) or []
+                result = data[0] if isinstance(data, list) and data else {}
+                if result:
+                    break
+            if result:
+                break
         if result:
             self._cache_write("f13", ticker, result)
         return result
@@ -969,17 +987,25 @@ class FMPClient:
         """Price target consensus (stable/price-target-consensus).
 
         Falls back to base symbol for EU/Asia tickers (e.g. ASML.AS → ASML).
+        The returned dict carries "_resolved_symbol" — the symbol variant the
+        consensus actually came from — so callers can pair the quote with the
+        SAME variant (a USD ADR target must never meet a local-currency quote).
         """
         if not self._api_key:
             return {}
         data = self._get("price-target-consensus", {"symbol": ticker},
                          bucket="ratings") or []
         result = data[0] if isinstance(data, list) and data else {}
+        resolved = ticker
         if not result and "." in ticker:
             base = ticker.split(".")[0]
             data2 = self._get("price-target-consensus", {"symbol": base},
                               bucket="ratings") or []
             result = data2[0] if isinstance(data2, list) and data2 else {}
+            resolved = base
+        if result:
+            result = dict(result)
+            result["_resolved_symbol"] = resolved
         return result
 
     def get_upside_to_target(self, ticker: str, max_age_days: int = 90) -> Optional[float]:
@@ -1008,7 +1034,11 @@ class FMPClient:
             from src.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
             from datetime import date as _date  # noqa: PLC0415
             target_data = self.get_price_target_consensus(ticker)
-            quote_data = self.get_quote(ticker)
+            # Same-symbol pairing: the quote MUST come from the same symbol
+            # variant the PT consensus resolved to (ASML.AS → ASML fallback
+            # means USD target × USD ADR quote, never USD target × EUR quote).
+            quote_symbol = target_data.get("_resolved_symbol", ticker)
+            quote_data = self.get_quote(quote_symbol)
             target = target_data.get("targetConsensus")
             price = quote_data.get("price")
             if not target or not price:
@@ -1033,7 +1063,28 @@ class FMPClient:
                 except Exception:
                     pass  # unparseable date — proceed without staleness filter
 
-            return score_price_target_upside(float(target), float(price))
+            target_f = float(target)
+            price_f = float(price)
+            ratio = target_f / price_f
+            # GBX/GBP rescue: LSE lines quote in pence while consensus targets
+            # are often published in pounds (structural 100× hazard). Rescue
+            # recovers the signal instead of None-dropping the UK book.
+            if quote_symbol.upper().endswith(".L"):
+                if 0.005 <= ratio <= 0.02:
+                    target_f *= 100.0
+                elif 50.0 <= ratio <= 200.0:
+                    target_f /= 100.0
+                ratio = target_f / price_f
+            # Order-of-magnitude backstop (all symbols): post-rescue scale
+            # mismatch means residual currency mixing — None, never a score.
+            if ratio > 5.0 or ratio < 0.2:
+                log.warning(
+                    "get_upside_to_target %s: target/price ratio %.3f outside "
+                    "[0.2, 5.0] — suspected currency/scale mismatch, returning None",
+                    ticker, ratio,
+                )
+                return None
+            return score_price_target_upside(target_f, price_f)
         except Exception as exc:
             log.debug("get_upside_to_target %s failed: %s", ticker, exc)
             return None
@@ -1088,6 +1139,40 @@ class FMPClient:
         data = self._get("cash-flow-statement",
                          {"symbol": ticker, "period": "quarter", "limit": limit},
                          bucket="key_metrics") or []
+        return data if isinstance(data, list) else []
+
+    def get_income_statements(
+        self, ticker: str, period: str = "quarter", limit: int = 8
+    ) -> List[Dict]:
+        """Income statements (stable/income-statement), quarterly or annual.
+
+        v3.0 margin_expansion input: 8 quarters for the TTM-vs-prior-TTM
+        operating-margin delta, or 2 annual rows for the fallback track
+        (HKEX semi-annual mandates / JP tanshin make 8 clean quarters rare
+        ex-US). Rows carry filingDate for look-ahead-safe ordering; the
+        discrete-quarter validation lives in the scorer, not here.
+        """
+        if not self._api_key:
+            return []
+        data = self._get("income-statement",
+                         {"symbol": ticker, "period": period, "limit": limit},
+                         bucket="key_metrics") or []
+        return data if isinstance(data, list) else []
+
+    def get_analyst_estimates(
+        self, ticker: str, period: str = "quarter", limit: int = 6
+    ) -> List[Dict]:
+        """Raw analyst-estimates rows, newest-first.
+
+        v3.0 revision_velocity input (needs 4 consecutive estimate rows —
+        the second derivative of the revision path; get_analyst_estimate_revision
+        only exposes the first derivative as a scalar).
+        """
+        if not self._api_key:
+            return []
+        data = self._get("analyst-estimates",
+                         {"symbol": ticker, "period": period, "limit": limit},
+                         bucket="ratings") or []
         return data if isinstance(data, list) else []
 
     def get_earnings_transcript(self, ticker: str, max_chars: int = 3000) -> Optional[str]:

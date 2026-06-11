@@ -1,0 +1,274 @@
+ticker,name,sector,cap_tier,exchange,adv_usd
+SHEL.L,Shell plc,Energy,large,LSE,21068823271
+AZN.L,AstraZeneca PLC,Healthcare,large,LSE,19267977740
+HSBA.L,HSBC Holdings plc,Financial Services,large,LSE,16348970729
+BP.L,BP p.l.c.,Energy,large,LSE,15340504419
+GLEN.L,Glencore plc,Basic Materials,large,LSE,15246548854
+RIO.L,Rio Tinto Group,Basic Materials,large,LSE,14954093305
+ULVR.L,Unilever PLC,Consumer Defensive,large,LSE,13159869515
+GSK.L,GSK plc,Healthcare,large,LSE,10579022505
+BATS.L,British American Tobacco p.l.c.,Consumer Defensive,large,LSE,9949555266
+AAL.L,Anglo American plc,Basic Materials,large,LSE,9917961892
+DGE.L,Diageo plc,Consumer Defensive,large,LSE,9789382491
+BARC.L,Barclays PLC,Financial Services,large,LSE,8922900305
+LLOY.L,Lloyds Banking Group plc,Financial Services,large,LSE,8804975261
+RR.L,Rolls-Royce Holdings plc,Industrials,large,LSE,8296424678
+REL.L,RELX Plc,Industrials,large,LSE,8148530317
+RKT.L,Reckitt Benckiser Group plc,Consumer Defensive,large,LSE,7953706276
+NG.L,National Grid plc,Utilities,large,LSE,7308941137
+LSEG.L,London Stock Exchange Group plc,Financial Services,large,LSE,7056058760
+BA.L,BAE Systems plc,Industrials,large,LSE,6886916427
+VOD.L,Vodafone Group Public Limited Company,Communication Services,large,LSE,6006888520
+PRU.L,Prudential plc,Financial Services,large,LSE,5855519208
+NWG.L,NatWest Group plc,Financial Services,large,LSE,5789589315
+HLN.L,Haleon plc,Healthcare,large,LSE,5766435416
+STAN.L,Standard Chartered PLC,Financial Services,large,LSE,4982331153
+SSE.L,SSE plc,Utilities,large,LSE,4978349702
+EXPN.L,Experian plc,Industrials,large,LSE,4914721544
+TSCO.L,Tesco PLC,Consumer Defensive,large,LSE,4724921717
+AHT.L,Ashtead Group plc,Industrials,large,LSE,4328892458
+III.L,3i Group plc,Financial Services,large,LSE,4095908944
+IMB.L,Imperial Brands PLC,Consumer Defensive,large,LSE,3915693421
+IAG.L,International Consolidated Airlines Group S.A.,Industrials,large,LSE,3900745027
+LGEN.L,Legal & General Group Plc,Financial Services,large,LSE,3807022670
+SUNB.L,Sunbelt Rentals Holdings Inc,Financial Services,large,LSE,3693483336
+AV.L,Aviva plc,Financial Services,large,LSE,3634360724
+BHP.L,BHP Group Limited,Basic Materials,large,LSE,3618149790
+FLTR.L,Flutter Entertainment plc,Consumer Cyclical,large,LSE,3216162618
+BT-A.L,BT Group plc,Communication Services,large,LSE,2932820057
+CRH.L,CRH plc,Basic Materials,large,LSE,2766177200
+NXT.L,NEXT plc,Consumer Cyclical,large,LSE,2766050002
+RTO.L,Rentokil Initial plc,Industrials,large,LSE,2593271659
+CNA.L,Centrica plc,Utilities,mid,LSE,2564799213
+INF.L,Informa plc,Communication Services,large,LSE,2424078460
+SN.L,Smith & Nephew plc,Healthcare,mid,LSE,2369305983
+SGE.L,The Sage Group plc,Technology,mid,LSE,2334990607
+BNZL.L,Bunzl plc,Consumer Defensive,mid,LSE,2025504372
+SGRO.L,SEGRO Plc,Real Estate,mid,LSE,1968474329
+FERG.L,Ferguson plc,Industrials,large,LSE,1897583475
+ANTO.L,Antofagasta plc,Basic Materials,large,LSE,1814144410
+MKS.L,Marks and Spencer Group plc,Consumer Cyclical,mid,LSE,1779122482
+HLMA.L,Halma plc,Industrials,large,LSE,1778516205
+SKG.L,Smurfit Kappa Group Plc,Consumer Cyclical,large,LSE,1697770210
+UU.L,United Utilities Group PLC,Utilities,mid,LSE,1685359841
+BNC.L,"Banco Santander, S.A.",Financial Services,large,LSE,1683474607
+ABF.L,Associated British Foods plc,Consumer Defensive,large,LSE,1679840643
+CCH.L,Coca-Cola HBC AG,Consumer Defensive,large,LSE,1670095727
+NOVO-B.CO,Novo Nordisk A/S,Healthcare,large,CPH,1624280507
+ITRK.L,Intertek Group plc,Industrials,mid,LSE,1599553951
+PSON.L,Pearson plc,Communication Services,mid,LSE,1594684524
+SVT.L,Severn Trent Plc,Utilities,mid,LSE,1585418117
+ADM.L,Admiral Group plc,Financial Services,large,LSE,1512188034
+SWR.L,Smurfit Westrock Plc,Consumer Cyclical,large,LSE,1465904775
+SMIN.L,Smiths Group plc,Industrials,mid,LSE,1421003956
+SMDS.L,DS Smith Plc,Consumer Cyclical,mid,LSE,1409202274
+PHNX.L,Phoenix Group Holdings plc,Financial Services,mid,LSE,1307880204
+MNG.L,M&G plc,Financial Services,mid,LSE,1228267198
+BEZ.L,Beazley plc,Financial Services,mid,LSE,1201860790
+SDLF.L,Standard Life plc,Financial Services,mid,LSE,1191135012
+WISE.L,Wise plc,Technology,mid,LSE,1048132300
+VALT.L,Valterra Platinum Limited,Basic Materials,large,LSE,935756640
+CCL.L,Carnival Corporation & plc,Consumer Cyclical,large,LSE,917738825
+DPLM.L,Diploma PLC,Industrials,mid,LSE,836669619
+FRES.L,Fresnillo plc,Basic Materials,large,LSE,823920387
+SDR.L,Schroders plc,Financial Services,mid,LSE,743572422
+VOLV-B.ST,AB Volvo (publ),Industrials,large,STO,717898052
+INVE-B.ST,Investor AB (publ),Financial Services,large,STO,631149389
+EDV.L,Endeavour Mining plc,Basic Materials,mid,LSE,606500408
+ATCO-A.ST,Atlas Copco AB,Industrials,large,STO,590137148
+EVO.ST,Evolution AB (publ),Consumer Cyclical,large,STO,576741940
+ERIC-B.ST,Telefonaktiebolaget LM Ericsson (publ),Technology,large,STO,500317481
+SWED-A.ST,Swedbank AB (publ),Financial Services,large,STO,477495775
+NDA-SE.ST,Nordea Bank Abp,Financial Services,large,STO,476272400
+SHB-A.ST,Svenska Handelsbanken AB (publ),Financial Services,large,STO,456263728
+AZN.ST,AstraZeneca PLC,Healthcare,large,STO,427522397
+ASML.AS,ASML Holding N.V.,Unknown,large,AMS,425231406
+SAND.ST,Sandvik AB (publ),Industrials,large,STO,423422372
+HM-B.ST,H & M Hennes & Mauritz AB (publ),Consumer Cyclical,large,STO,413541320
+ASSA-B.ST,ASSA ABLOY AB (publ),Industrials,large,STO,406940673
+BOL.ST,Boliden AB (publ),Basic Materials,large,STO,399622912
+SEB-A.ST,Skandinaviska Enskilda Banken AB (publ),Financial Services,large,STO,392345513
+AAF.L,Airtel Africa Plc,Communication Services,large,LSE,387060387
+DSV.CO,DSV A/S,Industrials,large,CPH,382121324
+VWS.CO,Vestas Wind Systems A/S,Industrials,large,CPH,374807319
+HEXA-B.ST,Hexagon AB (publ),Technology,large,STO,349715630
+ESSITY-B.ST,Essity AB (publ),Consumer Defensive,large,STO,337719759
+MAERSK-B.CO,A.P. Møller - Mærsk A/S,Industrials,large,CPH,334173000
+TELIA.ST,Telia Company AB (publ),Communication Services,large,STO,282354185
+ABB.ST,ABB Ltd,Industrials,large,STO,282348058
+SAAB-B.ST,Saab AB (publ),Industrials,large,STO,278780744
+NIBE-B.ST,NIBE Industrier AB (publ),Industrials,large,STO,268738718
+SKF-B.ST,AB SKF (publ),Industrials,large,STO,259425740
+EQT.ST,EQT AB (publ),Financial Services,large,STO,249352028
+MC.PA,"LVMH Moët Hennessy - Louis Vuitton, Société Européenne",Unknown,large,PAR,248374447
+SAP.DE,SAP SE,Technology,large,XETRA,248245387
+ORSTED.CO,Ørsted A/S,Utilities,large,CPH,245179883
+TTE.PA,TotalEnergies SE,Unknown,large,PAR,243924970
+GMAB.CO,Genmab A/S,Healthcare,large,CPH,231470217
+ALFA.ST,Alfa Laval Corporate AB,Industrials,large,STO,223772644
+DANSKE.CO,Danske Bank A/S,Financial Services,large,CPH,221492116
+SSAB-B.ST,SSAB AB (publ),Basic Materials,large,STO,221216097
+TEL2-B.ST,Tele2 AB (publ),Communication Services,large,STO,220140693
+ATCO-B.ST,Atlas Copco AB,Industrials,large,STO,213089596
+SIE.DE,Siemens AG,Industrials,large,XETRA,193947736
+SCA-B.ST,Svenska Cellulosa Aktiebolaget SCA (publ),Basic Materials,large,STO,191523726
+EPI-A.ST,Epiroc AB (publ),Industrials,large,STO,186506668
+ALV.DE,Allianz SE,Financial Services,large,XETRA,180654501
+SINCH.ST,Sinch AB (publ),Communication Services,large,STO,179242593
+NSIS-B.CO,Novozymes A/S,Basic Materials,large,CPH,178757724
+CARL-B.CO,Carlsberg A/S,Consumer Defensive,large,CPH,178121462
+PNDORA.CO,Pandora A/S,Consumer Cyclical,large,CPH,175395540
+TYT.L,Toyota Motor Corporation,Consumer Cyclical,large,LSE,169206082
+BNP.PA,BNP Paribas S.A.,Unknown,large,PAR,166922791
+GETI-B.ST,Getinge AB (publ),Healthcare,large,STO,156400749
+COLO-B.CO,Coloplast A/S,Healthcare,large,CPH,153856800
+NZYM-B.CO,Novozymes A/S,Basic Materials,large,CPH,153505820
+CAST.ST,Castellum AB (publ),Real Estate,large,STO,152067263
+WDS.L,Woodside Energy Group Ltd,Energy,large,LSE,149231305
+DTE.DE,Deutsche Telekom AG,Communication Services,large,XETRA,148686594
+SKA-B.ST,Skanska AB (publ),Industrials,large,STO,137505428
+0R15.L,SoftBank Group Corp.,Communication Services,large,LSE,137066376
+VOLCAR-B.ST,Volvo Car AB (publ.),Consumer Cyclical,large,STO,127501885
+TREL-B.ST,Trelleborg AB (publ),Industrials,large,STO,126064687
+0R1E.L,"Nintendo Co., Ltd.",Communication Services,large,LSE,124317725
+SECU-B.ST,Securitas AB (publ),Industrials,large,STO,119458362
+ALIV-SDB.ST,"Autoliv, Inc.",Consumer Cyclical,large,STO,115277611
+BALD-B.ST,Fastighets AB Balder (publ),Real Estate,large,STO,113734936
+INDU-C.ST,AB Industrivärden (publ),Financial Services,large,STO,109844282
+BAYN.DE,Bayer AG,Unknown,large,XETRA,105683628
+GN.CO,GN Store Nord A/S,Healthcare,large,CPH,101055231
+TRYG.CO,Tryg A/S,Financial Services,large,CPH,96886231
+SOBI.ST,Swedish Orphan Biovitrum AB (publ),Healthcare,large,STO,95512480
+CHR.CO,Chr. Hansen Holding A/S,Basic Materials,large,CPH,95020378
+AZA.ST,Avanza Bank Holding AB (publ),Financial Services,large,STO,85557618
+INVE-A.ST,Investor AB (publ),Financial Services,large,STO,85134949
+ZEAL.CO,Zealand Pharma A/S,Healthcare,large,CPH,84638587
+S32.L,South32 Limited,Basic Materials,large,LSE,81517105
+SSAB-A.ST,SSAB AB (publ),Basic Materials,large,STO,78956225
+LIFCO-B.ST,Lifco AB (publ),Industrials,large,STO,77369952
+BEIJ-B.ST,Beijer Ref AB (publ),Industrials,large,STO,74482744
+DEMANT.CO,Demant A/S,Healthcare,large,CPH,74152289
+MAERSK-A.CO,A.P. Møller - Mærsk A/S,Industrials,large,CPH,73241690
+ASM.AS,ASM International N.V.,Unknown,large,AMS,72139960
+SAGA-B.ST,AB Sagax (publ),Real Estate,large,STO,71079546
+ROCK-B.CO,Rockwool A/S,Industrials,large,CPH,70147347
+HOLM-B.ST,Holmen AB (publ),Basic Materials,large,STO,69999997
+RWE.DE,RWE AG,Unknown,large,XETRA,69437322
+INDT.ST,Indutrade AB (publ),Industrials,large,STO,69255270
+ADDT-B.ST,Addtech AB (publ.),Industrials,large,STO,69159276
+TIGO-SDB.ST,Millicom International Cellular S.A.,Communication Services,large,STO,68455080
+AXFO.ST,Axfood AB (publ),Consumer Defensive,large,STO,67711558
+BAVA.CO,Bavarian Nordic A/S,Healthcare,large,CPH,67420222
+AMBU-B.CO,Ambu A/S,Healthcare,large,CPH,66151406
+JYSK.CO,Jyske Bank A/S,Financial Services,large,CPH,65333818
+ALSYDB.CO,AL Sydbank A/S,Financial Services,large,CPH,64314967
+AAK.ST,AAK AB (publ.),Consumer Defensive,large,STO,63629042
+ISS.CO,ISS A/S,Industrials,large,CPH,63575293
+ENR.DE,Siemens Energy AG,Industrials,large,XETRA,62897437
+LATO-B.ST,Investment AB Latour (publ),Financial Services,large,STO,55208048
+NKT.CO,NKT A/S,Industrials,large,CPH,55191996
+EPI-B.ST,Epiroc AB (publ),Industrials,large,STO,54575391
+KIND-SDB.ST,Kindred Group plc,Consumer Cyclical,large,STO,54569135
+0QYR.L,Panasonic Holdings Corporation,Technology,large,LSE,53726679
+NDA-FI.HE,Nordea Bank Abp,Financial Services,large,HEL,52572504
+LUND-B.ST,L E Lundbergföretagen AB (publ),Financial Services,large,STO,52382985
+FNOX.ST,Fortnox AB (publ),Technology,large,STO,51256705
+RBREW.CO,Royal Unibrew A/S,Consumer Defensive,large,CPH,50225865
+INDU-A.ST,AB Industrivärden (publ),Financial Services,large,STO,50034438
+SAVE.ST,Nordnet AB (publ),Financial Services,large,STO,48483418
+NOKIA.HE,Nokia Oyj,Technology,large,HEL,47803966
+LUMI.ST,Lundin Mining Corporation,Basic Materials,large,STO,44396700
+CCEP.L,Coca-Cola Europacific Partners PLC,Consumer Defensive,large,LSE,43477049
+FLS.CO,FLSmidth & Co. A/S,Industrials,large,CPH,43147908
+NDA-DK.CO,Nordea Bank Abp,Financial Services,large,CPH,41928390
+HPOL-B.ST,HEXPOL AB (publ),Basic Materials,large,STO,39062595
+MTRS.ST,Munters Group AB (publ),Industrials,large,STO,37535755
+AIR.DE,Airbus SE,Industrials,large,XETRA,37466734
+SIM.CO,SimCorp A/S,Technology,large,CPH,36974942
+NETC.CO,Netcompany Group A/S,Technology,large,CPH,36442432
+TRMD-A.CO,TORM plc,Energy,large,CPH,36184659
+SYDB.CO,Sydbank A/S,Financial Services,large,CPH,33471355
+LOOMIS.ST,Loomis AB (publ),Industrials,large,STO,33127251
+KPN.AS,Koninklijke KPN N.V.,Unknown,large,AMS,33095047
+STE-R.ST,Stora Enso Oyj,Basic Materials,large,STO,32760657
+WIHL.ST,Wihlborgs Fastigheter AB (publ),Real Estate,large,STO,32213270
+ASMDEE-B.ST,Asmodee Group AB (publ),Consumer Cyclical,large,STO,32064745
+NESTE.HE,Neste Oyj,Energy,large,HEL,30435930
+SWEC-B.ST,Sweco AB (publ),Industrials,large,STO,29856443
+UPM.HE,UPM-Kymmene Oyj,Basic Materials,large,HEL,29721276
+SAMPO.HE,Sampo Oyj,Financial Services,large,HEL,29550020
+BIOA-B.ST,BioArctic AB (publ),Healthcare,large,STO,28542129
+0Q0C.L,Toshiba Corporation,Technology,large,LSE,28409897
+VOLV-A.ST,AB Volvo (publ),Industrials,large,STO,28096954
+KNEBV.HE,KONE Oyj,Industrials,large,HEL,28057197
+RILBA.CO,Ringkjøbing Landbobank A/S,Financial Services,large,CPH,27928848
+ASKER.ST,Asker Healthcare Group AB,Healthcare,large,STO,27642292
+UCB.BR,UCB S.A.,Unknown,large,BRU,27242305
+NOBA.ST,NOBA Bank Group AB,Financial Services,large,STO,26747849
+IPCO.ST,International Petroleum Corporation,Energy,large,STO,26646061
+LAGR-B.ST,Lagercrantz Group AB (publ),Technology,large,STO,26632119
+CAMX.ST,Camurus AB (publ),Healthcare,large,STO,26567931
+DNORD.CO,Dampskibsselskabet Norden A/S,Industrials,mid,CPH,26325359
+ALK-B.CO,ALK-Abelló A/S,Healthcare,large,CPH,25905805
+MYCR.ST,Mycronic AB (publ),Industrials,large,STO,25820928
+WALL-B.ST,Wallenstam AB (publ),Real Estate,large,STO,25480068
+SECT-B.ST,Sectra AB (publ),Healthcare,large,STO,24653100
+WPM.L,Wheaton Precious Metals Corp.,Basic Materials,large,LSE,24423695
+PEAB-B.ST,Peab AB (publ),Industrials,large,STO,23551947
+TOP.CO,Topdanmark A/S,Financial Services,large,CPH,23363769
+CHEMM.CO,ChemoMetec A/S,Healthcare,mid,CPH,23013590
+CATE.ST,Catena AB (publ),Real Estate,large,STO,22490623
+KNM.L,Konami Group Corporation,Technology,large,LSE,22450000
+FORTUM.HE,Fortum Oyj,Utilities,large,HEL,21971802
+ROKO-B.ST,Röko AB (publ),Financial Services,large,STO,21064820
+NOKIA-SEK.ST,Nokia Oyj,Technology,large,STO,20829103
+HLUN-B.CO,H. Lundbeck A/S,Healthcare,large,CPH,19967714
+PNDX-B.ST,Pandox AB (publ),Consumer Cyclical,large,STO,19962060
+ZEG.L,Zegona Communications plc,Communication Services,large,LSE,19452972
+STERV.HE,Stora Enso Oyj,Basic Materials,mid,HEL,18980363
+BRAV.ST,Bravida Holding AB (publ),Industrials,large,STO,18902844
+8TRA.ST,Traton SE,Industrials,large,STO,18223877
+TL0.DE,"Tesla, Inc.",Consumer Cyclical,large,XETRA,18151450
+ALMB.CO,Alm. Brand A/S,Financial Services,large,CPH,17863397
+NVD.DE,NVIDIA Corporation,Technology,large,XETRA,17542531
+SMSN.L,"Samsung Electronics Co., Ltd.",Technology,large,LSE,16942544
+CLAS-B.ST,Clas Ohlson AB (publ),Consumer Cyclical,large,STO,16145309
+MAW.L,"Maruwa Co., Ltd.",Technology,large,LSE,16080000
+HMS.ST,HMS Networks AB (publ),Technology,large,STO,14893063
+DFDS.CO,DFDS A/S,Industrials,mid,CPH,14732416
+MOCORP.HE,Metso Outotec Oyj,Industrials,mid,HEL,14565537
+SHB-B.ST,Svenska Handelsbanken AB (publ),Financial Services,large,STO,13500207
+METSO.HE,Metso Oyj,Industrials,large,HEL,13491103
+WRT1V.HE,Wärtsilä Oyj Abp,Industrials,large,HEL,13405515
+GACA.L,General Accident PLC,Financial Services,large,LSE,12395730
+RICO.L,"Ricoh Company, Ltd.",Industrials,large,LSE,12084000
+AIBG.L,AIB Group plc,Financial Services,large,LSE,11964507
+LIN.DE,Linde plc,Basic Materials,large,XETRA,11904350
+ELISA.HE,Elisa Oyj,Communication Services,mid,HEL,11897341
+MCOV-B.ST,Medicover AB (publ),Healthcare,large,STO,11002948
+STG.CO,Scandinavian Tobacco Group A/S,Consumer Defensive,mid,CPH,10966683
+IPC.L,International Paper Company,Consumer Cyclical,large,LSE,10288266
+GUBRA.CO,Gubra A/S,Healthcare,mid,CPH,10047286
+ORNBV.HE,Orion Oyj,Healthcare,mid,HEL,9828424
+VALMT.HE,Valmet Oyj,Industrials,mid,HEL,9737506
+KESKOB.HE,Kesko Oyj,Consumer Defensive,mid,HEL,9698091
+SPNO.CO,Spar Nord Bank A/S,Financial Services,large,CPH,9662141
+APC.DE,Apple Inc.,Technology,large,XETRA,9609624
+LUG.ST,Lundin Gold Inc.,Basic Materials,large,STO,9599370
+MSF.DE,Microsoft Corporation,Technology,large,XETRA,9075128
+AMZ.DE,"Amazon.com, Inc.",Consumer Cyclical,large,XETRA,8512096
+SVITZR.CO,Svitzer Group A/S,Industrials,mid,CPH,7809161
+SCHO.CO,Aktieselskabet Schouw & Co.,Industrials,large,CPH,7483419
+SAGA-D.ST,AB Sagax (publ),Real Estate,large,STO,7018648
+OUT1V.HE,Outokumpu Oyj,Basic Materials,mid,HEL,6959995
+NTG.CO,NTG Nordic Transport Group A/S,Industrials,mid,CPH,6905360
+PAAL-B.CO,Per Aarsleff Holding A/S,Industrials,large,CPH,6846675
+MATAS.CO,Matas A/S,Consumer Cyclical,mid,CPH,6813112
+SPIUSGKL.CO,Sparinvest INDEX USA Growth KL,Financial Services,mid,CPH,5979741
+KCR.HE,Konecranes Plc,Industrials,mid,HEL,5869283
+SPVIGAKL.CO,Sparinvest INDEX Globale Aktier KL,Financial Services,mid,CPH,5740755
+NOBLE.CO,Noble Corporation Plc,Energy,large,CPH,5734452
+MANTA.HE,Mandatum Oyj,Financial Services,mid,HEL,5571733
+ABEA.DE,Alphabet Inc.,Communication Services,large,XETRA,5529190
+HUH1V.HE,Huhtamäki Oyj,Consumer Cyclical,mid,HEL,5481673
+GACB.L,General Accident PLC,Financial Services,large,LSE,5345512

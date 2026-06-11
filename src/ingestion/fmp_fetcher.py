@@ -40,6 +40,7 @@ import logging
 from typing import Any, Optional
 
 from src.core.fetchers_base import BaseMarketFetcher, MarketEnum, TickerEntry
+from src.ingestion.v3_shadow import v3_shadow_enabled as _v3_shadow_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -129,11 +130,23 @@ class FMPFetcher(BaseMarketFetcher):
                 if rf is None:
                     continue
 
+                # ── v3.0 shadow columns (SCORING_V3_SHADOW=1) ────────────
+                # v2.2 factors untouched; failures degrade to unavailable.
+                if _v3_shadow_enabled():
+                    try:
+                        rf.update(self._v3_intl_columns(ticker, client))
+                    except Exception as v3_exc:
+                        logger.warning(
+                            "FMPFetcher v3 shadow %s: %s — v3 factors "
+                            "unavailable for this ticker", ticker, v3_exc)
+
                 entries.append(TickerEntry(
                     ticker=ticker,
                     market=self._market,
-                    sector="",
-                    cap_tier="",
+                    # sector/cap_tier populated only by the v3 shadow path
+                    # (required for engine_v3 bucketing; "" keeps v2.2 stable)
+                    sector=rf.get("_v3_sector", "") or "",
+                    cap_tier=rf.get("_v3_cap_tier", "") or "",
                     source_reliability=self.source_reliability(ticker),
                     raw_factors=rf,
                 ))
@@ -142,6 +155,81 @@ class FMPFetcher(BaseMarketFetcher):
                 logger.warning("FMPFetcher: skip %s: %s", ticker, exc)
 
         return entries
+
+    def _v3_intl_columns(self, ticker: str, client: Any) -> dict:
+        """v3.0 EU/ASIA factor columns (plan step 5; cached client calls).
+
+        New factors: inst_concentration, dividend_sustain, margin_expansion
+        (discrete-quarter validation + annual fallback), revision_velocity.
+        Plus 0.5-centered analyst_revision_score_v3 and an uncoerced
+        price_target_upside_score_v3 (the v2.2 key stores 0.0 for missing —
+        a downward bias on a signed factor). Sector/cap_tier from the cached
+        quote feed engine_v3 bucketing via _v3_sector/_v3_cap_tier.
+        """
+        from src.ingestion.v3_shadow import _g  # noqa: PLC0415
+        from src.scoring.alt_signals import (  # noqa: PLC0415
+            score_dividend_sustain, score_inst_concentration,
+        )
+        from src.scoring.consensus_signals import (  # noqa: PLC0415
+            score_analyst_revision, score_revision_velocity,
+        )
+        from src.scoring.fundamental_signals import score_margin_expansion  # noqa: PLC0415
+
+        cols: dict = {}
+
+        ratios = client.get_ratios_ttm(ticker) or {}
+        cf = client.get_cash_flow_statements(ticker, limit=4) or []
+        fcf_ttm = sum(float(r.get("freeCashFlow") or 0.0) for r in cf) if cf else None
+        paid_ttm = sum(float(r.get("dividendsPaid") or 0.0) for r in cf) if cf else None
+        cols["dividend_sustain_score"] = score_dividend_sustain(
+            dividend_yield=_g(ratios, "dividendYieldTTM", "dividendYield"),
+            payout_ratio=_g(ratios, "dividendPayoutRatioTTM", "payoutRatioTTM",
+                            "payoutRatio"),
+            fcf_ttm=fcf_ttm,
+            dividends_paid_ttm=paid_ttm,
+        )
+
+        cols["inst_concentration_score"] = score_inst_concentration(
+            client.get_institutional_ownership(ticker))
+
+        quarters: list = []
+        for sym in _symbol_candidates(ticker):
+            quarters = client.get_income_statements(
+                sym, period="quarter", limit=8) or []
+            if quarters:
+                break
+        margin = score_margin_expansion(quarters, [])
+        if margin is None:
+            annual: list = []
+            for sym in _symbol_candidates(ticker):
+                annual = client.get_income_statements(
+                    sym, period="annual", limit=2) or []
+                if annual:
+                    break
+            margin = score_margin_expansion(quarters, annual)
+        cols["margin_expansion_score"] = margin
+
+        cols["revision_velocity_score"] = score_revision_velocity(
+            client.get_analyst_estimates(ticker, period="quarter", limit=6) or [])
+
+        rev_pct, n_analysts = client.get_analyst_estimate_revision(ticker)
+        cols["analyst_revision_score_v3"] = score_analyst_revision(
+            rev_pct, n_analysts)
+
+        cols["price_target_upside_score_v3"] = None
+        for sym in _symbol_candidates(ticker):
+            upside = client.get_upside_to_target(sym)
+            if upside is not None:
+                cols["price_target_upside_score_v3"] = upside
+                break
+
+        quote = client.get_quote(ticker) or {}
+        cols["_v3_sector"] = (quote.get("sector") or "").strip() or "Unknown"
+        mcap = float(quote.get("marketCap") or 0.0)
+        cols["_v3_cap_tier"] = (
+            "large" if mcap >= 10e9 else "mid" if mcap >= 2e9 else "small"
+        )
+        return cols
 
     def _fetch_all_factors(
         self, ticker: str, client: Any,

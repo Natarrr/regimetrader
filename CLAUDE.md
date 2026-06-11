@@ -15,7 +15,7 @@
 * **Error Handling:**
   * Never use silent `try/except` blocks to return `None` or suppress errors.
   * On network/auth failure, propagate `FMPEndpointError`.
-  * Soft logic failures return `(0.0, "none")`.
+  * Soft logic failures return `(0.0, "none")` for UNSIGNED factors (0.0 = dead signal). SIGNED factors (centered at 0.5 — see `src/config/factor_matrix.py` SIGNED_FACTORS) return `(None, "unavailable")`: data absence must never read as bearish.
 
 ## 3. QUANTITATIVE ENGINE RULES
 
