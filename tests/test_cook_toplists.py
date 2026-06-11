@@ -546,6 +546,75 @@ class TestSegmentByMarketCap:
         assert "mvo_pools" in result
 
 
+def test_intl_insider_meta_flows_engine_to_discord(cook_mod, registry, tmp_path):
+    """End-to-end (plan verification 1b): FMPFetcher display meta survives
+    StrategyEngine → _normalize_intl_entry → DiscordPayloadBuilder, so the
+    EU desk line shows real insider $; the INTL MVO guard still excludes the
+    entry from cap brackets despite a plausible-looking market_cap."""
+    import json as _json
+    import tempfile
+    from datetime import datetime, timezone
+
+    from src.delivery.send_discord import DiscordPayloadBuilder
+    from src.engine.engine import StrategyEngine
+
+    profile = {
+        "region": "INTL",
+        "active_factors": {"momentum_long": 0.60, "news_sentiment": 0.40},
+        "output_filename": "test_out.json",
+    }
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False
+    ) as f:
+        _json.dump(profile, f)
+        profile_path = f.name
+
+    try:
+        engine = StrategyEngine(profile_path)
+        raw = [{
+            "ticker": "ASML.AS",
+            "metrics": {
+                "momentum_long_score":  0.80,
+                "news_sentiment_score": 0.90,
+                "insider_usd":          150_000.0,
+                "market_cap":           5e9,
+                "return_12_1m":         0.18,
+            },
+        }]
+        engine_entry = engine.score_ticker_pool(raw)[0]
+    finally:
+        import os
+        os.unlink(profile_path)
+
+    reg_map = cook_mod._build_registry_map(registry)
+    normalized = cook_mod._normalize_intl_entry(engine_entry, reg_map, vix=17.0)
+    assert normalized["insider_usd"] == 150_000.0
+    assert normalized["market_cap"] == 5e9
+    assert normalized["momentum_spy_relative"] == 0.18
+    assert normalized["market"] == "EUROPE"
+
+    # Currency guard: $5B-looking cap must NOT bracket an INTL entry.
+    large, mid, small = cook_mod._segment_by_market_cap([normalized])
+    assert large == mid == small == []
+
+    payload = DiscordPayloadBuilder({
+        "generated_at":    datetime.now(timezone.utc).isoformat(),
+        "vix":             17.0,
+        "vix_regime":      "NORMAL",
+        "kill_switch":     False,
+        "ticker_count":    1,
+        "top_buys_usa":    [],
+        "top_buys_europe": [normalized],
+        "top_buys_asia":   [],
+        "watchlist":       [],
+        "mvo_pools":       {},
+    }).build()
+    eu_field = next(f for f in payload["embeds"][0]["fields"]
+                    if "EUROPE" in f["name"])
+    assert "Insider $150k" in eu_field["value"]
+    assert "+18.0% vs SPY 12m" in eu_field["value"]
+
+
 def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):
     """Normalized INTL entries must carry 'pipeline': 'INTL'."""
     us_path = tmp_path / "top_lists_us.json"
