@@ -1152,6 +1152,22 @@ class FMPClient:
                          bucket="key_metrics") or []
         return data if isinstance(data, list) else []
 
+    def get_analyst_estimates(
+        self, ticker: str, period: str = "quarter", limit: int = 6
+    ) -> List[Dict]:
+        """Raw analyst-estimates rows, newest-first.
+
+        v3.0 revision_velocity input (needs 4 consecutive estimate rows —
+        the second derivative of the revision path; get_analyst_estimate_revision
+        only exposes the first derivative as a scalar).
+        """
+        if not self._api_key:
+            return []
+        data = self._get("analyst-estimates",
+                         {"symbol": ticker, "period": period, "limit": limit},
+                         bucket="ratings") or []
+        return data if isinstance(data, list) else []
+
     def get_earnings_transcript(self, ticker: str, max_chars: int = 3000) -> Optional[str]:
         """Executive remarks from the most recent earnings call.
 
