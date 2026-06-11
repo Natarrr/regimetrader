@@ -58,9 +58,17 @@ def _apply_sector_count_cap(
 
 
 def _segment_by_market_cap(entries: list) -> tuple[list, list, list]:
-    """Return (large_cap >$10B, mid_cap $2B-$10B, small_cap $300M-$2B). Others excluded."""
+    """Return (large_cap >$10B, mid_cap $2B-$10B, small_cap $300M-$2B). Others excluded.
+
+    INTL entries are excluded from all brackets: their market_cap arrives in
+    listing currency (FMP quote.marketCap has no FX normalization — JPY for .T,
+    GBp for .L, …), so treating it as USD would misclassify brackets and skew
+    MVO allocations. Lift this guard only once FX normalization exists upstream.
+    """
     large, mid, small = [], [], []
     for entry in entries:
+        if entry.get("pipeline") == "INTL":
+            continue
         cap = entry.get("market_cap", 0) or 0
         if cap > _LARGE_CAP_THRESHOLD:
             large.append(entry)

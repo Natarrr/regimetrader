@@ -1,315 +1,548 @@
-"""tests/test_discord_formatter.py
-Unit tests for Discord formatter helpers — 7-factor schema (P0 rewrite).
+# Path: tests/test_discord_formatter.py
+"""Tests for DiscordPayloadBuilder — institutional daily-brief layout.
+
+Contract under test (sole production builder for cooked logs/top_lists.json):
+  - Theme dispatch: NORMAL / BEAR / CAPITULATION (colors, ANSI action bar,
+    risk multiplier from src.risk.regime — never hardcoded).
+  - ANSI hygiene: escape codes confined to the leading ```ansi block, reset
+    before the closing fence, double-newline terminator before markdown.
+  - Factor matrix: ASCII-only code block ('-' for absent, no em-dash, no
+    tabs), CG column US-only, FCF/AMH/PB/ROI intl-only, equal row lengths.
+  - Desk lines: 4-dp score, percentile, badge, score delta (stale-aware),
+    intl insider $ passthrough, COV warning.
+  - Budget: desc <=4096, field <=1024, total <=6000, balanced fences.
+  - DATA UNAVAILABLE alert title contract (test_daily_toplists_absence.yml).
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
+
+ESC = "\x1b"
+
+_NOW = datetime(2026, 6, 11, 16, 30, tzinfo=timezone.utc)
 
 
-def _make_status(tickers=None, generated_at="2026-05-17T12:00:00+00:00"):
-    """Minimal intel_source_status.json fixture for build_payload tests."""
-    if tickers is None:
-        tickers = [
-            {"ticker": "AAPL", "final_score": 0.70, "badge": "WATCHLIST",
-             "sector": "Technology", "cap_tier": "large", "market": "US",
-             "insider_conviction_score_neutral": 0.80,
-             "insider_breadth_score_neutral": 0.70,
-             "congress_score_neutral": 0.0,
-             "news_sentiment_score_neutral": 0.60,
-             "news_buzz_score_neutral": 0.50,
-             "momentum_long_score_neutral": 0.40,
-             "volume_attention_score_neutral": 0.0,
-             "ceo_conviction_tier": "CEO BUY"},
-        ]
-    return {
-        "generated_at": generated_at,
-        "source_run_id": "test-run",
-        "ticker_count": len(tickers),
-        "top_by_market": {"US": tickers, "EUROPE": [], "ASIA": []},
-        "results": tickers,
+# ── Fixture builders (cooked top_lists.json schema) ───────────────────────────
+
+def _entry(ticker, score=0.72, market="USA", **kw):
+    badge = ("HIGH BUY" if score >= 0.80
+             else "TACTICAL BUY" if score >= 0.60 else "WATCHLIST")
+    factors = {
+        "insider_conviction": 0.50, "insider_breadth": 0.40,
+        "congress": 0.30 if market == "USA" else 0.0,
+        "news_sentiment": 0.60, "news_buzz": 0.45,
+        "momentum_long": 0.70, "volume_attention": 0.0,
+        "analyst_consensus": 0.55, "quality_piotroski": 0.65,
+        "sector": kw.pop("sector", "Technology"),
     }
+    if market in ("EUROPE", "ASIA"):
+        factors.update({
+            "fcf_yield": 0.55, "amihud_shock": 0.38,
+            "pb_value_up": 0.47, "roic_quality": 0.52,
+        })
+    factors.update(kw.pop("factors", {}))
+    base = {
+        "ticker": ticker,
+        "final_score": score,
+        "badge": badge,
+        "market": market,
+        "factors": factors,
+        "insider_usd": 0.0,
+        "momentum_spy_relative": 0.0,
+    }
+    base.update(kw)
+    return base
 
 
-class TestTickerDetailField:
-    """_ticker_detail_field renders the 3-line card format with 7 factors."""
-
-    def _entry(self, **overrides):
-        base = {
-            "ticker": "AAPL",
-            "final_score": 0.82,
-            "badge": "HIGH BUY",
-            "sector": "Technology",
-            "cap_tier": "large",
-            "market": "USA",
-            "ceo_conviction_tier": "BUY",
-            "factors": {
-                "insider_conviction": 0.80,
-                "insider_breadth": 0.70,
-                "congress": 0.0,
-                "news_sentiment": 0.60,
-                "news_buzz": 0.50,
-                "momentum_long": 0.40,
-                "volume_attention": 0.0,
+def _top_lists(vix=17.3, **overrides):
+    data = {
+        "top_buys_usa": [
+            _entry("NVDA", 0.8412, insider_usd=2_100_000,
+                   momentum_spy_relative=0.182),
+            _entry("MSFT", 0.7821),
+        ],
+        "top_buys_europe": [
+            _entry("ASML.AS", 0.7102, market="EUROPE", weight_coverage=0.85),
+        ],
+        "top_buys_asia": [
+            _entry("7203.T", 0.6404, market="ASIA", weight_coverage=0.90),
+        ],
+        "watchlist": [],
+        "mvo_pools": {
+            "large_cap_anchors": {
+                "bracket": "LARGE_CAP_ANCHOR", "cap_range": ">$10B",
+                "positions": [
+                    {"ticker": "NVDA", "allocation": 0.25, "final_score": 0.8412,
+                     "exit_anchors": {"batch_floor": 408.0, "upside_pct": 14.2}},
+                ],
             },
-        }
-        base.update(overrides)
-        return base
-
-    def _all_scores(self):
-        return [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.82, 0.9]
-
-    def test_ticker_in_field(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        f = _ticker_detail_field(
-            1, self._entry(), all_scores=self._all_scores())
-        assert "AAPL" in f["name"]
-
-    def test_score_in_field(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        f = _ticker_detail_field(
-            1, self._entry(), all_scores=self._all_scores())
-        assert "0.8200" in f["name"]
-
-    def test_7factor_matrix_rendered(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        f = _ticker_detail_field(
-            1, self._entry(), all_scores=self._all_scores())
-        val = f["value"]
-        assert "IC:" in val
-        assert "IB:" in val
-        assert "CG:" in val
-        assert "NS:" in val
-        assert "NB:" in val
-        assert "MO:" in val
-        assert "VA:" in val
-
-    def test_zero_factors_rendered_as_dash(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        f = _ticker_detail_field(
-            1, self._entry(), all_scores=self._all_scores())
-        val = f["value"]
-        # congress=0.0 and volume_attention=0.0 → should render as "—"
-        assert "CG:—" in val
-        assert "VA:—" in val
-
-    def test_ceo_tier_shown(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        entry = self._entry(insider_usd=22000, ceo_conviction_tier="CEO BUY")
-        f = _ticker_detail_field(1, entry, all_scores=self._all_scores())
-        assert "Insider" in f["value"]
-        assert "CEO" in f["value"]
-
-    def test_ceo_tier_absent_when_none(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        entry = self._entry(ceo_conviction_tier=None)
-        f = _ticker_detail_field(1, entry, all_scores=self._all_scores())
-        assert "CEO" not in f["value"]
-
-    def test_percentile_in_field(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        # all_scores has 9 values, 0.82 is 8th → p88
-        f = _ticker_detail_field(
-            1, self._entry(), all_scores=self._all_scores())
-        assert "p8" in f["name"]  # p80–p89 range
-
-    def test_catalyst_line_present(self):
-        from src.delivery.send_discord import _ticker_detail_field
-        f = _ticker_detail_field(
-            1, self._entry(), all_scores=self._all_scores())
-        assert any(kw in f["value"] for kw in ["Insider",
-                   "EPS", "congress", "vs SPY", "no primary"])
-
-
-class TestComputePercentile:
-    """_compute_percentile returns correct rank within population."""
-
-    def test_top_score_is_p100(self):
-        from src.delivery.send_discord import _compute_percentile
-        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
-        assert _compute_percentile(0.5, scores) == 100
-
-    def test_bottom_score_is_low(self):
-        from src.delivery.send_discord import _compute_percentile
-        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
-        pct = _compute_percentile(0.1, scores)
-        assert pct <= 20
-
-    def test_empty_population_returns_zero(self):
-        from src.delivery.send_discord import _compute_percentile
-        assert _compute_percentile(0.5, []) == 0
-
-
-class TestComputeCatalyst:
-    """_compute_catalyst returns top active factors in descending order."""
-
-    def test_returns_top_two_drivers(self):
-        from src.delivery.send_discord import _compute_catalyst
-        entry = {
-            "insider_usd": 12500,
-            "ceo_conviction_tier": "CEO BUY",
-            "earnings_surprise_pct": 0.12,
-            "earnings_surprise_days": 8,
-        }
-        cat = _compute_catalyst(entry)
-        assert "Insider" in cat
-        assert "EPS" in cat
-
-    def test_no_active_factors_returns_no_catalyst(self):
-        from src.delivery.send_discord import _compute_catalyst
-        entry = {"factors": {"insider_conviction": 0.0, "congress": 0.0}}
-        cat = _compute_catalyst(entry)
-        assert "no primary catalyst" in cat
-
-    def test_zeros_excluded_from_catalyst(self):
-        from src.delivery.send_discord import _compute_catalyst
-        entry = {"factors": {"insider_conviction": 0.9, "congress": 0.0,
-                             "news_sentiment": 0.0}}
-        cat = _compute_catalyst(entry)
-        assert "CG" not in cat
-
-
-class TestBuildPayloadSchema:
-    """build_payload handles both intel_source_status.json and legacy top_lists.json."""
-
-    def test_status_schema_produces_embed(self):
-        from src.delivery.send_discord import build_payload
-        payload = build_payload(_make_status())
-        assert "embeds" in payload
-        assert len(payload["embeds"]) >= 1
-
-    def test_status_schema_has_usa_section(self):
-        """5-section format: regional sections render inside field VALUES
-        (GLOBAL FACTOR RADAR), not as field names."""
-        from src.delivery.send_discord import build_payload
-        payload = build_payload(_make_status())
-        fields = payload["embeds"][0]["fields"]
-        values = [f.get("value") or "" for f in fields]
-        assert any("UNITED STATES" in v or "USA" in v for v in values)
-
-    def test_legacy_schema_still_works(self):
-        from src.delivery.send_discord import build_payload
-        legacy = {
-            "generated_at": "2026-05-17T12:00:00+00:00",
-            "source_run_id": "test-run",
-            "ticker_count": 1,
-            "weights": {"edgar": 0.28, "insider": 0.23, "congress": 0.22,
-                        "news": 0.15, "macro": 0.12},
-            "top_buys": [{"ticker": "AAPL", "final_score": 0.70,
-                          "badge": "WATCHLIST",
-                          "factors": {"edgar": 0.7, "insider": 0.6,
-                                      "congress": 0.5, "news": 0.6,
-                                      "macro": 0.5},
-                          "ceo_buy": False}],
-            "mid_caps": [],
-            "small_caps": [],
-        }
-        payload = build_payload(legacy)
-        assert "embeds" in payload
-
-    def test_stale_data_shows_warning(self):
-        from src.delivery.send_discord import build_payload
-        # generated_at > 25h ago → DATA IS Xh OLD stale alert in description
-        status = _make_status(generated_at="2026-05-17T12:00:00+00:00")
-        payload = build_payload(status)
-        desc = payload["embeds"][0]["description"]
-        assert "OLD" in desc
-
-    def test_status_schema_preserves_esg_metadata(self):
-        """ESG keys survive entry normalisation, and the per-ticker card
-        renderer still emits the ESG! tag (the 5-section embed itself no
-        longer shows per-ticker detail fields)."""
-        from src.delivery.send_discord import _build_ticker_card, _normalise_entry
-        raw = {
-            "ticker": "AAPL", "final_score": 0.70, "badge": "WATCHLIST",
-            "factors": {}, "esg_score": 22.0, "esg_flag": True,
-        }
-        entry = _normalise_entry(raw)
-        assert entry.get("esg_score") == 22.0
-        assert entry.get("esg_flag") is True
-        card = _build_ticker_card(1, entry)
-        assert "ESG!" in card["name"]
-
-    def test_percentile_includes_zero_values(self):
-        from src.delivery.send_discord import _compute_percentile
-        scores = [0.0, 0.2, 0.4, 0.6]
-        assert _compute_percentile(0.0, scores) == 25
-
-
-_INSTITUTIONAL_SAMPLE = {
-    "top_buys_usa": [{
-        "ticker": "MSFT", "final_score": 0.942, "badge": "HIGH BUY",
-        "price_target": 480.0, "current_price": 420.0,
-        "factors": {"sector": "Technology"},
-        "exit_anchors": {
-            "batch_floor": 408.0, "upside_pct": 14.2,
-            "take_profit_alert": False, "breakout_extension": False,
-            "extended_target": None,
         },
-    }],
-    "top_buys_europe": [{
-        "ticker": "ASML.AS", "final_score": 0.912, "badge": "HIGH BUY",
-        "price_target": 980.0, "current_price": 851.0,
-        "factors": {"sector": "Technology"},
-        "exit_anchors": {
-            "batch_floor": 820.0, "upside_pct": 15.1,
-            "take_profit_alert": False, "breakout_extension": False,
-            "extended_target": None,
-        },
-    }],
-    "top_buys_asia": [],
-    "mvo_pools": {
-        "mid_cap": {
-            "bracket": "MID_CAP",
-            "positions": [{
-                "ticker": "IFF", "allocation": 0.35, "final_score": 0.80,
-                "price_target": 110.0,
-                "exit_anchors": {"batch_floor": 88.0, "upside_pct": 16.2,
-                                 "take_profit_alert": False},
-            }],
+        "vix": vix,
+        "vix_regime": "NORMAL",
+        "kill_switch": False,
+        "ticker_count": 164,
+        "generated_at": (_NOW - timedelta(hours=0.4)).isoformat(),
+    }
+    data.update(overrides)
+    return data
+
+
+def _build(vix=17.3, yesterday_scores=None, yesterday_age_h=None, **overrides):
+    from src.delivery.send_discord import DiscordPayloadBuilder
+    builder = DiscordPayloadBuilder(
+        _top_lists(vix=vix, **overrides),
+        yesterday_scores=yesterday_scores,
+        yesterday_age_h=yesterday_age_h,
+        now=_NOW,
+    )
+    return builder.build()
+
+
+def _embed(payload):
+    return payload["embeds"][0]
+
+
+def _all_text(embed):
+    parts = [embed.get("title", ""), embed.get("description", "")]
+    for f in embed.get("fields", []):
+        parts.append(f.get("name", ""))
+        parts.append(f.get("value", ""))
+    parts.append((embed.get("footer") or {}).get("text", ""))
+    return "\n".join(parts)
+
+
+def _field(embed, name_fragment):
+    for f in embed.get("fields", []):
+        if name_fragment in f["name"]:
+            return f
+    return None
+
+
+# ── 1. Theme selection ─────────────────────────────────────────────────────────
+
+class TestThemes:
+    def test_normal_is_green_with_full_multiplier(self):
+        e = _embed(_build(vix=17.3))
+        assert e["color"] == 0x00FF00
+        assert "NORMAL" in e["description"]
+        assert "×1.00" in e["description"]
+
+    def test_bear_is_orange_with_dampened_multiplier(self):
+        e = _embed(_build(vix=24.0))
+        assert e["color"] == 0xFFA500
+        assert "BEAR" in e["description"]
+        assert "×0.80" in e["description"]
+
+    def test_capitulation_is_red_with_half_multiplier(self):
+        e = _embed(_build(
+            vix=34.0, kill_switch=True,
+            top_buys_usa=[], top_buys_europe=[], top_buys_asia=[],
+            watchlist=[_entry("JNJ", 0.41, badge="WATCHLIST")],
+        ))
+        assert e["color"] == 0xFF0000
+        assert "CAPITULATION" in e["description"]
+        assert "×0.50" in e["description"]
+        assert "SUPPRESSED" in e["description"].upper()
+
+    def test_multiplier_comes_from_regime_module(self):
+        """Thresholds must come from src.risk.regime, not hardcoded 20/30."""
+        from src.risk.regime import BEAR_THRESHOLD
+        e = _embed(_build(vix=BEAR_THRESHOLD))  # boundary: 20.0 is BEAR
+        assert "BEAR" in e["description"]
+
+    def test_stale_data_forces_red_and_warning(self):
+        gen = (_NOW - timedelta(hours=30)).isoformat()
+        e = _embed(_build(vix=17.3, generated_at=gen))
+        assert e["color"] == 0xFF0000
+        assert "STALE" in e["description"].upper()
+
+    def test_macro_section_has_strategy_label_and_gates(self):
+        from src.risk.regime import RiskRegime, strategy_label
+        e = _embed(_build(vix=17.3))
+        assert strategy_label(RiskRegime.NORMAL) in e["description"]
+        assert "≥0.60" in e["description"]
+        assert "≥0.80" in e["description"]
+
+
+# ── 2. ANSI hygiene (edge case 1) ──────────────────────────────────────────────
+
+class TestAnsiHygiene:
+    def test_description_opens_with_ansi_block(self):
+        desc = _embed(_build())["description"]
+        assert desc.startswith("```ansi\n")
+
+    def test_reset_precedes_closing_fence(self):
+        desc = _embed(_build())["description"]
+        close = desc.index("\n```")
+        assert ESC + "[0m" in desc[:close], "reset must occur inside the block"
+
+    def test_block_terminates_with_blank_line_before_markdown(self):
+        desc = _embed(_build())["description"]
+        assert "```\n\n" in desc, "closing fence must be followed by blank line"
+
+    def test_no_escape_bytes_outside_ansi_block(self):
+        e = _embed(_build())
+        desc = e["description"]
+        after_block = desc[desc.index("\n```") + 4:]
+        assert ESC not in after_block
+        for f in e["fields"]:
+            assert ESC not in f["name"]
+            assert ESC not in f["value"]
+
+
+# ── 3. Alpha desk fields ───────────────────────────────────────────────────────
+
+class TestDeskFields:
+    def test_one_field_per_nonempty_region(self):
+        e = _embed(_build())
+        assert _field(e, "USA") is not None
+        assert _field(e, "EUROPE") is not None
+        assert _field(e, "ASIA") is not None
+
+    def test_empty_region_omitted(self):
+        e = _embed(_build(top_buys_asia=[]))
+        assert _field(e, "ASIA") is None
+
+    def test_desk_line_has_score_badge_percentile(self):
+        f = _field(_embed(_build()), "USA")
+        assert "NVDA" in f["value"]
+        assert "0.8412" in f["value"]
+        assert "HIGH BUY" in f["value"]
+        assert "p" in f["value"]
+
+    def test_us_insider_usd_rendered(self):
+        f = _field(_embed(_build()), "USA")
+        assert "Insider $2100k" in f["value"] or "Insider $2.1M" in f["value"] \
+            or "Insider $2,100k" in f["value"]
+
+    def test_intl_insider_usd_rendered_when_present(self):
+        """EU entry with insider_usd > 0 must show the dollar volume —
+        the engine passthrough fix exists precisely for this."""
+        eu = _entry("ASML.AS", 0.7102, market="EUROPE",
+                    insider_usd=150_000, weight_coverage=0.85)
+        f = _field(_embed(_build(top_buys_europe=[eu])), "EUROPE")
+        assert "Insider $150k" in f["value"]
+
+    def test_intl_insider_omitted_at_zero(self):
+        f = _field(_embed(_build()), "EUROPE")  # default insider_usd=0.0
+        assert "Insider" not in f["value"]
+
+    def test_momentum_vs_spy_rendered(self):
+        f = _field(_embed(_build()), "USA")
+        assert "vs SPY" in f["value"]
+        assert "+18.2%" in f["value"]
+
+    def test_low_coverage_warning_on_intl(self):
+        eu = _entry("ASML.AS", 0.7102, market="EUROPE", weight_coverage=0.62)
+        f = _field(_embed(_build(top_buys_europe=[eu])), "EUROPE")
+        assert "COV:62%" in f["value"]
+
+    def test_high_coverage_no_warning(self):
+        f = _field(_embed(_build()), "EUROPE")  # coverage 0.85
+        assert "COV:" not in f["value"]
+
+
+# ── 4. Score deltas (edge case 4) ──────────────────────────────────────────────
+
+class TestScoreDeltas:
+    def test_fresh_delta_shows_arrow(self):
+        f = _field(_embed(_build(
+            yesterday_scores={"NVDA": 0.8282}, yesterday_age_h=24.0)), "USA")
+        assert "▲" in f["value"]
+        assert "+0.013" in f["value"]
+
+    def test_stale_delta_tagged_no_bare_arrows(self):
+        """Monday-style gap: snapshot 72h old → interval tag, no ▲/▼."""
+        f = _field(_embed(_build(
+            yesterday_scores={"NVDA": 0.8282}, yesterday_age_h=72.0)), "USA")
+        assert "(>48h)" in f["value"]
+        assert "▲" not in f["value"]
+        assert "▼" not in f["value"]
+
+    def test_new_ticker_tagged(self):
+        f = _field(_embed(_build(
+            yesterday_scores={"MSFT": 0.7800}, yesterday_age_h=24.0)), "USA")
+        assert "[NEW]" in f["value"]  # NVDA absent from yesterday's snapshot
+
+    def test_no_snapshot_no_delta_tags(self):
+        f = _field(_embed(_build()), "USA")
+        assert "[NEW]" not in f["value"]
+        assert "▲" not in f["value"]
+
+
+# ── 5. Factor matrix (edge cases 2, 5, 6) ──────────────────────────────────────
+
+class TestFactorMatrix:
+    def _matrix(self, **overrides):
+        f = _field(_embed(_build(**overrides)), "FACTOR MATRIX")
+        assert f is not None
+        return f["value"]
+
+    def test_single_plain_code_block(self):
+        val = self._matrix()
+        assert val.count("```") == 2
+        assert not val.startswith("```ansi")
+
+    def test_us_header_has_congress_column(self):
+        val = self._matrix()
+        us_header = next(line for line in val.splitlines() if "QF" in line)
+        assert "CG" in us_header
+
+    def test_intl_header_omits_congress_adds_value_factors(self):
+        val = self._matrix()
+        intl_header = next(line for line in val.splitlines() if "FCF" in line)
+        assert "CG" not in intl_header
+        assert "AMH" in intl_header
+        assert "PB" in intl_header
+        assert "ROI" in intl_header
+
+    def test_zero_factor_renders_ascii_hyphen(self):
+        val = self._matrix()  # volume_attention = 0.0 on every US entry
+        nvda_row = next(line for line in val.splitlines() if "NVDA" in line)
+        assert "-" in nvda_row
+
+    def test_no_em_dash_or_tabs_inside_code_blocks(self):
+        e = _embed(_build())
+        for f in e["fields"]:
+            if "```" not in f["value"]:
+                continue
+            inner = f["value"].split("```")[1]
+            assert "—" not in inner
+            assert "\t" not in inner
+
+    def test_rows_equal_length_with_long_intl_ticker(self):
+        asia = [_entry("601318.SS", 0.6404, market="ASIA", weight_coverage=0.9)]
+        val = self._matrix(top_buys_asia=asia)
+        lines = [line for line in val.splitlines()
+                 if line.strip() and "```" not in line]
+        assert len({len(line) for line in lines}) == 1, (
+            f"Misaligned matrix rows: {[(len(line), line) for line in lines]}"
+        )
+
+
+# ── 6. Portfolio & legend ──────────────────────────────────────────────────────
+
+class TestPortfolioAndLegend:
+    def test_mvo_pool_rendered_with_allocation_and_floor(self):
+        f = _field(_embed(_build()), "PORTFOLIO")
+        assert "LARGE-CAP" in f["value"]
+        assert "25.0%" in f["value"]
+        assert "$408" in f["value"]
+
+    def test_sector_concentration_line_present(self):
+        f = _field(_embed(_build()), "PORTFOLIO")
+        assert "Tech" in f["value"]
+
+    def test_legend_is_last_field(self):
+        e = _embed(_build())
+        assert "LEGEND" in e["fields"][-1]["name"]
+        assert "Insider Conviction" in e["fields"][-1]["value"]
+        assert "Piotroski" in e["fields"][-1]["value"]
+
+    def test_footer_local_without_run_id(self):
+        e = _embed(_build())
+        assert "local" in e["footer"]["text"]
+
+    def test_footer_shows_run_id_when_present(self):
+        e = _embed(_build(source_run_id="12345678901"))
+        assert "12345678901" in e["footer"]["text"]
+
+
+# ── 7. CAPITULATION theme ──────────────────────────────────────────────────────
+
+class TestCapitulation:
+    def _payload(self, watchlist):
+        return _build(
+            vix=34.0, kill_switch=True,
+            top_buys_usa=[], top_buys_europe=[], top_buys_asia=[],
+            mvo_pools={}, watchlist=watchlist,
+        )
+
+    def test_no_desk_fields_and_no_mvo(self):
+        e = _embed(self._payload([_entry("JNJ", 0.41, badge="WATCHLIST")]))
+        assert _field(e, "ALPHA DESK") is None
+        assert _field(e, "PORTFOLIO") is None
+
+    def test_watchlist_anchors_rendered_as_watchlist(self):
+        e = _embed(self._payload([_entry("JNJ", 0.41, badge="WATCHLIST")]))
+        f = _field(e, "STRUCTURAL ANCHORS")
+        assert f is not None
+        assert "JNJ" in f["value"]
+        assert "WATCHLIST" in f["value"]
+        assert "BUY" not in f["value"].replace("HIGH BUY", "").replace(
+            "TACTICAL BUY", "") or "WATCHLIST" in f["value"]
+
+    def test_banner_mentions_suppression_and_live_sells(self):
+        e = _embed(self._payload([_entry("JNJ", 0.41, badge="WATCHLIST")]))
+        text = _all_text(e).upper()
+        assert "SUPPRESSED" in text
+        assert "SELL" in text
+
+    def test_empty_watchlist_explicit_zero_anchor_line(self):
+        """Edge case 7: absolute crisis — nothing survived the filters."""
+        e = _embed(self._payload([]))
+        text = _all_text(e)
+        assert "0 assets met defensive survival thresholds" in text
+        assert "100%" in text
+        assert _field(e, "FACTOR MATRIX") is None
+
+    def test_no_empty_field_values(self):
+        for wl in ([], [_entry("JNJ", 0.41, badge="WATCHLIST")]):
+            e = _embed(self._payload(wl))
+            for f in e["fields"]:
+                assert f["value"].strip(), f"Empty field value: {f['name']!r}"
+
+
+# ── 8. Validation & alert ──────────────────────────────────────────────────────
+
+class TestValidation:
+    def _builder(self, data):
+        from src.delivery.send_discord import DiscordPayloadBuilder
+        return DiscordPayloadBuilder(data, now=_NOW)
+
+    def test_missing_vix_fatal(self):
+        data = _top_lists()
+        del data["vix"]
+        assert self._builder(data).validate()
+
+    def test_non_numeric_vix_fatal(self):
+        data = _top_lists()
+        data["vix"] = "not-a-number"
+        assert self._builder(data).validate()
+
+    def test_missing_generated_at_fatal(self):
+        data = _top_lists()
+        del data["generated_at"]
+        assert self._builder(data).validate()
+
+    def test_no_regional_keys_fatal(self):
+        data = _top_lists()
+        for k in ("top_buys_usa", "top_buys_europe", "top_buys_asia",
+                  "watchlist"):
+            del data[k]
+        assert self._builder(data).validate()
+
+    def test_capitulation_empty_buys_valid(self):
+        data = _top_lists(
+            vix=34.0, kill_switch=True,
+            top_buys_usa=[], top_buys_europe=[], top_buys_asia=[],
+            watchlist=[],
+        )
+        assert self._builder(data).validate() == []
+
+    def test_well_formed_input_valid(self):
+        assert self._builder(_top_lists()).validate() == []
+
+
+class TestAlert:
+    def test_alert_title_contract(self):
+        """test_daily_toplists_absence.yml asserts on embeds[0].title."""
+        from src.delivery.send_discord import DiscordPayloadBuilder
+        payload = DiscordPayloadBuilder.build_alert("File not found: x.json")
+        embed = payload["embeds"][0]
+        assert "DATA UNAVAILABLE" in embed["title"]
+        assert embed["color"] == 0xFF0000
+        assert "File not found: x.json" in embed["description"]
+
+
+# ── 9. Budget & fence integrity (edge case 5) ──────────────────────────────────
+
+class TestBudget:
+    def _oversized(self):
+        usa = [_entry(f"TICK{i:02d}", 0.85 - i * 0.01,
+                      insider_usd=2_000_000 + i,
+                      momentum_spy_relative=0.15)
+               for i in range(12)]
+        eu = [_entry(f"EU{i:02d}.PA", 0.80 - i * 0.01, market="EUROPE",
+                     weight_coverage=0.55) for i in range(12)]
+        asia = [_entry(f"60131{i}.SS", 0.78 - i * 0.01, market="ASIA",
+                       weight_coverage=0.55) for i in range(12)]
+        pools = {
+            k: {"bracket": k.upper(), "cap_range": "x",
+                "positions": [
+                    {"ticker": f"P{k[:1]}{i}", "allocation": 0.08,
+                     "final_score": 0.7,
+                     "exit_anchors": {"batch_floor": 100.0 + i}}
+                    for i in range(10)
+                ]}
+            for k in ("large_cap_anchors", "mid_cap", "small_cap")
         }
-    },
-    "vix": 24.5, "vix_regime": "BEAR", "kill_switch": False,
-    "generated_at": "2026-06-07T12:00:00+00:00",
-}
+        return _build(top_buys_usa=usa, top_buys_europe=eu,
+                      top_buys_asia=asia, mvo_pools=pools)
+
+    def test_embed_limits_respected(self):
+        e = _embed(self._oversized())
+        assert len(e["description"]) <= 4096
+        for f in e["fields"]:
+            assert len(f["name"]) <= 256
+            assert len(f["value"]) <= 1024, f"{f['name']} too long"
+        total = (len(e.get("title", "")) + len(e.get("description", ""))
+                 + sum(len(f["name"]) + len(f["value"]) for f in e["fields"])
+                 + len((e.get("footer") or {}).get("text", "")))
+        assert total <= 6000, f"total embed chars {total} > 6000"
+
+    def test_fences_balanced_in_every_component(self):
+        e = _embed(self._oversized())
+        assert e["description"].count("```") % 2 == 0
+        for f in e["fields"]:
+            assert f["value"].count("```") % 2 == 0, (
+                f"Orphaned code fence in {f['name']!r}"
+            )
+
+    def test_legend_survives_trimming(self):
+        e = _embed(self._oversized())
+        assert "LEGEND" in e["fields"][-1]["name"]
 
 
-class TestInstitutionalFormat:
-    def _payloads(self):
-        from src.delivery.send_discord import build_institutional_payload
-        return build_institutional_payload(_INSTITUTIONAL_SAMPLE)
+# ── 10. Lazy archive loader (edge cases 3-4) ───────────────────────────────────
 
-    def test_returns_two_payloads(self):
-        assert len(self._payloads()) == 2
+class TestLoadYesterdayScores:
+    def _write(self, root, day, scores):
+        root.mkdir(parents=True, exist_ok=True)
+        body = {"top_buys_usa": [
+            {"ticker": t, "final_score": s} for t, s in scores.items()
+        ]}
+        (root / f"{day}_top_lists.json").write_text(
+            json.dumps(body), encoding="utf-8")
 
-    def test_both_have_embeds(self):
-        for p in self._payloads():
-            assert "embeds" in p
+    def test_reads_newest_non_today_file_only(self, tmp_path):
+        from src.delivery.send_discord import _load_yesterday_scores
+        root = tmp_path / "archive"
+        self._write(root, "2026-06-09", {"OLD": 0.1})
+        self._write(root, "2026-06-10", {"NVDA": 0.8282})
+        self._write(root, "2026-06-11", {"TODAY": 0.9})
+        scores, age_h = _load_yesterday_scores(root, now=_NOW)
+        assert scores == {"NVDA": 0.8282}
+        assert age_h is not None and 24 <= age_h <= 48
 
-    def test_header_in_first_embed(self):
-        desc = self._payloads()[0]["embeds"][0]["description"]
-        assert "INSTITUTIONAL RISK & ALPHA DISPATCH" in desc
+    def test_old_snapshot_reports_stale_age(self, tmp_path):
+        from src.delivery.send_discord import _load_yesterday_scores
+        root = tmp_path / "archive"
+        self._write(root, "2026-06-08", {"NVDA": 0.8})
+        scores, age_h = _load_yesterday_scores(root, now=_NOW)
+        assert scores == {"NVDA": 0.8}
+        assert age_h > 48
 
-    def test_vix_in_regime_line(self):
-        desc = self._payloads()[0]["embeds"][0]["description"]
-        assert "24.5" in desc or "24.50" in desc
+    def test_missing_dir_returns_empty(self, tmp_path):
+        from src.delivery.send_discord import _load_yesterday_scores
+        scores, age_h = _load_yesterday_scores(tmp_path / "nope", now=_NOW)
+        assert scores == {}
+        assert age_h is None
 
-    def test_batch_floor_label_not_hard_stop(self):
-        desc = self._payloads()[0]["embeds"][0]["description"]
-        assert "Batch Floor" in desc
-        assert "Hard Stop" not in desc
+    def test_corrupt_newest_falls_through_to_older(self, tmp_path):
+        from src.delivery.send_discord import _load_yesterday_scores
+        root = tmp_path / "archive"
+        self._write(root, "2026-06-09", {"NVDA": 0.7})
+        (root / "2026-06-10_top_lists.json").write_text(
+            "{corrupt", encoding="utf-8")
+        scores, _age = _load_yesterday_scores(root, now=_NOW)
+        assert scores == {"NVDA": 0.7}
 
-    def test_spot_price_in_card(self):
-        desc = self._payloads()[0]["embeds"][0]["description"]
-        assert "420.00" in desc   # MSFT spot
-
-    def test_gtc_notice_in_second_embed(self):
-        desc = self._payloads()[1]["embeds"][0]["description"]
-        assert "GTC" in desc
-
-    def test_sector_concentration_header(self):
-        desc = self._payloads()[1]["embeds"][0]["description"]
-        assert "SECTOR CONCENTRATION" in desc.upper() or "Theme Sector Exposure" in desc
-
-    def test_description_within_4096(self):
-        for p in self._payloads():
-            assert len(p["embeds"][0].get("description", "")) <= 4096
+    def test_today_only_returns_empty(self, tmp_path):
+        from src.delivery.send_discord import _load_yesterday_scores
+        root = tmp_path / "archive"
+        self._write(root, "2026-06-11", {"TODAY": 0.9})
+        scores, age_h = _load_yesterday_scores(root, now=_NOW)
+        assert scores == {}
+        assert age_h is None

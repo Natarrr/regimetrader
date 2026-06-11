@@ -1,164 +1,193 @@
-"""tests/test_send_toplists_discord.py
-Tests for satellite integration in send_toplists_discord.py.
+# Path: tests/test_send_toplists_discord.py
+"""Integration tests for send_discord.main() — CLI alert paths & exit codes.
+
+Contract (preserved across the DiscordPayloadBuilder consolidation, asserted
+live by .github/workflows/test_daily_toplists_absence.yml):
+  exit 2  → DISCORD_WEBHOOK_URL unset and no --webhook
+  exit 0  → briefing sent, or DATA UNAVAILABLE alert sent successfully
+  exit 1  → parse/validation failure (non-dry), or all send attempts failed
 """
 from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
-from src.delivery.send_discord import _load_satellite, build_payload
+_WEBHOOK = "http://localhost:9/test-webhook"
 
 
-# ── Fixture: minimal valid top_lists ─────────────────────────────────────────
-
-def _top_lists() -> dict:
-    return {
-        "generated_at":  "2026-05-20T08:00:00+00:00",
-        "source_run_id": "test-run",
-        "ticker_count":  5,
-        "weights":       {},
-        "kill_switch":   False,
-        "vix":           18.0,
-        "top_buys":      [
-            {"ticker": "PLTR", "final_score": 0.75, "badge": "HIGH BUY",
-             "factors": {"edgar": 0.8, "insider": 0.7, "congress": 0.6,
-                         "news": 0.65, "momentum": 0.6}, "ceo_buy": False}
-        ],
-        "mid_caps":   [],
-        "small_caps": [],
+def _cooked(tmp_path: Path, **overrides) -> Path:
+    data = {
+        "generated_at":    datetime.now(timezone.utc).isoformat(),
+        "vix":             17.0,
+        "vix_regime":      "NORMAL",
+        "kill_switch":     False,
+        "ticker_count":    1,
+        "top_buys_usa":    [{
+            "ticker": "MSFT", "final_score": 0.72, "badge": "TACTICAL BUY",
+            "market": "USA",
+            "factors": {"insider_conviction": 0.6, "momentum_long": 0.7,
+                        "sector": "Technology"},
+        }],
+        "top_buys_europe": [],
+        "top_buys_asia":   [],
+        "watchlist":       [],
+        "mvo_pools":       {},
     }
+    data.update(overrides)
+    path = tmp_path / "top_lists.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
-def _satellite() -> dict:
-    return {
-        "generated_at": "2026-05-20T08:41:00+00:00",
-        "month":        "May",
-        "status":       "success",
-        "cyclicals": [
-            {"ticker": "PLTR", "win_rate": 0.75, "median_return": 0.031, "years": 9}
-        ],
-        "cannibals": [
-            {"ticker": "SQ", "buyback_yield": 0.048, "pe": 18.2, "price_vs_52w_low": 1.18}
-        ],
-    }
+def _extract_payload(out: str) -> dict:
+    """Pull the JSON payload out of mixed log + JSON stdout."""
+    idx = out.find('{\n  "embeds"')
+    assert idx >= 0, f"No payload JSON in output: {out[:400]!r}"
+    return json.loads(out[idx:])
 
 
-# ── _load_satellite ───────────────────────────────────────────────────────────
-
-class TestLoadSatellite:
-    def test_returns_none_on_missing_file(self, tmp_path):
-        assert _load_satellite(tmp_path) is None
-
-    def test_returns_none_on_corrupt_json(self, tmp_path):
-        (tmp_path / "satellite_insights.json").write_text("not json", encoding="utf-8")
-        assert _load_satellite(tmp_path) is None
-
-    def test_returns_none_on_non_dict_json(self, tmp_path):
-        (tmp_path / "satellite_insights.json").write_text(
-            json.dumps([1, 2, 3]), encoding="utf-8"
-        )
-        assert _load_satellite(tmp_path) is None
-
-    def test_returns_dict_on_valid_file(self, tmp_path):
-        data = _satellite()
-        (tmp_path / "satellite_insights.json").write_text(
-            json.dumps(data), encoding="utf-8"
-        )
-        result = _load_satellite(tmp_path)
-        assert result == data
+def _run_main(args, monkeypatch, webhook=_WEBHOOK):
+    from src.delivery import send_discord
+    if webhook is None:
+        monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    else:
+        monkeypatch.setenv("DISCORD_WEBHOOK_URL", webhook)
+    return send_discord.main(args)
 
 
-# ── build_payload with satellite ──────────────────────────────────────────────
+class TestExitCodes:
+    def test_no_webhook_exits_2(self, tmp_path, monkeypatch):
+        rc = _run_main(
+            ["--input", str(tmp_path / "x.json"), "--log-dir", str(tmp_path)],
+            monkeypatch, webhook=None)
+        assert rc == 2
 
-class TestBuildPayloadSatellite:
-    def test_without_satellite_no_satellite_fields(self):
-        """satellite=None → no cyclical or cannibal fields in embed."""
-        payload = build_payload(_top_lists(), satellite=None)
-        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert not any("CYCLICALS" in n.upper() for n in field_names)
-        assert not any("CANNIBALS" in n.upper() for n in field_names)
+    def test_dry_run_works_without_webhook(self, tmp_path, monkeypatch, capfd):
+        """README contract: --dry-run previews with no webhook configured."""
+        path = _cooked(tmp_path)
+        monkeypatch.setattr("src.delivery.audit_payload.audit", lambda p: None)
+        rc = _run_main(
+            ["--input", str(path), "--log-dir", str(tmp_path), "--dry-run"],
+            monkeypatch, webhook=None)
+        assert rc == 0
+        payload = _extract_payload(capfd.readouterr().out)
+        assert "REGIME TRADER" in payload["embeds"][0]["title"]
 
-    def test_without_satellite_has_core_fields(self):
-        """satellite=None → brand banner in description + core 5-section fields present."""
-        payload = build_payload(_top_lists(), satellite=None)
+    def test_missing_file_alert_sent_exits_0(self, tmp_path, monkeypatch):
+        """Mirrors test_daily_toplists_absence.yml: absent artifact → alert → 0."""
+        sent = {}
+
+        def _fake_send(webhook, payload, **kw):
+            sent["payload"] = payload
+            return True
+
+        monkeypatch.setattr(
+            "src.delivery.send_discord.send_to_discord", _fake_send)
+        rc = _run_main(
+            ["--input", str(tmp_path / "nope.json"), "--log-dir", str(tmp_path)],
+            monkeypatch)
+        assert rc == 0
+        assert "DATA UNAVAILABLE" in sent["payload"]["embeds"][0]["title"]
+
+    def test_missing_file_send_failure_exits_1(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "src.delivery.send_discord.send_to_discord",
+            lambda *a, **kw: False)
+        rc = _run_main(
+            ["--input", str(tmp_path / "nope.json"), "--log-dir", str(tmp_path)],
+            monkeypatch)
+        assert rc == 1
+
+    def test_corrupt_json_non_dry_exits_1(self, tmp_path, monkeypatch):
+        bad = tmp_path / "top_lists.json"
+        bad.write_text("{corrupt", encoding="utf-8")
+        monkeypatch.setattr(
+            "src.delivery.send_discord.send_to_discord",
+            lambda *a, **kw: True)
+        rc = _run_main(
+            ["--input", str(bad), "--log-dir", str(tmp_path)], monkeypatch)
+        assert rc == 1
+
+
+class TestDryRunPayloads:
+    def test_missing_file_prints_alert(self, tmp_path, monkeypatch, capfd):
+        rc = _run_main(
+            ["--input", str(tmp_path / "nope.json"),
+             "--log-dir", str(tmp_path), "--dry-run"],
+            monkeypatch)
+        assert rc == 0
+        payload = _extract_payload(capfd.readouterr().out)
+        assert "DATA UNAVAILABLE" in payload["embeds"][0]["title"]
+
+    def test_corrupt_json_prints_alert(self, tmp_path, monkeypatch, capfd):
+        bad = tmp_path / "top_lists.json"
+        bad.write_text("{corrupt", encoding="utf-8")
+        rc = _run_main(
+            ["--input", str(bad), "--log-dir", str(tmp_path), "--dry-run"],
+            monkeypatch)
+        assert rc == 0
+        payload = _extract_payload(capfd.readouterr().out)
+        assert "DATA UNAVAILABLE" in payload["embeds"][0]["title"]
+
+    def test_validation_failure_prints_alert(self, tmp_path, monkeypatch, capfd):
+        path = _cooked(tmp_path)
+        blob = json.loads(path.read_text(encoding="utf-8"))
+        del blob["vix"]
+        path.write_text(json.dumps(blob), encoding="utf-8")
+        monkeypatch.setattr("src.delivery.audit_payload.audit", lambda p: None)
+        rc = _run_main(
+            ["--input", str(path), "--log-dir", str(tmp_path), "--dry-run"],
+            monkeypatch)
+        assert rc == 0
+        payload = _extract_payload(capfd.readouterr().out)
+        assert "DATA UNAVAILABLE" in payload["embeds"][0]["title"]
+        assert "vix" in payload["embeds"][0]["description"]
+
+    def test_valid_input_prints_briefing(self, tmp_path, monkeypatch, capfd):
+        path = _cooked(tmp_path)
+        monkeypatch.setattr("src.delivery.audit_payload.audit", lambda p: None)
+        rc = _run_main(
+            ["--input", str(path), "--log-dir", str(tmp_path), "--dry-run"],
+            monkeypatch)
+        assert rc == 0
+        payload = _extract_payload(capfd.readouterr().out)
         embed = payload["embeds"][0]
-        field_names = [f["name"] for f in embed["fields"]]
-        # 5-section structured format: brand banner lives in the description
-        assert "REGIME TRADER" in embed["description"]
-        # Core sections: conviction plays + global factor radar
-        assert any("CONVICTION" in n.upper() for n in field_names)
-        assert any("FACTOR RADAR" in n.upper() for n in field_names)
-
-    def test_with_satellite_adds_cyclical_and_cannibal_fields(self):
-        """satellite with non-empty lists → cyclical and cannibal fields appear."""
-        payload = build_payload(_top_lists(), satellite=_satellite())
-        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert any("CYCLICALS" in n.upper() for n in field_names)
-        assert any("CANNIBALS" in n.upper() for n in field_names)
-
-    def test_cyclical_field_content(self):
-        """Cyclical field renders win-rate and median correctly."""
-        payload = build_payload(_top_lists(), satellite=_satellite())
-        fields = payload["embeds"][0]["fields"]
-        cyclical_field = next(f for f in fields if "CYCLICALS" in f["name"].upper())
-        assert "PLTR" in cyclical_field["value"]
-        assert "75%" in cyclical_field["value"]
-        assert "+3.1%" in cyclical_field["value"]
-
-    def test_cannibal_field_content(self):
-        """Cannibal field renders yield, P/E, and price ratio correctly."""
-        payload = build_payload(_top_lists(), satellite=_satellite())
-        fields = payload["embeds"][0]["fields"]
-        cannibal_field = next(f for f in fields if "CANNIBALS" in f["name"].upper())
-        assert "SQ" in cannibal_field["value"]
-        assert "4.8%" in cannibal_field["value"]
-        assert "18.2" in cannibal_field["value"]
-
-    def test_empty_cyclicals_no_cyclical_field(self):
-        """If cyclicals is empty, no cyclical embed field added."""
-        sat = _satellite()
-        sat["cyclicals"] = []
-        payload = build_payload(_top_lists(), satellite=sat)
-        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert not any("CYCLICALS" in n.upper() for n in field_names)
-
-    def test_empty_cannibals_no_cannibal_field(self):
-        """If cannibals is empty, no cannibal embed field added."""
-        sat = _satellite()
-        sat["cannibals"] = []
-        payload = build_payload(_top_lists(), satellite=sat)
-        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        assert not any("CANNIBALS" in n.upper() for n in field_names)
-
-    def test_satellite_fields_after_cap_tiers(self):
-        """Cyclical/cannibal fields always follow the cap-tier fields."""
-        payload = build_payload(_top_lists(), satellite=_satellite())
-        field_names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        cyclical_idx = next(i for i, n in enumerate(field_names) if "CYCLICALS" in n.upper())
-        cannibal_idx = next(i for i, n in enumerate(field_names) if "CANNIBALS" in n.upper())
-        # Both satellite fields come after all core fields
-        assert cyclical_idx > 0
-        assert cannibal_idx > cyclical_idx
+        assert "REGIME TRADER" in embed["title"]
+        assert embed["color"] == 0x00FF00
+        assert any("LEGEND" in f["name"] for f in embed["fields"])
 
 
-def test_weights_for_entry_returns_regional_weights():
-    """EU tickers use WEIGHTS_EU, US tickers use WEIGHTS_US — per-ticker routing via get_weights()."""
+def test_module_loads_standalone_by_path():
+    """send_discord.py must stay importable by file path (CI smoke pattern)."""
     spec = importlib.util.spec_from_file_location(
-        "send_discord",
+        "send_discord_standalone",
         Path("src/delivery/send_discord.py"),
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    assert hasattr(mod, "DiscordPayloadBuilder")
+    assert hasattr(mod, "main")
 
-    from src.config.weights import WEIGHTS_US, WEIGHTS_EU
 
-    intl_entry = {"ticker": "SAP.DE", "pipeline": "INTL", "factors": {"momentum_long": 0.8}}
-    us_entry   = {"ticker": "MSFT",   "pipeline": "US",   "factors": {"congress": 0.5}}
+def test_audit_gate_failure_sends_alert(tmp_path, monkeypatch):
+    """PipelineAuditError from the pre-flight audit → alert + exit 1."""
+    from src.delivery.audit_payload import PipelineAuditError
 
-    intl_weights = mod._weights_for_entry(intl_entry)
-    us_weights   = mod._weights_for_entry(us_entry)
+    path = _cooked(tmp_path)
+    sent = {}
 
-    assert intl_weights == WEIGHTS_EU, "EU ticker (SAP.DE) must use WEIGHTS_EU"
-    assert us_weights   == WEIGHTS_US, "US entry must use WEIGHTS_US"
-    assert intl_weights.get("congress", 0) == 0.0, "WEIGHTS_EU.congress must be 0.0"
+    def _fake_send(webhook, payload, **kw):
+        sent["payload"] = payload
+        return True
+
+    def _failing_audit(p):
+        raise PipelineAuditError("score out of range")
+
+    monkeypatch.setattr("src.delivery.audit_payload.audit", _failing_audit)
+    monkeypatch.setattr("src.delivery.send_discord.send_to_discord", _fake_send)
+    rc = _run_main(["--input", str(path), "--log-dir", str(tmp_path)],
+                   monkeypatch)
+    assert rc == 1
+    assert "AUDIT GATE FAILED" in sent["payload"]["embeds"][0]["description"]

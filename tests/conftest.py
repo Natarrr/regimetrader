@@ -1,5 +1,5 @@
 """tests/conftest.py
-CI network isolation.
+CI network isolation + test-suite-wide mocks.
 
 When the CI environment variable is set (GitHub Actions sets it
 automatically), any test that makes a live HTTP call without an
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from typing import Generator
+from unittest.mock import patch
 
 import pytest
 
@@ -35,4 +36,20 @@ if _IN_CI:
             )
 
         monkeypatch.setattr(requests.Session, "send", _blocked)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_yfinance_calls() -> Generator[None, None, None]:
+    """Prevent DiscordPayloadBuilder.build() from live yfinance/SQLite calls.
+
+    _spy_qqq_snapshot() calls MarketData.get_historical_bars() via yfinance,
+    which opens peewee SQLite caches in background threads without closing
+    them.  The function already returns a safe fallback ('') on failure;
+    stubbing it here keeps that contract without hitting the network.
+
+    Tests that specifically exercise it can override this fixture with their
+    own patch at a tighter scope.
+    """
+    with patch("src.delivery.send_discord._spy_qqq_snapshot", return_value=""):
         yield

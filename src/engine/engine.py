@@ -11,6 +11,25 @@ from src.scoring.engine_v3 import score_universe_v3
 
 logger = logging.getLogger("QuantEngine")
 
+# Raw FMPFetcher metrics forwarded verbatim for Discord display / cook joins.
+# These are NOT scoring inputs — cook_toplists._normalize_intl_entry reads them
+# by exactly these names. market_cap is listing-currency (no FX normalization
+# upstream) and must not be used for USD math downstream; insider_usd is Form 4
+# USD by definition; the remaining keys are dimensionless or used as ratios.
+_DISPLAY_META_KEYS = (
+    "insider_usd",
+    "market_cap",
+    "return_12_1m",
+    "target_price",
+    "current_price",
+    "earnings_surprise_pct",
+    "earnings_surprise_days",
+    "analyst_consensus_source",
+    "analyst_revision_score",
+    "price_target_upside_score",
+    "quality_piotroski_score",
+)
+
 # v3.0 shadow: engine factor name → INTL metrics column carrying its raw value.
 # Superset across EU+ASIA; each region's engine input only reads its own 9.
 _V3_INTL_INPUT_MAP: Dict[str, str] = {
@@ -143,6 +162,9 @@ class StrategyEngine:
                 "weight_coverage":  weight_coverage,
                 "_low_coverage":    low_coverage,
                 "sector":           asset.get("sector", ""),
+                # Display-meta passthrough: only keys present in raw_metrics are
+                # forwarded (absent keys stay absent — no None spray).
+                **{k: raw_metrics[k] for k in _DISPLAY_META_KEYS if k in raw_metrics},
             })
 
         # Sort universe descending by final quantitative output ranking

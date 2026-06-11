@@ -1,45 +1,49 @@
-"""scripts/send_toplists_discord.py
-Send the daily market report to Discord via Embed webhook.
+# Path: src/delivery/send_discord.py
+"""Institutional daily-brief Discord delivery for the cooked top_lists.json.
 
-Reads logs/intel_source_status.json (7-factor schema, SSOT) and formats
-a mobile-first Discord embed with institutional desk format:
+Executed by daily_trading_pipeline.yml (cook_and_notify, 3x/day at
+00:30 / 08:30 / 16:30 UTC) as:
 
-  ⚡ Alpha Pipeline [May 25, 2026]
-  Description: TL;DR — VIX regime | alerts
-  Fields: 7-factor ticker cards (score + bar + percentile + badge + catalyst)
-          ACTION TODAY (buy/watch recommendations)
-          PIPELINE HEALTH (orthogonality + dead factors + latency)
+  python src/delivery/send_discord.py --input logs/top_lists.json --log-dir logs
 
-Discord embed limits:
-  title:       256 chars
-  description: 4096 chars
-  field value: 1024 chars (hard limit — truncated at 1024)
-  fields:      25 max
-  total:       6000 chars
+Layout (single webhook POST, one embed — DiscordPayloadBuilder):
+  description  ```ansi action bar (regime glyph + VIX + overlay + status)
+               + Section 1 MACRO RISK & REGIME (markdown, mobile-safe)
+  fields       Section 2 ALPHA DESK — USA / EUROPE / ASIA
+               Section 3 FACTOR MATRIX (plain code block, ASCII-only)
+               Section 4 PORTFOLIO CONSTRUCTION (MVO pools + sectors)
+               LEGEND (always last)
+  CAPITULATION theme replaces desks/portfolio with STRUCTURAL ANCHORS
+  (watchlist, force-WATCHLIST) — BUY suppressed, SELL/exit signals live.
 
-Embed color (severity-driven):
-  GREEN  (0x00FF00) — system nominal
-  ORANGE (0xFFA500) — non-critical anomaly
-  RED    (0xFF0000) — critical: stale data / kill-switch / dead feeds
+ANSI caveat: Discord renders ```ansi colors on desktop/web only; mobile
+clients show plain text. Escape codes are therefore confined to the leading
+action-bar block, reset before the closing fence, and the block terminates
+with a blank line so mobile clients exit the terminal context cleanly.
 
-Retry policy: 3 attempts with 30s / 60s backoff.
+Discord embed limits (enforced structurally, never by slicing fenced text):
+  title 256 · description 4096 · field value 1024 · fields 25 · total 6000
 
-Usage:
-  python scripts/send_toplists_discord.py
-  python scripts/send_toplists_discord.py --input logs/intel_source_status.json --dry-run
-  python scripts/send_toplists_discord.py --run-tests
+DATA UNAVAILABLE contract: on missing/corrupt/invalid input the script sends
+a red alert embed whose title contains "DATA UNAVAILABLE"
+(asserted by .github/workflows/test_daily_toplists_absence.yml).
+
+Exit codes: 0 sent (or alert sent) · 1 send/parse/audit failure · 2 no webhook.
+
+Retry policy: 3 attempts with 30s / 60s backoff, 429-aware.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from dotenv import load_dotenv
@@ -54,11 +58,11 @@ except ImportError:
     requests = None  # type: ignore
     _HAS_REQUESTS = False
 
-from src.utils.formatting import score_bar as _score_bar_util  # noqa: E402
 from src.risk.regime import (  # noqa: E402
-    BEAR_THRESHOLD as _VIX_BEARISH,
-    CAPITULATION_THRESHOLD as _VIX_CAPITULATION,
-    get_regime as _get_regime,
+    RiskRegime,
+    get_regime,
+    score_multiplier,
+    strategy_label,
 )
 
 log = logging.getLogger("discord.send_toplists")
@@ -67,13 +71,37 @@ log = logging.getLogger("discord.send_toplists")
 _COLOR_GREEN = 0x00FF00
 _COLOR_ORANGE = 0xFFA500
 _COLOR_RED = 0xFF0000
-_COLOR_BLUE = 0x3498DB
 
-_CRITICAL_FLAGS = frozenset({"STALE_SOURCE", "MISSING_AMOUNT", "DEAD_FEED"})
+# ── ANSI (action bar only — see module docstring) ─────────────────────────────
+_ESC = "\x1b"
+_ANSI_RESET = _ESC + "[0m"
+_ANSI_GREEN = _ESC + "[1;32m"
+_ANSI_YELLOW = _ESC + "[1;33m"
+_ANSI_RED = _ESC + "[1;31m"
+_ANSI_DIM = _ESC + "[2;37m"
 
-# ── 7-factor display config — single SSOT replacing legacy _FACTOR_LABEL/_FACTOR_EMOJI ──
-# Each entry: (field_key_in_factors_dict, short_label_for_matrix)
-_FACTOR_DISPLAY: List[tuple] = [
+_REGIME_STYLE: Dict[RiskRegime, Tuple[str, str, str, int]] = {
+    # regime → (ansi color, glyph, action text, embed color)
+    RiskRegime.NORMAL: (
+        _ANSI_GREEN, "●", "ALL SIGNALS ACTIONABLE", _COLOR_GREEN),
+    RiskRegime.BEAR: (
+        _ANSI_YELLOW, "◆", "GRADUATED CAUTION", _COLOR_ORANGE),
+    RiskRegime.CAPITULATION: (
+        _ANSI_RED, "■", "BUY SUPPRESSED · SELLS LIVE", _COLOR_RED),
+}
+
+# ── Embed budget (Discord hard limits) ────────────────────────────────────────
+_LIMIT_DESC = 4096
+_LIMIT_FIELD = 1024
+_LIMIT_TOTAL = 6000
+
+_STALE_HOURS = 25
+_DELTA_STALE_HOURS = 48.0
+_NO_CATALYST = "no primary catalyst detected"
+
+# ── Factor matrix columns (9-factor US schema; intl swaps CG/NB/VA/QF for
+#    the EU/Asia value & liquidity factors — congress structurally absent) ────
+_MATRIX_US_COLS: List[Tuple[str, str]] = [
     ("insider_conviction", "IC"),
     ("insider_breadth",    "IB"),
     ("congress",           "CG"),
@@ -82,8 +110,29 @@ _FACTOR_DISPLAY: List[tuple] = [
     ("momentum_long",      "MO"),
     ("volume_attention",   "VA"),
     ("analyst_consensus",  "AC"),
-    ("analyst_revision",   "AR"),
+    ("quality_piotroski",  "QF"),
 ]
+_MATRIX_INTL_COLS: List[Tuple[str, str]] = [
+    ("insider_conviction", "IC"),
+    ("insider_breadth",    "IB"),
+    ("news_sentiment",     "NS"),
+    ("momentum_long",      "MO"),
+    ("analyst_consensus",  "AC"),
+    ("fcf_yield",          "FCF"),
+    ("amihud_shock",       "AMH"),
+    ("pb_value_up",        "PB"),
+    ("roic_quality",       "ROI"),
+]
+_MATRIX_CELL_W = 5
+_MATRIX_TICKER_W_MAX = 9
+
+_REGION_KEYS: List[Tuple[str, str, str]] = [
+    # (top_lists key, flag, label)
+    ("top_buys_usa",    "🇺🇸", "USA"),
+    ("top_buys_europe", "🇪🇺", "EUROPE"),
+    ("top_buys_asia",   "🌏", "ASIA"),
+]
+_MEDAL: Dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 # ── Sector normalisation ───────────────────────────────────────────────────────
 _SECTOR_SHORT: Dict[str, str] = {
@@ -104,17 +153,6 @@ _SECTOR_SHORT: Dict[str, str] = {
 }
 _SECTOR_MISC = "🔲 Misc"
 
-# ── Buyback yield thresholds ───────────────────────────────────────────────────
-_BUYBACK_HIGH = 0.10
-_BUYBACK_LOW = 0.05
-
-_MEDAL: Dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
-_MARKET_FLAGS: Dict[str, str] = {"USA": "🇺🇸",
-                                 "US": "🇺🇸", "EUROPE": "🇪🇺", "ASIA": "🇯🇵"}
-
-_STALE_HOURS = 25
-_NO_CATALYST = "no primary catalyst detected"
-
 # ── Ticker display names (EU/Asia from registry) ──────────────────────────────
 _TICKER_NAMES: Dict[str, str] = {}
 try:
@@ -123,33 +161,19 @@ try:
     for _reg_entry in _reg_data.get("europe", []) + _reg_data.get("asia", []):
         if _reg_entry.get("ticker") and _reg_entry.get("name"):
             _TICKER_NAMES[_reg_entry["ticker"]] = _reg_entry["name"]
-except Exception:
-    pass
+except Exception as _reg_exc:  # registry optional — names are cosmetic
+    log.debug("ticker_registry.json not loaded: %s", _reg_exc)
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
 
-def _score_bar(score: float, width: int = 8) -> str:
-    return _score_bar_util(score, width)
-
-
 def _safe_float(val: Any, default: float = 0.0) -> float:
-    """Cast val to float, returning default for None / NaN / Inf / non-numeric strings."""
-    import math as _math  # noqa: PLC0415
+    """Cast val to float, returning default for None / NaN / Inf / non-numeric."""
     try:
         v = float(val)
-        return default if _math.isnan(v) or _math.isinf(v) else v
+        return default if math.isnan(v) or math.isinf(v) else v
     except (TypeError, ValueError):
         return default
-
-
-def _fmt_cap(market_cap: float) -> str:
-    if market_cap >= 1e12:
-        return f"${market_cap/1e12:.1f}T"
-    if market_cap >= 1e9:
-        v = market_cap / 1e9
-        return f"${v:.0f}B" if v >= 10 else f"${v:.1f}B"
-    return f"${market_cap/1e6:.0f}M"
 
 
 def _fmt_usd(usd: float) -> str:
@@ -162,476 +186,21 @@ def _fmt_usd(usd: float) -> str:
     return formatted.rstrip("0").rstrip(".")
 
 
-def _fmt_insider_badge(entry: Dict[str, Any]) -> Optional[str]:
-    usd = float(entry.get("insider_usd", 0) or 0)
-    if usd <= 0:
-        return None
-    label = f"Insider {_fmt_usd(usd)}"
-    ceo_tier = (entry.get("ceo_conviction_tier") or "").strip()
-    if ceo_tier and ceo_tier.lower() != "none":
-        return f"{label} CEO"
-    form4_count = int(entry.get("form4_count", 0) or 0)
-    if form4_count > 0:
-        return f"{label} · {form4_count} filings"
-    return label
-
-
-def _fmt_eps_badge(entry: Dict[str, Any]) -> str:
-    pct = entry.get("earnings_surprise_pct")
-    days = int(entry.get("earnings_surprise_days") or 0)
-    if pct is None or days > 90:
-        return "EPS —"
-    pct_value = float(pct)
-    if pct_value < 0:
-        return f"EPS miss {abs(pct_value * 100):.1f}%"
-    return f"EPS +{pct_value * 100:.1f}% · {days}d ago"
-
-
-def _fmt_pt_badge(entry: Dict[str, Any]) -> str:
-    """Format price target badge using actual stored prices (not score inversion).
-
-    Uses target_price + current_price stored in result dict by run_pipeline.py.
-    Falls back to qualitative label if raw prices unavailable.
-    """
-    target = entry.get("target_price") or entry.get("targetConsensus")
-    price  = entry.get("current_price") or entry.get("price")
-    try:
-        target_val = float(target) if target is not None else 0.0
-        price_val  = float(price)  if price  is not None else 0.0
-    except (TypeError, ValueError):
-        target_val = price_val = 0.0
-
-    if target_val > 0 and price_val > 0:
-        upside = (target_val - price_val) / price_val * 100
-        sign   = "+" if upside >= 0 else ""
-        return f"PT ${target_val:.0f} ({sign}{upside:.0f}%)"
-
-    # No raw prices — qualitative fallback only (no fake % from score)
-    _pt_raw = entry.get("price_target_upside_score")
-    if _pt_raw is None:
-        return "PT None"
-    score_val = float(_pt_raw)
-    if score_val >= 0.60:
-        return "PT ↑ above target"
-    if score_val >= 0.40:
-        return "PT → at target"
-    if score_val > 0:
-        return "PT ↓ below target"
-    return "PT —"
-
-
-def _fmt_analyst_badge(entry: Dict[str, Any]) -> str:
-    source = (entry.get("analyst_consensus_source") or "").strip()
-    label = source if source else "Consensus —"
-    n = int(entry.get("analyst_revision_n_analysts") or 0)
-    if n > 0:
-        label += f" · {n} upgrades"
-    try:
-        rev_score = float(entry.get("analyst_revision_score") or 0.0)
-    except Exception:
-        rev_score = 0.0
-    if rev_score > 0.6:
-        label += " · rev ↑"
-    elif rev_score < 0.4:
-        label += " · rev ↓"
-    return label
-
-
-def _fmt_transcript_badge(entry: Dict[str, Any]) -> str:
-    signals = entry.get("transcript_signals")
-    if not isinstance(signals, dict) or not signals:
-        return "No transcript"
-    tone = (signals.get("guidance_tone") or "").strip().lower()
-    tone_map = {
-        "raised":    "Guidance ↑",
-        "maintained": "Guidance →",
-        "lowered":   "Guidance ↓",
-    }
-    guidance = tone_map.get(tone, "Guidance")
-    extras: List[str] = []
-    if signals.get("buyback_mentioned"):
-        extras.append("Buyback")
-    elif (signals.get("management_confidence") or "").strip().lower() == "high":
-        extras.append("conf. high")
-    return " · ".join([guidance] + extras)
-
-
-def _fmt_factor_matrix(entry: Dict[str, Any], market: str = "US") -> str:
-    market_norm = (market or "US").upper()
-    is_intl = market_norm in ("EUROPE", "ASIA", "EU")
-
-    factors = entry.get("factors") or {}
-    _ar_raw = entry.get("analyst_revision_score")
-    _pt_raw = entry.get("price_target_upside_score")
-    _ac_raw = entry.get("analyst_consensus_score")
-    raw_values: Dict[str, Optional[float]] = {
-        "analyst_revision":    (float(_ar_raw) if _ar_raw is not None else None),
-        "price_target_upside": (float(_pt_raw) if _pt_raw is not None else None),
-        # AC preserved separately: factors["analyst_consensus"] is always 0.0 when
-        # source is "no_coverage" (normalizer coerces None→0.0); this raw field
-        # carries the original None so the display can show AC:None vs AC:—
-        "analyst_consensus":   (float(_ac_raw) if _ac_raw is not None else None),
-    }
-
-    if is_intl:
-        # EU / Asia: congress structurally absent — omit entirely
-        # AC (analyst_consensus) carries redistributed weight — include
-        # v2.3: FCF/AMH/PB/ROI added for EU/Asia fundamental value + quality
-        labels = [
-            ("insider_conviction",  "IC"),
-            ("insider_breadth",     "IB"),
-            ("news_sentiment",      "NS"),
-            ("news_buzz",           "NB"),
-            ("momentum_long",       "MO"),
-            ("volume_attention",    "VA"),
-            ("analyst_consensus",   "AC"),
-            ("analyst_revision",    "AR"),
-            ("price_target_upside", "PT"),
-            ("fcf_yield",           "FCF"),
-            ("amihud_shock",        "AMH"),
-            ("pb_value_up",         "PB"),
-            ("roic_quality",        "ROI"),
-        ]
-    else:
-        # US: full 9-factor display including congress
-        labels = [
-            ("insider_conviction",  "IC"),
-            ("insider_breadth",     "IB"),
-            ("congress",            "CG"),
-            ("news_sentiment",      "NS"),
-            ("news_buzz",           "NB"),
-            ("momentum_long",       "MO"),
-            ("volume_attention",    "VA"),
-            ("analyst_consensus",   "AC"),
-            ("analyst_revision",    "AR"),
-            ("price_target_upside", "PT"),
-        ]
-
-    # Add QF into the displayed factor list — dominant factor for EU (w=0.28)
-    labels = list(labels) + [("quality_piotroski", "QF")]
-
-    parts = []
-    for key, label in labels:
-        if key in raw_values:
-            raw = raw_values[key]
-        elif key == "quality_piotroski":
-            _qf = entry.get("quality_piotroski_score")
-            if _qf is None:
-                _qf = factors.get("quality_piotroski")
-            raw = float(_qf) if _qf is not None else None
-        else:
-            raw = factors.get(key)  # normalized float or absent (0.0)
-            raw = float(raw) if raw is not None else None
-
-        if raw is None or raw <= 0:
-            parts.append(f"{label}:—")
-        else:
-            parts.append(f"{label}:{raw:.2f}")
-
-    if market_norm in ("EUROPE", "EU"):
-        suffix = " [EU]"
-    elif market_norm == "ASIA":
-        suffix = " [ASIA]"
-    else:
-        suffix = ""
-
-    return " ".join(parts) + suffix
-
-
-def _build_ticker_card(
-    rank: int,
-    entry: Dict[str, Any],
-    market: str = "US",
-    kill_switch: bool = False,
-    mid_cap: bool = False,
-    held_context: Optional[Dict[str, float]] = None,
-) -> Dict[str, Any]:
-    ticker = entry.get("ticker", "?")
-    display_ticker = f"{ticker} ({_TICKER_NAMES[ticker]})" if ticker in _TICKER_NAMES else ticker
-    score = float(entry.get("final_score", 0) or 0)
-    pct = int(entry.get("percentile", 0) or 0)
-    badge = _badge_from_score(score)
-    if kill_switch:
-        badge = f"[DAMPENED] {badge}"
-    mktcap_str = ""
-    if mid_cap:
-        market_cap = float(entry.get("market_cap", 0) or 0)
-        if market_cap > 0:
-            mktcap_str = f" · ${market_cap / 1e9:.1f}B"
-    factor_matrix = _fmt_factor_matrix(entry, market)
-    badge_texts = [
-        _fmt_insider_badge(entry),
-        _fmt_eps_badge(entry),
-        _fmt_pt_badge(entry),
-        _fmt_analyst_badge(entry),
-        _fmt_transcript_badge(entry),
-    ]
-    badge_line = " ".join([b for b in badge_texts if b])
-    coverage_warn = ""
-    mkt_upper = (entry.get("market") or market or "US").upper()
-    if mkt_upper in ("EUROPE", "ASIA", "EU"):
-        cov = float(entry.get("weight_coverage", 1.0) or 1.0)
-        if cov < 0.40:
-            coverage_warn = f" ⚠COV:{cov:.0%}"
-        elif cov < 0.70:
-            coverage_warn = f" COV:{cov:.0%}"
-        # If coverage >= 70% don't clutter the name line
-
-    name = f"#{rank} {display_ticker} | {badge} | p{pct} | {score:.4f}{mktcap_str}{coverage_warn}"
-    if entry.get("esg_flag"):
-        name = f"{name} | ESG!"
-    # Add position annotation for Revolut context
-    if held_context is not None:
-        avg_cost = held_context.get(ticker)
-        if avg_cost is not None:
-            pos_label = f" [HOLD @{avg_cost:.0f}]" if avg_cost > 0 else " [HOLD]"
-        else:
-            pos_label = " [NEW]"
-        name = f"{name}{pos_label}"
-
-    value = _truncate(f"`{factor_matrix}`\n{badge_line}", 1024)
-    return {
-        "name": name,
-        "value": value,
-        "inline": False,
-    }
-
-
-def _truncate(text: str, max_chars: int = 1024) -> str:
+def _truncate(text: str, max_chars: int = _LIMIT_FIELD) -> str:
+    """Plain-prose truncation. MUST NOT be used on text containing code
+    fences — slicing through ``` orphans the closing fence and spills the
+    rest of the embed into terminal context (use structural row-dropping)."""
     if len(text) <= max_chars:
         return text
-    return text[:max_chars - 3] + "…"
-
-
-# ── Domain logic ───────────────────────────────────────────────────────────────
-
-def get_market_regime(vix: float) -> str:
-    regime = _get_regime(vix)
-    _emoji_map = {
-        "NORMAL":       "🟢",
-        "BEAR":         "🟡",
-        "CAPITULATION": "🔴",
-    }
-    emoji = _emoji_map.get(regime.value, "⚪")
-    return f"VIX `{vix:.1f}` {emoji} **{regime.value}**"
-
-
-def _spy_qqq_snapshot() -> str:
-    """Return a one-line market snapshot for SPY + QQQ, or '' on failure.
-
-    Runs independently of _compute_laureate_regime() so it appears even when
-    the full regime computation (HMM/GARCH/FRED/CAPE) fails.
-    """
-    try:
-        from backend.data.market_service import MarketData  # noqa: PLC0415
-
-        def _snap(bars) -> dict:
-            if bars is None or getattr(bars, "empty", True) or len(bars) < 2:
-                return {}
-            closes = bars["Close"].dropna()
-            if len(closes) < 2:
-                return {}
-            price   = float(closes.iloc[-1])
-            pct_1d  = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
-            pct_12m = round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1) if len(closes) >= 252 else None
-            return {"price": price, "pct_1d": pct_1d, "pct_12m": pct_12m}
-
-        def _fmt(v):
-            if v is None:
-                return "—"
-            return f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
-
-        spy = _snap(MarketData.get_historical_bars("SPY", years_back=2))
-        if not spy:
-            return ""
-        qqq: dict = {}
-        try:
-            qqq = _snap(MarketData.get_historical_bars("QQQ", years_back=2))
-        except Exception:
-            pass
-
-        spy_str = f"SPY `${spy['price']:.0f}` {_fmt(spy.get('pct_1d'))} 1d · {_fmt(spy.get('pct_12m'))} 12m"
-        qqq_str = (
-            f"  ·  QQQ `${qqq['price']:.0f}` {_fmt(qqq.get('pct_1d'))} 1d · {_fmt(qqq.get('pct_12m'))} 12m"
-            if qqq else ""
-        )
-        return f"\n📈 {spy_str}{qqq_str}"
-    except Exception as exc:
-        log.debug("_spy_qqq_snapshot failed: %s", exc)
-        return ""
-
-
-def _compute_laureate_regime() -> Optional[dict]:
-    """Compute Laureate 4-state regime (BULL/OVERHEATED/FRAGILE/CRASH) for SPY.
-
-    Pipeline:
-        1. SPY bars → FeatureEngineer → RegimeClassifier (HMM)
-        2. GJR-GARCH persistence on SPY log returns
-        3. FRED: 10Y-2Y yield spread + M2 velocity
-        4. Shiller CAPE percentile
-        5. classify_regime() → BULL/OVERHEATED/FRAGILE/CRASH
-        6. minsky_moment() → CRITICAL/WARNING/WATCH/CLEAR
-
-    Caches result in .cache/laureate_regime.json (TTL 6h).
-    Returns None on any failure — Discord falls back to VIX-only regime line.
-    """
-    import time  # noqa: PLC0415
-    _CACHE_FILE = Path(".cache/laureate_regime.json")
-    _TTL        = 6 * 3600
-    try:
-        if _CACHE_FILE.exists():
-            blob = json.loads(_CACHE_FILE.read_text())
-            if time.time() - blob.get("ts", 0) < _TTL:
-                return blob
-    except Exception as _cache_exc:
-        log.warning("Laureate regime cache unreadable (%s) — recomputing", _cache_exc)
-        # fall through to recompute (not silent pass)
-
-    try:
-        from backend.data.market_service import MarketData                     # noqa: PLC0415
-        from backend.data.fred_service import (                                # noqa: PLC0415
-            fetch_10y_yield, fetch_2y_yield, fetch_m2_velocity,
-        )
-        from backend.quant_models.monetary_pulse import (                      # noqa: PLC0415
-            yield_spread, monetary_regime,
-        )
-        from backend.quant_models.valuation_radar import (                     # noqa: PLC0415
-            fetch_shiller_cape_series, cape_percentile,
-        )
-        from backend.quant_models.volatility_brain import (                    # noqa: PLC0415
-            fit_gjr_garch, volatility_regime,
-        )
-        from backend.quant_models.prediction_controller import (               # noqa: PLC0415
-            classify_regime, combined_position_scale, minsky_moment, laureate_icon,
-        )
-        from feature_engineering.feature_engineering import FeatureEngineer    # noqa: PLC0415
-        from hmm_engine.classifier import RegimeClassifier                     # noqa: PLC0415
-
-        bars = MarketData.get_historical_bars("SPY", years_back=5)
-        if bars.empty:
-            return None
-
-        def _market_snapshot(b) -> dict:
-            """Extract {price, pct_1d, pct_12m} from a bars DataFrame."""
-            if b is None or b.empty or len(b) < 2:
-                return {}
-            closes = b["Close"].dropna()
-            if len(closes) < 2:
-                return {}
-            price   = float(closes.iloc[-1])
-            pct_1d  = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
-            pct_12m = None
-            if len(closes) >= 252:
-                pct_12m = round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1)
-            return {"price": price, "pct_1d": pct_1d, "pct_12m": pct_12m}
-
-        spy_snap = _market_snapshot(bars)
-        try:
-            qqq_bars = MarketData.get_historical_bars("QQQ", years_back=2)
-            qqq_snap = _market_snapshot(qqq_bars)
-        except Exception:
-            qqq_snap = {}
-
-        fe = FeatureEngineer()
-        features, returns, meta = fe.build(bars)
-        if len(features) < 60:
-            return None
-
-        clf = RegimeClassifier()
-        clf.fit(features, returns)
-        state = clf.predict_current(features[-40:])
-
-        import pandas as pd  # noqa: PLC0415
-        log_rets = pd.Series(returns)
-        garch    = fit_gjr_garch(log_rets)
-        vol_reg  = volatility_regime(garch["persistence"])
-
-        gs10   = fetch_10y_yield()
-        gs2    = fetch_2y_yield()
-        m2v    = fetch_m2_velocity()
-        spread = yield_spread(gs10, gs2)
-        spread_now = float(spread.iloc[-1]) if not spread.empty else 0.0
-        mon_reg = monetary_regime(spread, m2v)
-
-        cape_series = fetch_shiller_cape_series()
-        cape_pct    = cape_percentile(cape_series)
-
-        laureate = classify_regime(state.label, mon_reg, vol_reg)
-        scale    = combined_position_scale(laureate)
-        minsky   = minsky_moment(garch["persistence"], cape_pct, spread_now)
-
-        result = {
-            "ts":              time.time(),
-            "laureate":        laureate,
-            "laureate_icon":   laureate_icon(laureate),
-            "hmm_label":       state.label,
-            "hmm_prob":        round(state.probability, 3),
-            "mon_regime":      mon_reg,
-            "vol_regime":      vol_reg,
-            "garch_persistence": garch["persistence"],
-            "cape_percentile": cape_pct,
-            "yield_spread_bps": round(spread_now, 1),
-            "scale":           scale,
-            "minsky_level":    minsky.alert_level,
-            "minsky_icon":     minsky.icon,
-            "minsky_n":        minsky.conditions_met,
-            "minsky_narrative": minsky.narrative,
-            "spy_price":       spy_snap.get("price"),
-            "spy_pct_1d":      spy_snap.get("pct_1d"),
-            "spy_pct_12m":     spy_snap.get("pct_12m"),
-            "qqq_price":       qqq_snap.get("price"),
-            "qqq_pct_1d":      qqq_snap.get("pct_1d"),
-            "qqq_pct_12m":     qqq_snap.get("pct_12m"),
-        }
-        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(json.dumps(result))
-        return result
-    except Exception as exc:
-        log.warning("_compute_laureate_regime failed: %s", exc)
-        return None
-
-
-def _buyback_conviction(yield_pct: float) -> Optional[float]:
-    if yield_pct >= _BUYBACK_HIGH:
-        return 0.80
-    if yield_pct >= _BUYBACK_LOW:
-        return 0.40
-    return None
-
-
-def _embed_color(anomaly_map: Dict[str, List[str]], kill_switch: bool) -> int:
-    if kill_switch:
-        return _COLOR_RED
-    all_flags = {flag for flags in anomaly_map.values() for flag in flags}
-    if all_flags & _CRITICAL_FLAGS:
-        return _COLOR_RED
-    if all_flags:
-        return _COLOR_ORANGE
-    return _COLOR_GREEN
+    return text[:max_chars - 1] + "…"
 
 
 def _data_age_hours(generated_at: str) -> Optional[float]:
     try:
-        ts = datetime.fromisoformat(
-            (generated_at or "").replace("Z", "+00:00"))
+        ts = datetime.fromisoformat((generated_at or "").replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-    except Exception:
+    except ValueError:
         return None
-
-
-def _timestamp_from_status(status: Dict[str, Any]) -> str:
-    """Extract the pipeline timestamp from intel_source_status or top_lists schema.
-
-    intel_source_status.json uses 'computed_at' (top-level) and '_edgar_meta.last_run'.
-    top_lists.json uses 'generated_at'.
-    Falls back through all three.
-    """
-    return (
-        status.get("generated_at")
-        or status.get("computed_at")
-        or (status.get("_edgar_meta") or {}).get("last_run")
-        or ""
-    )
 
 
 def _compute_percentile(score: float, all_scores: List[float]) -> int:
@@ -642,19 +211,28 @@ def _compute_percentile(score: float, all_scores: List[float]) -> int:
     return int(below / len(all_scores) * 100)
 
 
+def _badge_from_score(score: float) -> str:
+    if score >= 0.80:
+        return "HIGH BUY"
+    if score >= 0.60:
+        return "TACTICAL BUY"
+    return "WATCHLIST"
+
+
 def _compute_catalyst(entry: Dict[str, Any]) -> str:
-    """Evidence-first catalyst narrative, max 80 chars, signals separated by ' · '.
+    """Evidence-first catalyst narrative, max 80 chars, signals joined by ' · '.
 
     Priority order (max 3 signals emitted):
       1. INSIDER: insider_usd > 0 → "Insider $Xk [CEO]"
       2. EPS: earnings_surprise_pct → "EPS +X% · Nd ago" / "EPS miss X%"
-      3. CONGRESS: quiver_evidence.congress.purchases > 0 → "Nx congress buy · rep"
-      4. MOMENTUM: |momentum_spy_relative| > 0.05 → "±X% vs SPY 12m"
-      5. ANALYST REVISION (fallback only): analyst_revision_n_analysts ≥ 5
+      3. UPGRADE/DOWNGRADE: recent rating change
+      4. CONGRESS: quiver_evidence.congress.purchases > 0
+      5. MOMENTUM: |momentum_spy_relative| > 0.05 → "±X% vs SPY 12m"
+      6. ANALYST REVISION (fallback only): n_analysts ≥ 5
     """
-    signals: list[str] = []
+    signals: List[str] = []
 
-    usd = float(entry.get("insider_usd", 0) or 0)
+    usd = _safe_float(entry.get("insider_usd"))
     if usd > 0:
         usd_label = _fmt_usd(usd)
         ceo_tier = (entry.get("ceo_conviction_tier") or "").strip()
@@ -672,13 +250,12 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
         else:
             signals.append(f"EPS +{pct * 100:.1f}% · {eps_days}d ago")
 
-    # Analyst rating change (most recent upgrade/downgrade within 7 days)
     upg_raw = entry.get("recent_upgrade_downgrade") or {}
     if isinstance(upg_raw, dict) and upg_raw.get("action") in ("upgrade", "downgrade"):
         action_str = upg_raw["action"].upper()
-        firm_raw   = upg_raw.get("analyst_firm") or ""
-        firm_str   = f" {firm_raw[:12]}" if firm_raw else ""
-        days_upg   = int(upg_raw.get("days_ago") or 0)
+        firm_raw = upg_raw.get("analyst_firm") or ""
+        firm_str = f" {firm_raw[:12]}" if firm_raw else ""
+        days_upg = int(upg_raw.get("days_ago") or 0)
         signals.append(f"{action_str}{firm_str} {days_upg}d")
 
     congress = (entry.get("quiver_evidence") or {}).get("congress", {})
@@ -688,92 +265,83 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
         rep_str = reps[0][:12] if reps else "members"
         signals.append(f"{cg_buys}x congress buy · {rep_str}")
 
-    rel = float(entry.get("momentum_spy_relative", 0) or 0)
+    rel = _safe_float(entry.get("momentum_spy_relative"))
     if abs(rel) > 0.05:
         sign = "+" if rel >= 0 else ""
         signals.append(f"{sign}{rel * 100:.1f}% vs SPY 12m")
 
     if not signals:
         n = int(entry.get("analyst_revision_n_analysts",
-                entry.get("analyst_revision_n", 0)) or 0)
+                          entry.get("analyst_revision_n", 0)) or 0)
         if n >= 5:
             signals.append(f"analyst revision ({n} analysts)")
 
-    result = " · ".join(signals[:3])
-    catalyst_str = (result or _NO_CATALYST)[:80]
+    catalyst_str = (" · ".join(signals[:3]) or _NO_CATALYST)[:80]
 
-    # PATCH 09: Append double-count warning when both insider and congress fire.
-    # Grinold & Kahn (2000): correlated signals overstate effective signal strength.
+    # Correlated-signal advisory (Grinold & Kahn 2000: correlated signals
+    # overstate effective signal strength).
     if entry.get("_correlated_signal_flag"):
         warning = " ⚠double-signal"
         if len(catalyst_str) + len(warning) <= 80:
-            catalyst_str = catalyst_str + warning
+            catalyst_str += warning
         else:
             catalyst_str = catalyst_str[:80 - len(warning)] + warning
 
-    # PATCH 12B: Advisory risk flags for negative signals.
-    risk_flags: list[str] = []
-
-    mom = float(entry.get("momentum_spy_relative", 0) or 0)
-    if mom < -0.10:
-        risk_flags.append(f"⚠ mom {mom*100:.0f}%")
-
-    rev_score = float(entry.get("analyst_revision_score") or 0.0)
+    # Advisory risk flags for negative signals.
+    risk_flags: List[str] = []
+    if rel < -0.10:
+        risk_flags.append(f"⚠ mom {rel*100:.0f}%")
+    rev_score = _safe_float(entry.get("analyst_revision_score"))
     if 0.0 < rev_score < 0.35:
         risk_flags.append("⚠ rev↓")
-
-    quality = float(entry.get("quality_piotroski_score") or 0.0)
+    quality = _safe_float(entry.get("quality_piotroski_score"))
     if 0.0 < quality < 0.30:
         risk_flags.append("⚠ F-Score↓")
-
     if risk_flags:
-        risk_str = " ".join(risk_flags[:2])
-        combined = f"{catalyst_str} | {risk_str}"
-        catalyst_str = combined[:80]
-
-    # F6.2: Append top-3 weighted factor contribution line.
-    # Format: "Top: momentum_long(0.19) analyst_consensus(0.08) insider_conviction(0.05)"
-    # Only appended when entry carries normalized factor scores from top_lists.json.
-    # Limit applied AFTER appending so the 80-char inline truncation doesn't
-    # silently eat the factor line when it follows a long risk-flag suffix.
-    factor_line = _factor_contribution_line(entry)
-    if factor_line:
-        catalyst_str = f"{catalyst_str}\n{factor_line}"[:1024]  # Discord field value limit
-    else:
-        catalyst_str = catalyst_str[:80]
+        catalyst_str = f"{catalyst_str} | {' '.join(risk_flags[:2])}"[:80]
 
     return catalyst_str
 
 
-def _weights_for_entry(entry: dict) -> dict:
-    """Return the correct weight dict based on ticker region."""
-    from src.config.weights import get_weights as _gw  # noqa: PLC0415
-    ticker = entry.get("ticker", "")
-    return _gw(ticker)
+def _spy_qqq_snapshot() -> str:
+    """Return a one-line market snapshot for SPY + QQQ, or '' on failure."""
+    try:
+        from backend.data.market_service import MarketData  # noqa: PLC0415
 
+        def _snap(bars) -> dict:
+            if bars is None or getattr(bars, "empty", True) or len(bars) < 2:
+                return {}
+            closes = bars["Close"].dropna()
+            if len(closes) < 2:
+                return {}
+            price = float(closes.iloc[-1])
+            pct_1d = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
+            pct_12m = (round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1)
+                       if len(closes) >= 252 else None)
+            return {"price": price, "pct_1d": pct_1d, "pct_12m": pct_12m}
 
-def _factor_contribution_line(entry: Dict[str, Any]) -> str:
-    """Return top-3 weighted factor contributions as a compact string.
+        def _fmt(v):
+            if v is None:
+                return "—"
+            return f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
 
-    Contribution = weight × normalized_score.  Pulls weights from the
-    'weights' key in the entry (written by generate_top_lists) or falls back
-    to the correct regional weight set based on entry pipeline metadata.
-    Returns empty string when no factor data is present.
-    """
-    factors = entry.get("factors")
-    if not factors:
+        spy = _snap(MarketData.get_historical_bars("SPY", years_back=2))
+        if not spy:
+            return ""
+        qqq: dict = {}
+        try:
+            qqq = _snap(MarketData.get_historical_bars("QQQ", years_back=2))
+        except Exception:
+            pass
+
+        spy_str = (f"SPY `${spy['price']:.0f}` {_fmt(spy.get('pct_1d'))} 1d · "
+                   f"{_fmt(spy.get('pct_12m'))} 12m")
+        qqq_str = (f"  ·  QQQ `${qqq['price']:.0f}` {_fmt(qqq.get('pct_1d'))} 1d · "
+                   f"{_fmt(qqq.get('pct_12m'))} 12m" if qqq else "")
+        return f"📈 {spy_str}{qqq_str}"
+    except Exception as exc:
+        log.debug("_spy_qqq_snapshot failed: %s", exc)
         return ""
-    weights = entry.get("weights") or _weights_for_entry(entry)
-    contributions = {
-        k: round(float(weights.get(k, 0.0)) * float(factors.get(k, 0.0)), 4)
-        for k in factors
-        if float(factors.get(k, 0.0) or 0.0) > 0.0
-    }
-    if not contributions:
-        return ""
-    top3 = sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:3]
-    parts = [f"{k.replace('_', ' ')}({v:.2f})" for k, v in top3]
-    return "Top: " + " · ".join(parts)
 
 
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
@@ -782,7 +350,7 @@ def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
         raw = (e.get("sector") or e.get("factors", {}).get("sector") or "").strip()
         label = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
         ticker = e.get("ticker", "?")
-        score = float(e.get("final_score", 0))
+        score = _safe_float(e.get("final_score"))
         buckets.setdefault(label, []).append((ticker, score))
     return {
         lbl: sorted(pairs, key=lambda x: -x[1])[:2]
@@ -790,1597 +358,483 @@ def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
     }
 
 
-# ── Field builders ─────────────────────────────────────────────────────────────
+# ── Archive delta loader (lazy, O(1) file reads) ───────────────────────────────
 
-def _ticker_detail_field(
-    rank: int,
-    entry: Dict[str, Any],
-    anomaly_flags: Optional[List[str]] = None,
-    score_delta: Optional[float] = None,
-    buyback_conv: Optional[float] = None,
-    mid_cap: bool = False,
-    all_scores: Optional[List[float]] = None,
-    kill_switch: bool = False,
-    held_context: Optional[Dict[str, float]] = None,
-) -> Dict[str, Any]:
-    if all_scores is not None:
-        entry["percentile"] = _compute_percentile(
-            float(entry.get("final_score", 0) or 0), all_scores)
-    field = _build_ticker_card(
-        rank,
-        entry,
-        market=entry.get("market", "US"),
-        kill_switch=kill_switch,
-        mid_cap=mid_cap,
-        held_context=held_context,
-    )
-    if anomaly_flags:
-        field["name"] = f"{field['name']} ⚠️"
-    if score_delta is not None:
+def _load_yesterday_scores(
+    archive_root: Path,
+    now: Optional[datetime] = None,
+) -> Tuple[Dict[str, float], Optional[float]]:
+    """Load prior-day ticker scores from logs/archive/ for ▲/▼/[NEW] deltas.
+
+    Filenames are YYYY-MM-DD_top_lists.json (name sort == chronological), so
+    the loader iterates the reverse-sorted glob lazily and reads ONLY the
+    first snapshot dated before today (UTC) — never the whole history.
+
+    Returns (scores, snapshot_age_hours). Missing directory, today-only
+    archives, or fully unreadable history → ({}, None). Corrupt candidates
+    are logged and skipped in favour of the next older file.
+    """
+    now = now or datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    root = Path(archive_root)
+    if not root.exists():
+        return {}, None
+
+    for path in sorted(root.glob("*_top_lists.json"), reverse=True):
+        day = path.name[:10]
+        if day >= today:
+            continue  # today's (or malformed/future-dated) snapshot
         try:
-            current_score = float(entry.get("final_score", 0))
-            diff = current_score - float(score_delta)
-            if abs(diff) >= 0.01:
-                arrow = "▲" if diff > 0 else "▼"
-                delta_str = f" {arrow}{diff:+.3f}"
-            else:
-                delta_str = ""
-        except Exception:
-            delta_str = ""
-        field["name"] = f"{field['name']}{delta_str}"
-    return field
-
-
-def _action_section(entries: List[Dict[str, Any]], all_scores: List[float]) -> Optional[Dict[str, Any]]:
-    """Top-3 actionable recommendations gated on BADGE THRESHOLDS, not just percentile.
-
-    A WATCHLIST ticker (score < 0.60) must not be labelled BUY — that violates
-    the badge system the rest of the embed uses. Score thresholds match
-    _badge_from_score() exactly:
-      score >= 0.60  → BUY  (TACTICAL BUY or HIGH BUY band)
-      score <  0.60  → WATCH (WATCHLIST — relative rank only, no action)
-    """
-    if not entries or not all_scores:
-        return None
-
-    lines = []
-    for e in entries[:3]:
-        ticker = e.get("ticker", "?")
-        score = float(e.get("final_score", 0))
-        pct = _compute_percentile(score, all_scores)
-        cat = _compute_catalyst(e)
-        # Fix #3: verb gated on score (badge thresholds), NOT percentile alone
-        if score >= 0.60:
-            verb = "**BUY**   "
-        else:
-            verb = "**WATCH** "
-        lines.append(f"{verb} `{ticker}` — p{pct} · {cat}")
-
-    if not lines:
-        return None
-
-    return {
-        "name":   "⚡ ACTION TODAY",
-        "value":  _truncate("\n".join(lines), 1024),
-        "inline": False,
-    }
-
-
-def _dead_factor_lines(top_buys_data: list, weights: dict) -> list:
-    """Return signal-health warning lines for the Discord health section.
-
-    Detects dead (all 0.0) and flat (all identical non-boundary value) factors
-    from top_buys entries. Returns [] when everything looks healthy.
-    """
-    if not top_buys_data or not weights:
-        return []
-
-    factor_scores: dict = {}
-    for entry in top_buys_data:
-        for k, v in entry.get("factors", {}).items():
-            factor_scores.setdefault(k, []).append(float(v or 0.0))
-
-    dead: list = []
-    flat: list = []
-    for factor, scores in factor_scores.items():
-        if all(s == 0.0 for s in scores):
-            dead.append(factor)
-        elif len(set(round(s, 2) for s in scores)) == 1 and scores[0] not in (0.0, 1.0):
-            flat.append(f"{factor}={scores[0]:.2f}")
-
-    lines: list = []
-    if dead or flat:
-        lines.append("⚠️ **Signal health:**")
-        if dead:
-            lines.append(f"  Dead (0.0): `{'`, `'.join(dead)}`")
-        if flat:
-            lines.append(f"  Flat (no discrimination): `{'`, `'.join(flat)}`")
-
-    all_dead_flat = dead + [x.split("=")[0] for x in flat]
-    total_weight = sum(weights.values()) or 1.0
-    active_weight = sum(w for f, w in weights.items() if f not in all_dead_flat)
-    dead_weight = total_weight - active_weight
-    if all_dead_flat and dead_weight > 0.05 * total_weight:
-        lines.append(
-            f"  Effective weight: **{active_weight/total_weight*100:.0f}%** "
-            f"({dead_weight/total_weight*100:.0f}% in dead/flat factors)"
-        )
-
-    return lines
-
-
-def _health_field(status: Dict[str, Any]) -> Dict[str, Any]:
-    """Pipeline health summary from intel_source_status.json top-level fields."""
-    meta = status.get("_edgar_meta", {})
-    orth = status.get("factor_orthogonality", {})
-
-    # Latency
-    generated_at = status.get("generated_at") or meta.get("last_run", "")
-    age_h = _data_age_hours(generated_at)
-    age_str = f"{age_h:.1f}h" if age_h is not None else "?"
-
-    # Orthogonality
-    max_rho = orth.get("max_abs_correlation", 0.0)
-    max_pair = orth.get("max_pair", [])
-    ldp = orth.get("low_density_pairs", [])
-    if max_pair and len(max_pair) == 2:
-        pair_str = (
-            f"{max_pair[0].replace('_score', '').replace('_', '.')}"
-            f"<->{max_pair[1].replace('_score', '').replace('_', '.')}"
-        )
-        orth_line = f"Orthogonality: max rho={max_rho:.3f} ({pair_str})"
-    else:
-        orth_line = f"Orthogonality: max rho={max_rho:.3f}"
-    if ldp:
-        orth_line += f" | {len(ldp)} sparse pairs excluded"
-
-    # Dead factors (density < 0.05)
-    densities = orth.get("factor_densities", {})
-    dead = [f.replace("_score", "") for f, d in densities.items()
-            if isinstance(d, float) and d < 0.05]
-    dead_str = ", ".join(dead) if dead else "none"
-
-    # CEO tiers
-    results = status.get("results", [])
-    tier_counts: Dict[str, int] = {}
-    for r in results:
-        t = r.get("ceo_conviction_tier", "none") or "none"
-        tier_counts[t] = tier_counts.get(t, 0) + 1
-    tier_parts = [f"{n}x {t}" for t, n in sorted(
-        tier_counts.items()) if t != "none" and n > 0]
-    ceo_str = ", ".join(tier_parts) if tier_parts else "none"
-
-    tickers = meta.get("ticker_count", len(results))
-    errors = meta.get("error_count", 0)
-    quarantine = meta.get("quarantine_count", 0)
-
-    # Dead/flat factor warnings — support both intel_source_status.json (results list,
-    # _score suffix) and top_lists.json (top_buys list, nested factors dict).
-    top_buys_data = status.get("top_buys")
-    if not top_buys_data:
-        # intel_source_status.json path: synthesise factor dicts from results rows
-        raw_results = status.get("results", [])[:50]
-        top_buys_data = [
-            {
-                "factors": {
-                    k.replace("_score", ""): float(v or 0.0)
-                    for k, v in r.items()
-                    if k.endswith("_score") and isinstance(v, (int, float, type(None)))
-                }
-            }
-            for r in raw_results
-        ]
-    weights_data = status.get("weights", {})
-    df_lines = _dead_factor_lines(top_buys_data, weights_data)
-
-    # Congress dead-days (from dead_factors_detail if present)
-    congress_detail = (status.get("dead_factors_detail") or {}).get("congress", {})
-    if congress_detail.get("dead") and congress_detail.get("dead_days", 0) > 0:
-        dead_str = f"congress (dead {congress_detail['dead_days']}d)"
-
-    eu_entries   = status.get("top_buys_europe", [])
-    asia_entries = status.get("top_buys_asia", [])
-    coverage_lines = []
-    for region_label, region_entries in [("EU", eu_entries), ("ASIA", asia_entries)]:
-        if region_entries:
-            coverages = [
-                float(e.get("weight_coverage", 0) or 0)
-                for e in region_entries
-            ]
-            avg_cov = sum(coverages) / len(coverages) if coverages else 0.0
-            low_n = sum(1 for c in coverages if c < 0.50)
-            icon = "⚠️" if avg_cov < 0.50 else "✅"
-            coverage_lines.append(
-                f"{icon} {region_label} factor coverage: "
-                f"avg={avg_cov:.0%} | {low_n}/{len(coverages)} tickers <50%"
-            )
-
-    lines = df_lines + coverage_lines + [
-        orth_line,
-        f"Dead factors: {dead_str}",
-        f"CEO tiers: {ceo_str}",
-        f"Latency: {age_str}  |  Tickers: {tickers}  |  Errors: {errors}  |  Quarantine: {quarantine}",
-    ]
-
-    return {
-        "name":   "🔬 PIPELINE HEALTH",
-        "value":  _truncate("\n".join(lines), 1024),
-        "inline": False,
-    }
-
-
-# ── I/O helpers ────────────────────────────────────────────────────────────────
-
-def _load_satellite(log_dir: Path) -> Optional[Dict[str, Any]]:
-    path = log_dir / "satellite_insights.json"
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception as exc:
-        log.warning("satellite_insights.json unreadable: %s", exc)
-        return None
-
-
-def _load_anomaly_report(log_dir: Path) -> Dict[str, List[str]]:
-    path = log_dir / "anomaly_report_latest.json"
-    if not path.exists():
-        return {}
-    try:
-        records = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(records, list):
-            return {}
-        result: Dict[str, List[str]] = {}
-        for rec in records:
-            if not isinstance(rec, dict):
-                continue
-            ticker = rec.get("ticker", "")
-            flag = rec.get("flag", "")
-            if ticker and flag:
-                result.setdefault(ticker, []).append(flag)
-        return result
-    except Exception as exc:
-        log.warning("anomaly_report_latest.json unreadable: %s", exc)
-        return {}
-
-
-def _load_top_lists_overlay(log_dir: Path, input_path: Optional[Path] = None) -> Dict[str, Any]:
-    """Load vix / kill_switch / vix_multiplier from top_lists.json.
-
-    intel_source_status.json does not carry the macro overlay — that lives in
-    top_lists.json next to it in the artifact.  Returns {} if the file is absent
-    or unreadable; caller treats missing keys as "no overlay".
-
-    Fallback: if top_lists.json is not found in log_dir, try the same directory
-    as input_path (sibling artifact pattern used in CI).
-    """
-    path = log_dir / "top_lists.json"
-    if not path.exists() and input_path is not None:
-        path = Path(input_path).parent / "top_lists.json"
-    if not path.exists():
-        log.warning(
-            "top_lists.json not found at %s — VIX overlay will be missing from embed", path
-        )
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return {
-            "vix":             data.get("vix"),
-            "kill_switch":     data.get("kill_switch", False),
-            "vix_multiplier":  data.get("vix_multiplier", 1.0),
-            "shadow_top_buys": data.get("shadow_top_buys", []),
-            "mvo_pools":       data.get("mvo_pools", {}),
-            "top_buys_europe": data.get("top_buys_europe", []),
-            "top_buys_asia":   data.get("top_buys_asia", []),
-        }
-    except Exception as exc:
-        log.warning("top_lists.json unreadable: %s", exc)
-        return {}
-
-
-def _normalise_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Map intel_source_status.json result row → ticker card entry.
-
-    Builds the 'factors' dict from *_score_neutral fields (post-neutralization),
-    falling back to raw *_score if neutral is absent.
-    """
-    def _get(key: str) -> float:
-        neutral = raw.get(f"{key}_score_neutral")
-        if neutral is not None:
-            return float(neutral)
-        return float(raw.get(f"{key}_score", 0) or 0)
-
-    factors = {key: _get(key) for key, _ in _FACTOR_DISPLAY}
-
-    eps_pct = raw.get("earnings_surprise_pct")   # float | None
-    eps_days = int(raw.get("earnings_surprise_days") or 0)
-
-    entry = {
-        "ticker":                    raw.get("ticker", "?"),
-        "sector":                    raw.get("sector", "Unknown"),
-        "cap_tier":                  raw.get("cap_tier", "large"),
-        "market_cap":                _safe_float(raw.get("market_cap", 0)),
-        "final_score":               float(raw.get("final_score", 0) or 0),
-        "badge":                     raw.get("badge") or _badge_from_score(float(raw.get("final_score", 0) or 0)),
-        "ceo_buy":                   bool(raw.get("ceo_buy", False)),
-        "ceo_conviction_tier":       raw.get("ceo_conviction_tier", "none"),
-        "ceo_purchase_bps":          raw.get("ceo_purchase_bps"),
-        "congress_boost":            float(raw.get("congress_boost", 0.0) or 0),
-        "market":                    raw.get("market", "USA"),
-        "factors":                   factors,
-        # Fix #2: analyst + quality fields read by _fmt_factor_matrix / _fmt_analyst_badge / _fmt_pt_badge
-        "analyst_consensus_score":   raw.get("analyst_consensus_score"),  # None = no coverage
-        "analyst_consensus_source":  raw.get("analyst_consensus_source", "none"),
-        "analyst_revision_score":    float(raw.get("analyst_revision_score") or 0.0),
-        "analyst_revision_n_analysts": int(raw.get("analyst_revision_n") or 0),
-        "price_target_upside_score": raw.get("price_target_upside_score"),  # None = no analyst target
-        "quality_piotroski_score":   float(raw.get("quality_piotroski_score") or 0.0),
-        "company_name":              raw.get("company_name", ""),
-        "earnings_surprise_pct":     eps_pct,
-        "earnings_surprise_days":    eps_days,
-        # Catalyst / evidence pass-through
-        "insider_usd":               float(raw.get("insider_usd", 0.0) or 0),
-        "form4_count":               int(raw.get("form4_count", 0) or 0),
-        "quiver_evidence":           raw.get("quiver_evidence", {}),
-        "momentum_spy_relative":     float(raw.get("momentum_spy_relative", 0.0) or 0),
-        "transcript_tone_score":     float(raw.get("transcript_tone_score") or 0.0),
-        "transcript_tone_source":    raw.get("transcript_tone_source", "none"),
-        "recent_upgrade_downgrade":  raw.get("recent_upgrade_downgrade", {}),
-        "target_price":              raw.get("target_price"),
-        "current_price":             raw.get("current_price"),
-        "weight_coverage":           float(raw.get("weight_coverage", 1.0) or 1.0),
-    }
-
-    for key in ("esg_score", "esg_e_score", "esg_flag"):
-        if key in raw:
-            entry[key] = raw.get(key)
-
-    return entry
-
-
-def _badge_from_score(score: float) -> str:
-    if score >= 0.80:
-        return "HIGH BUY"
-    if score >= 0.60:
-        return "TACTICAL BUY"
-    return "WATCHLIST"
-
-
-# ── Regional embed builder (v2.1-global) ──────────────────────────────────────
-# Lightweight alternative to build_payload for top_lists.json consumers.
-# Produces one Discord embed per non-empty region (US / EU / Asia).
-# Falls back to unified top_buys when regional keys are absent.
-
-_REGION_CONFIG: Dict[str, Dict[str, str]] = {
-    "US":   {"emoji": "🇺🇸", "label": "US",   "weight_note": "9-factor (congress included)"},
-    "EU":   {"emoji": "🇪🇺", "label": "EU",   "weight_note": "8-factor (congress absent — weight redistributed)"},
-    "ASIA": {"emoji": "🌏", "label": "Asia", "weight_note": "8-factor (congress absent — weight redistributed)"},
-}
-
-_FACTOR_SHORT_REGIONAL: Dict[str, str] = {
-    "insider_conviction": "IC",
-    "insider_breadth":    "IB",
-    "congress":           "CON",
-    "news_sentiment":     "NS",
-    "news_buzz":          "NB",
-    "momentum_long":      "MOM",
-    "volume_attention":   "VOL",
-    "analyst_consensus":  "AC",
-    "quality_piotroski":  "PIO",
-}
-
-
-def _fmt_factor_bar_regional(score: float, width: int = 8) -> str:
-    filled = min(width, max(0, round(score * width)))
-    return "▓" * filled + "░" * (width - filled)
-
-
-def _build_regional_ticker_line(entry: Dict[str, Any], show_congress: bool = True) -> str:
-    ticker  = entry.get("ticker", "?")
-    score   = entry.get("final_score", 0.0)
-    factors = entry.get("factors", {})
-    badge   = entry.get("badge", "")
-    region  = entry.get("region", "US")
-
-    core = ["insider_conviction", "news_sentiment", "momentum_long", "analyst_consensus"]
-    if show_congress and region == "US":
-        core.insert(2, "congress")
-
-    parts = [f"**{ticker}** `{score:.3f}`"]
-    if badge:
-        parts.append(f"_{badge}_")
-
-    factor_parts = []
-    for f in core:
-        s = factors.get(f, 0.0)
-        if s > 0.01:
-            factor_parts.append(f"{_FACTOR_SHORT_REGIONAL[f]}{_fmt_factor_bar_regional(s, 5)}")
-    if factor_parts:
-        parts.append("  ".join(factor_parts))
-
-    return "  ".join(parts)
-
-
-def _region_embed_color(region_code: str) -> int:
-    return {
-        "US":   0x2ECC71,
-        "EU":   0x3498DB,
-        "ASIA": 0x9B59B6,
-    }.get(region_code, 0x95A5A6)
-
-
-def build_regional_embeds(
-    top_lists: Dict[str, Any],
-    max_per_region: int = 5,
-    vix: float = 0.0,
-    kill_switch: bool = False,
-) -> List[Dict[str, Any]]:
-    """Build one Discord embed per non-empty region from top_lists.json.
-
-    Reads top_buys_us / top_buys_eu / top_buys_asia when present (post-v2.1
-    regional keys); falls back to splitting unified top_buys by region field.
-    Returns a list of embed dicts ready to POST as ``{"embeds": [...]}`` payload.
-    """
-    embeds: List[Dict[str, Any]] = []
-
-    has_regional = any(k in top_lists for k in ("top_buys_us", "top_buys_eu", "top_buys_asia"))
-
-    if has_regional:
-        region_keys = [
-            ("US",   top_lists.get("top_buys_us",   [])),
-            ("EU",   top_lists.get("top_buys_eu",   [])),
-            ("ASIA", top_lists.get("top_buys_asia", [])),
-        ]
-    else:
-        top_buys = top_lists.get("top_buys", [])
-        us   = [e for e in top_buys if e.get("region", "US") == "US"]
-        eu   = [e for e in top_buys if e.get("region") == "EU"]
-        asia = [e for e in top_buys if e.get("region") == "ASIA"]
-        if eu or asia:
-            region_keys = [("US", us), ("EU", eu), ("ASIA", asia)]
-        else:
-            region_keys = [("US", top_buys)]
-
-    for region_code, entries in region_keys:
-        if not entries:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("Archive snapshot %s unreadable (%s) — trying older",
+                        path.name, exc)
             continue
 
-        cfg   = _REGION_CONFIG[region_code]
-        top_n = entries[:max_per_region]
+        scores: Dict[str, float] = {}
+        for key in ("top_buys_usa", "top_buys_europe", "top_buys_asia",
+                    "watchlist", "top_buys"):
+            for e in blob.get(key) or []:
+                t = e.get("ticker")
+                if t and t not in scores:
+                    scores[t] = _safe_float(e.get("final_score"))
 
-        if kill_switch and region_code == "US":
-            description = (
-                "⚠️ **Kill-switch active** (VIX ≥ 30) — BUY signals suppressed.\n"
-                "SELL signals remain live. No new positions."
-            )
-        else:
-            lines = [_build_regional_ticker_line(e, show_congress=(region_code == "US")) for e in top_n]
-            description = "\n".join(lines) if lines else "_No tickers in this region today._"
+        try:
+            snap_dt = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            age_h: Optional[float] = (now - snap_dt).total_seconds() / 3600
+        except ValueError:
+            age_h = None
+        return scores, age_h
 
-        embeds.append({
-            "title":       f"{cfg['emoji']} Top Buys — {cfg['label']}",
-            "description": description,
-            "color":       _region_embed_color(region_code),
-            "footer":      {
-                "text": (
-                    f"{cfg['weight_note']}  •  VIX {vix:.1f}"
-                    + ("  •  🔴 Kill-switch" if kill_switch else "")
-                )
-            },
-        })
-
-    return embeds
-
-
-# ── Institutional block (v22 — Batch Floor + GTC desk notice) ─────────────────
-
-def _fmt_region_block(label: str, model_name: str, entries: list, max_entries: int = 3) -> str:
-    try:
-        from src.risk.exit_rules import format_card_line  # noqa: PLC0415
-        _has_exit = True
-    except ImportError:
-        _has_exit = False
-
-    lines = [f"[{label} - {model_name}]"]
-    for rank, e in enumerate(entries[:max_entries], 1):
-        ticker = e.get("ticker", "???")
-        score  = e.get("final_score", 0.0)
-        badge  = e.get("badge", "WATCHLIST")
-        cap    = " [CAPITULATION SURVIVOR]" if e.get("_capitulation_survivor") else ""
-        lines.append(f"  {rank}. {ticker:<8}| SCORE: {score:.4f} | {badge}{cap}")
-        if _has_exit:
-            lines.append("     " + format_card_line(e))
-    if not entries[:max_entries]:
-        lines.append("  [NO QUALIFYING ASSETS IN CURRENT REGIME]")
-    return "\n".join(lines)
-
-
-def _fmt_mvo_pool(label: str, pool: dict) -> str:
-    try:
-        from src.risk.exit_rules import format_card_line  # noqa: PLC0415
-        _has_exit = True
-    except ImportError:
-        _has_exit = False
-
-    lines = [f"[{label}]"]
-    for pos in pool.get("positions", [])[:6]:
-        ticker = pos.get("ticker", "???")
-        alloc  = (pos.get("allocation") or 0) * 100
-        score  = pos.get("final_score", 0)
-        stage  = "ENTER POSITION" if score >= 0.80 else "ASYMMETRIC LONG"
-        lines.append(f"  - {ticker:<6} (ALLOC: {alloc:5.2f}%) | STAGE: {stage}")
-        if _has_exit:
-            lines.append("    " + format_card_line(pos))
-    return "\n".join(lines)
-
-
-def _fmt_sector_concentration(all_entries: list) -> str:
-    """Rigid syntax: Theme Sector Exposure: Sector (N) Ticker Weight | Sector (N) ..."""
-    sector_map: dict = {}
-    for e in all_entries:
-        raw   = (e.get("factors", {}).get("sector") or e.get("sector") or "Other").strip()
-        short = _SECTOR_SHORT.get(raw, raw[:5])
-        score = e.get("final_score", 0.0)
-        sector_map.setdefault(short, []).append((e.get("ticker", "?"), score))
-
-    parts = []
-    for sector in sorted(sector_map):
-        tickers = sector_map[sector]
-        count   = len(tickers)
-        top2    = sorted(tickers, key=lambda x: x[1], reverse=True)[:2]
-        ticker_str = " ".join(f"{t} {w:.2f}" for t, w in top2)
-        parts.append(f"{sector} ({count}) {ticker_str}")
-
-    return "Theme Sector Exposure: " + " | ".join(parts) if parts else "Theme Sector Exposure: N/A"
-
-
-def build_institutional_payload(top_lists: dict) -> list:
-    """Build two-embed institutional monospaced block with GTC desk notice.
-
-    Embed 1: Regime header + regional equity sections with Batch Floor card lines.
-    Embed 2: GTC desk notice + MVO pool sections + sector concentration.
-    """
-    vix         = top_lists.get("vix", 0.0)
-    vix_regime  = (top_lists.get("vix_regime") or "UNKNOWN").upper()
-    kill_switch = top_lists.get("kill_switch", False)
-    gen_at      = (top_lists.get("generated_at") or "")[:16]
-
-    if kill_switch or vix >= _VIX_CAPITULATION:
-        strategy = "CAPITULATION DISTRESSED REGIME / HIGH-QUALITY ANCHORS ONLY"
-    elif vix >= _VIX_BEARISH:
-        strategy = "DEFENSIVE / GRADUATED POSITIONING ACTIVATED"
-    else:
-        strategy = "NORMAL / FULL POSITIONING"
-
-    SEP  = "=" * 72
-    THIN = "-" * 72
-
-    watchlist = top_lists.get("watchlist", [])
-    panic_note = ""
-    if (kill_switch or vix >= _VIX_CAPITULATION) and not (
-        top_lists.get("top_buys_usa") or
-        top_lists.get("top_buys_europe") or
-        top_lists.get("top_buys_asia")
-    ):
-        n = len(watchlist)
-        panic_note = (
-            "\n[!! PANIC REGIME ACTIVE — ALL NEW BUY SIGNALS SUPPRESSED !!]"
-            "\n[SELL/EXIT SIGNALS REMAIN ACTIVE — SEE EXIT RULES MODULE  ]"
-            + (f"\n[{n} STRUCTURAL ANCHOR(S) AVAILABLE IN WATCHLIST           ]" if n else "")
-        )
-
-    block1 = "\n".join([
-        SEP,
-        "INSTITUTIONAL RISK & ALPHA DISPATCH",
-        SEP,
-        f"[REGIME STATUS] DETECTED REGIME: {vix_regime} (VIX: {vix:.2f})",
-        f"[RISK OVERLAY]  STRATEGY: {strategy}",
-        panic_note,
-        SEP,
-        "",
-        "TOP REGIONAL EQUITIES",
-        THIN,
-        _fmt_region_block("US MARKET", "INSIDER INFILTRATION MODEL",
-                          top_lists.get("top_buys_usa", [])),
-        "",
-        _fmt_region_block("ASIAN MARKET", "LIQUIDITY SENTIMENT MODEL",
-                          top_lists.get("top_buys_asia", [])),
-        "",
-        _fmt_region_block("EUROPEAN MARKET", "BALANCE SHEET QUALITY MODEL",
-                          top_lists.get("top_buys_europe", [])),
-    ])
-
-    mvo_pools = top_lists.get("mvo_pools", {})
-    mvo_lines = [
-        "[DESK NOTICE: PLACE GTC BROKERAGE STOPS AT BATCH FLOOR PRICES IMMEDIATELY]",
-        "",
-        "OPTIMIZED PORTFOLIO POOLS (MEAN-VARIANCE ENGINE)",
-        THIN,
-    ]
-
-    anchors = mvo_pools.get("large_cap_anchors", {})
-    if anchors.get("positions"):
-        mvo_lines.append(_fmt_mvo_pool("STRUCTURAL CORE ANCHORS (>$10B - EQUAL WEIGHT)", anchors))
-        mvo_lines.append("")
-
-    mid = mvo_pools.get("mid_cap", {})
-    if mid.get("positions"):
-        mvo_lines.append(_fmt_mvo_pool("MID-CAP SHARPE MAXIMIZER ($2B-$10B)", mid))
-        mvo_lines.append("")
-
-    small = mvo_pools.get("small_cap", {})
-    if small.get("positions"):
-        mvo_lines.append(_fmt_mvo_pool("SMALL-CAP MIN VARIANCE ($300M-$2B | ADV-GATED)", small))
-
-    all_entries = (
-        top_lists.get("top_buys_usa", []) +
-        top_lists.get("top_buys_europe", []) +
-        top_lists.get("top_buys_asia", [])
-    )
-    block2 = "\n".join(mvo_lines + [
-        "",
-        "GLOBAL THEMATIC SECTOR CONCENTRATION",
-        THIN,
-        _fmt_sector_concentration(all_entries),
-        "",
-        SEP,
-        f"[PIPELINE STATUS: NOMINAL | GENERATED: {gen_at}]",
-        SEP,
-    ])
-
-    color = _COLOR_RED if (kill_switch or vix >= _VIX_CAPITULATION) else (
-        _COLOR_ORANGE if vix >= _VIX_BEARISH else _COLOR_GREEN
-    )
-
-    def _wrap_code(text: str) -> str:
-        wrapped = "```\n" + text + "\n```"
-        return wrapped[:4096]
-
-    return [
-        {"embeds": [{"description": _wrap_code(block1), "color": color}]},
-        {"embeds": [{"description": _wrap_code(block2), "color": color}]},
-    ]
+    return {}, None
 
 
 # ── Payload builder ────────────────────────────────────────────────────────────
 
-def build_payload(
-    status: Dict[str, Any],
-    satellite: Optional[Dict[str, Any]] = None,
-    anomaly_map: Optional[Dict[str, List[str]]] = None,
-    pipeline_latency_s: Optional[float] = None,
-) -> Dict[str, Any]:
-    """Build the Discord webhook JSON payload from intel_source_status.json.
+class DiscordPayloadBuilder:
+    """Builds the institutional daily-brief embed from cooked top_lists.json.
 
-    Accepts both old top_lists.json schema (has 'top_buys' key) and new
-    intel_source_status.json schema (has 'top_by_market' + 'results').
+    Themes: NORMAL / BEAR share the standard layout (differing action bar +
+    color); CAPITULATION (or kill_switch) swaps desks/portfolio for the
+    STRUCTURAL ANCHORS watchlist view. All regime math comes from
+    src.risk.regime — thresholds are never hardcoded here.
     """
-    anomaly_map = anomaly_map or {}
 
-    # ── Detect schema: intel_source_status vs legacy top_lists ───────────────
-    is_status_schema = "top_by_market" in status
+    MAX_DESK_ENTRIES = 3
+    MAX_MATRIX_ROWS = 3  # per region sub-table
 
-    if is_status_schema:
-        generated_at = _timestamp_from_status(status)
-        run_id = status.get("run_id", "")
-        vix_val = status.get("vix")
-        kill_switch = status.get("kill_switch", False)
+    def __init__(
+        self,
+        data: Dict[str, Any],
+        *,
+        yesterday_scores: Optional[Dict[str, float]] = None,
+        yesterday_age_h: Optional[float] = None,
+        now: Optional[datetime] = None,
+    ) -> None:
+        self.data = data
+        self.yesterday_scores = yesterday_scores or {}
+        self.yesterday_age_h = yesterday_age_h
+        self.now = now or datetime.now(timezone.utc)
 
-        # Build per-market top-5 from top_by_market (already sorted by final_score)
-        tbm = status.get("top_by_market", {})
-        # top_by_market values are full result dicts
-        us_entries = [_normalise_entry(e) for e in (
-            tbm.get("US") or tbm.get("USA") or [])[:5]]
-        eu_entries = [_normalise_entry(e)
-                      for e in (tbm.get("EUROPE") or [])[:5]]
-        asia_entries = [_normalise_entry(e)
-                        for e in (tbm.get("ASIA") or [])[:5]]
+    # ── Validation ────────────────────────────────────────────────────────────
 
-        all_results = status.get("results", [])
+    def validate(self) -> List[str]:
+        """Return fatal schema problems; empty list means buildable."""
+        problems: List[str] = []
+        vix = self.data.get("vix")
+        if (not isinstance(vix, (int, float)) or isinstance(vix, bool)
+                or math.isnan(float(vix)) or float(vix) < 0):
+            problems.append(f"vix missing or non-numeric: {vix!r}")
+        if not (self.data.get("generated_at") or "").strip():
+            problems.append("generated_at missing")
+        if not any(k in self.data for k in (
+                "top_buys_usa", "top_buys_europe", "top_buys_asia", "watchlist")):
+            problems.append(
+                "no regional top-lists keys present (top_buys_usa / "
+                "top_buys_europe / top_buys_asia / watchlist)")
+        return problems
 
-        # Mid caps: non-top-5 entries with cap_tier == "mid", cross-market
-        top_tickers = {e["ticker"]
-                       for e in us_entries + eu_entries + asia_entries}
-        mid_caps = sorted(
-            [_normalise_entry(r) for r in all_results
-             if r.get("cap_tier") == "mid" and r.get("ticker") not in top_tickers],
-            key=lambda e: -e["final_score"]
-        )[:5]
-        # EU/Asia mid-cap spotlight: top-1 per region from dedicated mid sleeve
-        eu_mid_small = sorted(
-            [_normalise_entry(r) for r in all_results
-             if r.get("cap_tier") in ("mid", "small")
-             and r.get("market", "").upper() in ("EUROPE", "EU")],
-            key=lambda e: -e["final_score"]
-        )[:1]
-        asia_mid_small = sorted(
-            [_normalise_entry(r) for r in all_results
-             if r.get("cap_tier") in ("mid", "small")
-             and r.get("market", "").upper() == "ASIA"],
-            key=lambda e: -e["final_score"]
-        )[:1]
+    # ── Regime / theme ────────────────────────────────────────────────────────
 
-    else:
-        # Legacy top_lists.json schema — graceful degradation
-        generated_at = _timestamp_from_status(status)
-        run_id = status.get("source_run_id", status.get("run_id", ""))
-        vix_val = status.get("vix")
-        kill_switch = status.get("kill_switch", False)
+    @property
+    def regime(self) -> RiskRegime:
+        if self.data.get("kill_switch"):
+            return RiskRegime.CAPITULATION
+        return get_regime(float(self.data["vix"]))
 
-        top_buys = (
-            status.get("top_buys_usa")
-            or status.get("top_buys")
-            or []
-        )
-        us_entries     = top_buys[:5]
-        eu_entries     = list(status.get("top_buys_europe") or [])[:5]
-        asia_entries   = list(status.get("top_buys_asia") or [])[:5]
-        mid_caps       = list(status.get("mid_caps") or [])[:5]
-        eu_mid_small   = list(status.get("eu_mid_small") or [])[:1]
-        asia_mid_small = list(status.get("asia_mid_small") or [])[:1]
+    @property
+    def multiplier(self) -> float:
+        return score_multiplier(self.regime)
 
-    # ── Timing ───────────────────────────────────────────────────────────────
-    age_h = _data_age_hours(generated_at)
-    try:
-        ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        date_str = ts.strftime("%b %d %H:%M UTC")
-    except Exception:
-        date_str = generated_at[:10] or "—"
+    @property
+    def is_panic(self) -> bool:
+        return self.regime == RiskRegime.CAPITULATION
 
-    # ── Color ────────────────────────────────────────────────────────────────
-    color = _embed_color(anomaly_map, kill_switch)
-    if age_h is not None and age_h > _STALE_HOURS:
-        color = _COLOR_RED
+    @property
+    def _age_hours(self) -> Optional[float]:
+        return _data_age_hours(self.data.get("generated_at", ""))
 
-    # ── Buyback join (satellite) ──────────────────────────────────────────────
-    buyback_conv_of: Dict[str, float] = {}
-    try:
-        if satellite:
-            for c in (satellite.get("cannibals") or []):
-                t = (c.get("ticker") or "").upper()
-                yld = float(c.get("buyback_yield") or 0.0)
-                conv = _buyback_conviction(yld)
-                if t and conv is not None:
-                    buyback_conv_of[t] = conv
-    except Exception as exc:
-        log.debug("buyback join failed: %s", exc)
+    @property
+    def _is_stale(self) -> bool:
+        age = self._age_hours
+        return age is not None and age > _STALE_HOURS
 
-    # ── Alerts ───────────────────────────────────────────────────────────────
-    alerts: List[str] = []
-    if age_h is not None and age_h > _STALE_HOURS:
-        alerts.append(
-            f"DATA IS {age_h:.0f}h OLD — pipeline may have failed. "
-            "Check edgar_3x on GitHub Actions."
-        )
-    if kill_switch:
-        vix_mult = status.get("vix_multiplier", 1.0)
-        vix_note = f"VIX {vix_val:.1f}  |  " if vix_val is not None else ""
-        alerts.append(
-            f"MACRO KILL-SWITCH ACTIVE  —  {vix_note}"
-            f"scores dampened x{vix_mult:.2f}.  Do NOT act on HIGH BUY signals."
-        )
-    if any(flag == "STALE_SOURCE" for flags in anomaly_map.values() for flag in flags):
-        alerts.append("STALE DATA SOURCE — scores may be unreliable.")
+    # ── Data access ───────────────────────────────────────────────────────────
 
-    congress_detail = (status.get("dead_factors_detail") or {}).get("congress", {})
-    if congress_detail.get("dead") and int(congress_detail.get("dead_days", 0)) >= 3:
-        dead_days = congress_detail["dead_days"]
-        alerts.append(
-            f"CONGRESS FEED DEAD {dead_days}d — CG=0.0 for all US tickers. "
-            f"5% weight budget lost. S3 Stock Watcher / FMP congress unreachable."
-        )
+    def _region_entries(self, key: str) -> List[Dict[str, Any]]:
+        return list(self.data.get(key) or [])
 
-    # PATCH 10: SPY momentum regime alert — VIX may not yet signal bear but price action does
-    _spy_mom_regime = status.get("spy_momentum_regime", "NORMAL")
-    if _spy_mom_regime in ("BEAR_CRASH", "BEAR_MOMENTUM"):
-        _spy_ret_63d = status.get("spy_return_63d")
-        _spy_note = f"  SPY 63d: {_spy_ret_63d * 100:.1f}%" if _spy_ret_63d is not None else ""
-        alerts.append(
-            f"SPY MOMENTUM REGIME: {_spy_mom_regime}{_spy_note} — "
-            "price action signals bear market (PATCH 10). VIX may lag. Consider risk reduction."
-        )
-
-    # ── Description ──────────────────────────────────────────────────────────
-    def _fmt_pct(v):
-        if v is None:
-            return "—"
-        return f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
-
-    vix_regime_str = get_market_regime(float(vix_val)) if vix_val is not None else "VIX —"
-    vix_mult = float(status.get("vix_multiplier", 1.0))
-    overlay_str = f"×{vix_mult:.2f}"
-    ks_str = "KILL SWITCH" if kill_switch else "NORMAL"
-
-    if kill_switch:
-        action_str = "🔴 **KILL SWITCH ACTIVE** — Do NOT trade signals."
-    else:
-        action_str = "🟢 **MARKET OPEN** — All signals are actionable."
-
-    laureate_line = ""
-    mkt_spy_line = ""
-    mkt_qqq_line = ""
-    try:
-        lr = _compute_laureate_regime()
-        if lr:
-            icon   = lr.get("laureate_icon", "⚪")
-            state  = lr.get("laureate", "—")
-            hmm    = lr.get("hmm_label", "—")
-            vol    = lr.get("vol_regime", "—")
-            m_icon = lr.get("minsky_icon", "✅")
-            m_lvl  = lr.get("minsky_level", "CLEAR")
-            m_n    = lr.get("minsky_n", 0)
-            laureate_line = (
-                f"\n**Laureate:** {icon} {state}  ·  HMM: {hmm}  ·  Vol: {vol}"
-                f"\nMinsky: {m_icon} {m_lvl} ({m_n}/3)"
-            )
-            spy_p = lr.get("spy_price")
-            qqq_p = lr.get("qqq_price")
-            if spy_p:
-                mkt_spy_line = (
-                    f"📈 **SPY** `${spy_p:.0f}`  —  *1d* {_fmt_pct(lr.get('spy_pct_1d'))}  |  "
-                    f"*12m* {_fmt_pct(lr.get('spy_pct_12m'))}"
-                )
-            if qqq_p:
-                mkt_qqq_line = (
-                    f"🚀 **QQQ** `${qqq_p:.0f}`  —  *1d* {_fmt_pct(lr.get('qqq_pct_1d'))}  |  "
-                    f"*12m* {_fmt_pct(lr.get('qqq_pct_12m'))}"
-                )
-    except Exception as _lr_exc:
-        log.debug("Laureate regime failed: %s", _lr_exc)
-
-    if not mkt_spy_line:
-        _raw_snap = _spy_qqq_snapshot().strip()
-        if _raw_snap:
-            if "·  QQQ" in _raw_snap:
-                _sparts = _raw_snap.split("·  QQQ", 1)
-                mkt_spy_line = _sparts[0].strip()
-                mkt_qqq_line = f"🚀 **QQQ**{_sparts[1]}" if len(_sparts) > 1 else ""
-            else:
-                mkt_spy_line = _raw_snap
-
-    try:
-        ts = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
-        ts_date = ts.strftime("%b %d, %Y • %H:%M UTC")
-    except Exception:
-        ts_date = date_str
-
-    desc_parts = [
-        "════════════════════════════════════",
-        "🌐 **REGIME TRADER | DAILY BRIEF**",
-        f"📅 **{ts_date}**",
-        "════════════════════════════════════",
-        "",
-        f"⚡ **ACTION BAR:** {action_str}",
-        f"*Data latency: {age_h:.1f}h  •  EDGAR-First*" if age_h is not None else "*EDGAR-First*",
-    ]
-
-    if alerts:
-        desc_parts.append("")
-        for _a in alerts:
-            desc_parts.append(f"⚠️ {_a}")
-
-    desc_parts.extend([
-        "",
-        "---",
-        "",
-        "### 📊 **1. MACRO RISK REGIME**",
-        "",
-        f"• **VIX:** {vix_regime_str}",
-        f"• **Overlay:** `{overlay_str}`  •  **Kill Switch:** {ks_str}",
-    ])
-    if laureate_line:
-        desc_parts.append(laureate_line)
-    if mkt_spy_line:
-        desc_parts.extend(["", mkt_spy_line])
-    if mkt_qqq_line:
-        desc_parts.append(mkt_qqq_line)
-
-    description = _truncate("\n".join(desc_parts), 4096)
-
-    # Load yesterday's scores from archive for real score-delta display.
-    # Reads all regional lists so EU/Asia tickers (never in unified top_buys)
-    # get a prior-day score and show ▲/▼ instead of always showing [NEW].
-    _yesterday_scores: Dict[str, float] = {}
-    try:
-        _archive_root = Path(__file__).resolve().parent.parent.parent / "logs" / "archive"
-        _archive_files = sorted(_archive_root.glob("*_top_lists.json"))
-        log.info(
-            "Archive root: %s | files found: %d",
-            _archive_root, len(_archive_files),
-        )
-
-        if not _archive_files:
-            log.info("No archive snapshots found — delta tags suppressed (first run)")
-            # _yesterday_scores stays {} — all tickers will show no delta tag
-
-        if len(_archive_files) >= 2:
-            _prev_file = _archive_files[-2]
-            log.info("Loading archive delta from: %s", _prev_file.name)
-            _prev_data = json.loads(_prev_file.read_text(encoding="utf-8"))
-
-            # Support both archive schemas:
-            #   combined top_lists.json  → top_buys_usa/europe/asia keys
-            #   top_lists_us.json        → top_buys + results keys
-            _all_prev_entries = (
-                _prev_data.get("top_buys", [])
-                + _prev_data.get("top_buys_usa", [])
-                + _prev_data.get("top_buys_europe", [])
-                + _prev_data.get("top_buys_asia", [])
-                + _prev_data.get("mid_caps", [])
-                + _prev_data.get("small_caps", [])
-            )
-            # intel_source_status.json archive (results list)
-            for _prev_e in _prev_data.get("results", []):
-                _prev_t = _prev_e.get("ticker", "")
-                if _prev_t and _prev_t not in _yesterday_scores:
-                    _yesterday_scores[_prev_t] = float(
-                        _prev_e.get("final_score", 0))
-
-            for _prev_e in _all_prev_entries:
-                _prev_t = _prev_e.get("ticker", "")
-                if _prev_t and _prev_t not in _yesterday_scores:
-                    _yesterday_scores[_prev_t] = float(
-                        _prev_e.get("final_score", 0))
-
-            log.info(
-                "Archive delta loaded: %d ticker scores from %s",
-                len(_yesterday_scores), _prev_file.name,
-            )
-        elif len(_archive_files) == 1:
-            log.info(
-                "Only 1 archive file found — first run with history. "
-                "All tickers will show [NEW] until a second archive exists."
-            )
-        else:
-            log.warning(
-                "No archive files at %s — all tickers will show [NEW]. "
-                "edgar_3x archive-snapshot job must commit at least one file.",
-                _archive_root,
-            )
-    except Exception as _arc_exc:
-        log.warning("Archive delta load failed: %s", _arc_exc)
-
-    # Load Revolut positions for hold/add context
-    _held_tickers: set[str] = set()
-    _held_avg_cost: Dict[str, float] = {}
-    try:
-        _rev_path = Path("data/revolut_portfolio.json")
-        if _rev_path.exists():
-            _rev_data = json.loads(_rev_path.read_text(encoding="utf-8"))
-            for _pos in _rev_data.get("positions", []):
-                _t = _pos.get("ticker", "")
-                if _t:
-                    _held_tickers.add(_t)
-                    _held_avg_cost[_t] = float(_pos.get("avg_cost", 0.0))
-    except Exception:
-        pass  # portfolio file not available
-
-    def _ticker_fields(
-        entries: List[Dict],
-        max_n: int,
-        budget: int,
-        all_scores: Optional[List[float]] = None,
-        mid_cap: bool = False,
-    ) -> List[Dict]:
-        result = []
-        used = 0
-        added = 0
-        for i, e in enumerate(entries[:max_n], 1):
-            ticker_ = e.get("ticker", "")
-            score_delta = _yesterday_scores.get(ticker_)
-            buyback_cv = buyback_conv_of.get(ticker_.upper())
-            field = _ticker_detail_field(
-                i,
-                e,
-                anomaly_flags=anomaly_map.get(ticker_),
-                score_delta=score_delta,
-                buyback_conv=buyback_cv,
-                mid_cap=mid_cap,
-                all_scores=all_scores,
-                kill_switch=kill_switch,
-                held_context=_held_avg_cost,
-            )
-            flen = len(field["value"])
-            if used + flen > budget and added > 0:
-                result.append({
-                    "name": "…",
-                    "value": f"... [{added}/{min(max_n, len(entries))}] shown — full report in logs",
-                    "inline": False,
-                })
-                break
-            result.append(field)
-            used += flen
-            added += 1
-        return result
-
-    # ── Fields ────────────────────────────────────────────────────────────────
-    fields: List[Dict[str, Any]] = []
-    _DIV = {"name": "---", "value": "** **", "inline": False}
-
-    # Helper: compact factor chips for a ticker entry
-    def _compact_factors(e: Dict, market: str = "US", max_f: int = 5) -> str:
-        facts = e.get("factors") or {}
-        mkt_up = (market or "US").upper()
-        is_intl = mkt_up in ("EUROPE", "ASIA", "EU")
-        if is_intl:
-            keys = [
-                ("insider_conviction", "IC"), ("insider_breadth", "IB"),
-                ("news_buzz", "NB"), ("momentum_long", "MO"),
-                ("fcf_yield", "FCF"), ("amihud_shock", "AMH"), ("pb_value_up", "PB"),
-            ]
-        else:
-            keys = [
-                ("insider_conviction", "IC"), ("insider_breadth", "IB"),
-                ("congress", "CG"), ("news_buzz", "NB"), ("momentum_long", "MO"),
-                ("analyst_consensus", "AC"),
-            ]
-        parts = []
-        for key, lbl in keys:
-            val = facts.get(key)
-            if val is not None and float(val) > 0:
-                parts.append(f"{lbl}:{float(val):.2f}")
-        return "  ·  ".join(parts[:max_f]) if parts else "—"
-
-    # ── Section 2: Conviction Plays ───────────────────────────────────────────
-    plays_picks = []
-    for i, e in enumerate(us_entries[:2], 1):
-        plays_picks.append(("🎯", "USA", i, e))
-    for i, e in enumerate(eu_entries[:1], 1):
-        plays_picks.append(("👀", "EU", i, e))
-    for i, e in enumerate(asia_entries[:1], 1):
-        plays_picks.append(("👀", "Asia", i, e))
-
-    if plays_picks:
-        play_lines = []
-        for icon, region, rank, e in plays_picks:
-            t_ = e.get("ticker", "?")
-            s_ = float(e.get("final_score", 0) or 0)
-            p_ = int(e.get("percentile", 0) or 0)
-            play_lines.append(
-                f"{icon} **WATCH: {t_}**  —  {region} #{rank}  |  "
-                f"`Score: {s_:.4f}`  |  `p{p_}`"
-            )
-            snap_parts: List[str] = []
-            mom = e.get("momentum_spy_relative")
-            if mom is not None:
-                mom_f = float(mom)
-                mom_pct = mom_f * 100 if abs(mom_f) < 5 else mom_f
-                snap_parts.append(f"{mom_pct:+.1f}% vs SPY (12m)")
-            ins_ = float(e.get("insider_usd", 0) or 0)
-            if ins_ > 0:
-                snap_parts.append(f"Insider {_fmt_usd(ins_)}")
-                fc = int(e.get("form4_count", 0) or 0)
-                if fc > 0:
-                    snap_parts.append(f"{fc} filings")
-            if not snap_parts:
-                eps_pct = e.get("earnings_surprise_pct")
-                if eps_pct is not None and float(eps_pct) > 0:
-                    snap_parts.append(f"EPS +{float(eps_pct) * 100:.1f}%")
-                else:
-                    snap_parts.append("No primary catalyst")
-            play_lines.append(f"└  *Snapshot:* {'  •  '.join(snap_parts)}")
-            facts_ = e.get("factors") or {}
-            driver_keys = [
-                ("insider_conviction", "IC"), ("insider_breadth", "IB"),
-                ("news_buzz", "NB"), ("momentum_long", "MO"),
-                ("analyst_consensus", "AC"), ("news_sentiment", "NS"),
-                ("congress", "CG"),
-            ]
-            drv_parts = []
-            for dk, dl in driver_keys:
-                dv = facts_.get(dk)
-                if dv is not None and float(dv) > 0:
-                    drv_parts.append(f"{dl}:`{float(dv):.2f}`")
-            if drv_parts:
-                play_lines.append(f"└  *Drivers:*  {'  ·  '.join(drv_parts[:3])}")
-            play_lines.append("")
-        fields.append({
-            "name":  "### ⚡ 2. TODAY'S HIGHEST-CONVICTION PLAYS",
-            "value": _truncate("\n".join(play_lines).rstrip(), 1024),
-            "inline": False,
-        })
-        fields.append(_DIV)
-
-    # ── Section 3: Global Factor Radar ────────────────────────────────────────
-    radar_sections = [
-        ("🇺🇸 **UNITED STATES**", us_entries,   "US"),
-        ("🇪🇺 **EUROPE**",        eu_entries,   "EUROPE"),
-        ("🇯🇵 **ASIA**",          asia_entries, "ASIA"),
-    ]
-    radar_lines: List[str] = []
-    for r_hdr, r_ents, r_mkt in radar_sections:
-        if not r_ents:
-            continue
-        radar_lines.append(r_hdr)
-        for i, e in enumerate(r_ents[:3], 1):
-            t_ = e.get("ticker", "?")
-            s_ = float(e.get("final_score", 0) or 0)
-            p_ = int(e.get("percentile", 0) or 0)
-            radar_lines.append(f"🔹 **#{i} {t_}** `{s_:.4f}` p{p_}")
-            fl = _compact_factors(e, r_mkt, max_f=5)
-            if fl and fl != "—":
-                radar_lines.append(f"└  {fl}")
-        radar_lines.append("")
-    if radar_lines:
-        fields.append({
-            "name":  "### 🗺️ 3. GLOBAL FACTOR RADAR",
-            "value": _truncate("\n".join(radar_lines).rstrip(), 1024),
-            "inline": False,
-        })
-
-    # ── Section 4: Mid/Small-Cap Watch ────────────────────────────────────────
-    mid_small_lines: List[str] = []
-    if eu_mid_small:
-        e = eu_mid_small[0]
-        t_ = e.get("ticker", "?")
-        s_ = float(e.get("final_score", 0) or 0)
-        p_ = int(e.get("percentile", 0) or 0)
-        mid_small_lines.append(f"🇪🇺 **EU Mid-Cap: {t_}** `{s_:.4f}` p{p_}")
-        fl = _compact_factors(e, "EUROPE")
-        if fl and fl != "—":
-            mid_small_lines.append(f"└  {fl}")
-        mid_small_lines.append("")
-    if asia_mid_small:
-        e = asia_mid_small[0]
-        t_ = e.get("ticker", "?")
-        s_ = float(e.get("final_score", 0) or 0)
-        p_ = int(e.get("percentile", 0) or 0)
-        mid_small_lines.append(f"🇯🇵 **Asia Mid-Cap: {t_}** `{s_:.4f}` p{p_}")
-        fl = _compact_factors(e, "ASIA")
-        if fl and fl != "—":
-            mid_small_lines.append(f"└  {fl}")
-    if mid_small_lines:
-        fields.append(_DIV)
-        fields.append({
-            "name":  "### 🔬 4. MID/SMALL-CAP WATCH",
-            "value": _truncate("\n".join(mid_small_lines).rstrip(), 1024),
-            "inline": False,
-        })
-
-    # ── Section 5: MVO Portfolio Allocation ───────────────────────────────────
-    mvo_pools = status.get("mvo_pools", {})
-    if mvo_pools:
-        mvo_lines = [
-            (
-                f"*Mathematical weighting · VIX {float(vix_val):.1f} environment · "
-                f"overlay {overlay_str}*"
-            ) if vix_val is not None else "*Mathematical weighting*",
-            "",
+    def _population(self) -> List[float]:
+        """All scores in the artifact — denominator for percentile ranks."""
+        keys = ("top_buys_usa", "top_buys_europe", "top_buys_asia",
+                "usa_overflow", "eu_overflow", "asia_overflow", "watchlist")
+        return [
+            _safe_float(e.get("final_score"))
+            for k in keys for e in (self.data.get(k) or [])
         ]
-        pool_order = ["large_cap_anchors", "mid_cap", "small_cap"]
-        pool_cfg = {
-            "large_cap_anchors": ("🔵", "LARGE-CAPS",  ">$10B"),
-            "mid_cap":           ("🟡", "MID-CAPS",    "$2B–$10B"),
-            "small_cap":         ("🔴", "SMALL-CAPS",  "$300M–$2B"),
+
+    # ── Section renderers ─────────────────────────────────────────────────────
+
+    def _ansi_bar(self) -> str:
+        """Leading ```ansi action bar. ANSI is confined to this block; the
+        reset lands before the closing fence and the block terminates with a
+        blank line so mobile clients exit terminal context cleanly."""
+        regime = self.regime
+        color, glyph, action, _ = _REGIME_STYLE[regime]
+        vix = float(self.data["vix"])
+        age = self._age_hours
+        age_str = f"{age:.1f}h" if age is not None else "—"
+        tickers = self.data.get("ticker_count", "?")
+        line1 = (f"{color}{glyph} {regime.value}{_ANSI_RESET}   "
+                 f"VIX {vix:.1f}   OVERLAY ×{self.multiplier:.2f}   {action}")
+        line2 = f"{_ANSI_DIM}DATA {age_str} · TICKERS {tickers}{_ANSI_RESET}"
+        return f"```ansi\n{line1}\n{line2}\n```\n\n"
+
+    def _macro_description(self) -> str:
+        regime = self.regime
+        vix = float(self.data["vix"])
+        lines = [
+            "### 📊 1 · MACRO RISK & REGIME",
+            (f"• VIX `{vix:.1f}` — **{regime.value}** · "
+             f"{strategy_label(regime)}"),
+            (f"• Risk multiplier `×{self.multiplier:.2f}` · "
+             "Action gates: TACTICAL ≥0.60 · HIGH BUY ≥0.80"),
+        ]
+        snapshot = _spy_qqq_snapshot()
+        if snapshot:
+            lines.append(snapshot)
+        if self._is_stale:
+            lines.append(
+                f"⚠️ **DATA STALE — {self._age_hours:.0f}h old** · "
+                "check edgar_3x on GitHub Actions")
+        if self.is_panic:
+            lines.append(
+                "🔴 **KILL-SWITCH ACTIVE — BUY SIGNALS SUPPRESSED · "
+                "SELL/EXIT SIGNALS REMAIN LIVE**")
+        return self._ansi_bar() + "\n".join(lines)
+
+    def _delta_tag(self, ticker: str, score: float) -> str:
+        if not self.yesterday_scores:
+            return ""
+        prev = self.yesterday_scores.get(ticker)
+        if prev is None:
+            return " [NEW]"
+        diff = score - prev
+        if abs(diff) < 0.005:
+            return ""
+        if (self.yesterday_age_h is not None
+                and self.yesterday_age_h > _DELTA_STALE_HOURS):
+            # Weekend/holiday/outage gap: an arrow over a stale interval is a
+            # false momentum signal — tag the interval explicitly instead.
+            return f" Δ{diff:+.3f} (>48h)"
+        arrow = "▲" if diff > 0 else "▼"
+        return f" {arrow}{diff:+.3f}"
+
+    def _desk_lines(self, entry: Dict[str, Any], rank: int,
+                    population: List[float]) -> List[str]:
+        ticker = entry.get("ticker", "?")
+        score = _safe_float(entry.get("final_score"))
+        badge = entry.get("badge") or _badge_from_score(score)
+        pct = _compute_percentile(score, population)
+        medal = _MEDAL.get(rank, f"#{rank}")
+        name = ""
+        if ticker in _TICKER_NAMES:
+            name = f" ({_TICKER_NAMES[ticker][:14]})"
+
+        cov_warn = ""
+        if (entry.get("market") or "").upper() in ("EUROPE", "ASIA", "EU"):
+            cov = _safe_float(entry.get("weight_coverage"), 1.0)
+            if cov < 0.70:
+                cov_warn = f" ⚠COV:{cov:.0%}"
+
+        head = (f"{medal} **{ticker}**{name} — {badge} · `{score:.4f}` · "
+                f"p{pct}{self._delta_tag(ticker, score)}")
+        detail = f"└ {_compute_catalyst(entry)}{cov_warn}"
+        return [head, detail]
+
+    def _desk_field(self, key: str, flag: str, label: str,
+                    population: List[float],
+                    max_entries: int) -> Optional[Dict[str, Any]]:
+        entries = self._region_entries(key)
+        if not entries:
+            return None
+        lines: List[str] = []
+        for rank, entry in enumerate(entries[:max_entries], 1):
+            lines.extend(self._desk_lines(entry, rank, population))
+        return {
+            "name":   f"{flag} 2 · ALPHA DESK — {label}",
+            "value":  _truncate("\n".join(lines)),
+            "inline": False,
         }
-        for pk in pool_order:
-            pool = mvo_pools.get(pk)
-            if not pool:
-                continue
-            positions = pool.get("positions", [])
+
+    @staticmethod
+    def _matrix_cell(factors: Dict[str, Any], factor_key: str) -> str:
+        raw = factors.get(factor_key)
+        val = _safe_float(raw) if raw is not None else 0.0
+        if val <= 0:
+            return "-".rjust(_MATRIX_CELL_W)
+        return f"{val:.2f}".rjust(_MATRIX_CELL_W)
+
+    def _matrix_rows(self, max_rows: int) -> List[str]:
+        """Aligned ASCII rows (no fences — caller wraps exactly once).
+
+        US and EU/ASIA sub-tables both carry 9 fixed-width columns; the
+        ticker column is left-justified to one shared width so every line in
+        the block has identical length (edge case 6)."""
+        us = self._region_entries("top_buys_usa")[:max_rows]
+        intl = (self._region_entries("top_buys_europe")[:max_rows]
+                + self._region_entries("top_buys_asia")[:max_rows])
+        if self.is_panic:
+            wl = self._region_entries("watchlist")
+            us = [e for e in wl if (e.get("market") or "USA").upper()
+                  in ("USA", "US")][:max_rows]
+            intl = [e for e in wl if (e.get("market") or "").upper()
+                    in ("EUROPE", "ASIA", "EU")][:max_rows]
+        if not us and not intl:
+            return []
+
+        names = ["USA", "EU/ASIA"] + [e.get("ticker", "?") for e in us + intl]
+        width = min(_MATRIX_TICKER_W_MAX, max(len(n) for n in names))
+
+        def _row(name: str, cells: List[str]) -> str:
+            return name[:width].ljust(width) + "".join(cells)
+
+        rows: List[str] = []
+        if us:
+            rows.append(_row("USA", [lbl.rjust(_MATRIX_CELL_W)
+                                     for _, lbl in _MATRIX_US_COLS]))
+            for e in us:
+                rows.append(_row(e.get("ticker", "?"), [
+                    self._matrix_cell(e.get("factors") or {}, k)
+                    for k, _ in _MATRIX_US_COLS]))
+        if intl:
+            rows.append(_row("EU/ASIA", [lbl.rjust(_MATRIX_CELL_W)
+                                         for _, lbl in _MATRIX_INTL_COLS]))
+            for e in intl:
+                rows.append(_row(e.get("ticker", "?"), [
+                    self._matrix_cell(e.get("factors") or {}, k)
+                    for k, _ in _MATRIX_INTL_COLS]))
+        return rows
+
+    def _matrix_field(self, max_rows: int) -> Optional[Dict[str, Any]]:
+        rows = self._matrix_rows(max_rows)
+        if not rows:
+            return None
+        # Structural budget fit: drop whole rows BEFORE fencing — never slice
+        # a rendered code block (edge case 5).
+        while rows and len("\n".join(rows)) + 8 > _LIMIT_FIELD:
+            rows.pop()
+        if not rows:
+            return None
+        return {
+            "name":   "🧬 3 · FACTOR MATRIX",
+            "value":  "```\n" + "\n".join(rows) + "\n```",
+            "inline": False,
+        }
+
+    def _portfolio_field(self) -> Optional[Dict[str, Any]]:
+        pools = self.data.get("mvo_pools") or {}
+        pool_cfg = [
+            ("large_cap_anchors", "🔵", "LARGE-CAP ANCHORS"),
+            ("mid_cap",           "🟡", "MID-CAPS"),
+            ("small_cap",         "🔴", "SMALL-CAPS"),
+        ]
+        lines: List[str] = []
+        for key, dot, label in pool_cfg:
+            pool = pools.get(key) or {}
+            positions = pool.get("positions") or []
             if not positions:
                 continue
-            emoji_, label_, cap_range = pool_cfg.get(pk, ("⚫", pk, ""))
             method = pool.get("method", "equal-weight")
-            n_pos  = len(positions)
-            avg_sc = sum(p.get("final_score", 0) for p in positions) / max(1, n_pos)
-            mvo_lines.append(
-                f"{emoji_} **{label_}** *({cap_range} | {method} | "
-                f"{n_pos} pos | avg score: {avg_sc:.3f})*"
-            )
+            lines.append(f"{dot} **{label}** · {method} · n={len(positions)}")
             for p in positions[:6]:
-                if (p.get("allocation") or 0) < 0.001:
+                alloc = _safe_float(p.get("allocation")) * 100
+                if alloc < 0.1:
                     continue
-                alloc_pct = (p.get("allocation") or 0) * 100
-                sec_ = (p.get("sector") or "").strip() or "—"
-                mvo_lines.append(f"• **{p['ticker']}:** `{alloc_pct:.1f}%`  —  {sec_}")
-            mvo_lines.append("")
-        if len(mvo_lines) > 2:
-            fields.append(_DIV)
-            fields.append({
-                "name":   "### ⚖️ 5. MVO PORTFOLIO ALLOCATION",
-                "value":  _truncate("\n".join(mvo_lines).rstrip(), 1024),
-                "inline": False,
-            })
+                floor = _safe_float((p.get("exit_anchors") or {}).get("batch_floor"))
+                floor_str = f" · floor ${floor:.0f}" if floor > 0 else ""
+                lines.append(f"`{p.get('ticker', '?')}` {alloc:.1f}%{floor_str}")
 
-    # ── Sector Exposure ───────────────────────────────────────────────────────
-    all_entries = us_entries + eu_entries + asia_entries + mid_caps[:3]
-    structured = _sector_heatmap_structured(all_entries)
-    if structured:
-        sorted_sectors = sorted(
-            structured.items(),
-            key=lambda kv: (-len(kv[1]), -(kv[1][0][1] if kv[1] else 0)),
-        )
-        sector_lines = []
-        for lbl, pairs in sorted_sectors:
-            total_in_sector = sum(
-                1 for e in all_entries
-                if _SECTOR_SHORT.get((e.get("sector") or "").strip(), _SECTOR_MISC) == lbl
-            )
-            chips = "  ·  ".join(f"`{t}` {s:.2f}" for t, s in pairs)
-            sector_lines.append(f"{lbl} ({total_in_sector})  {chips}")
-        fields.append({
-            "name":   "📊 Sector Exposure",
-            "value":  _truncate("\n".join(sector_lines), 1024),
-            "inline": False,
-        })
-
-    # ── Pipeline health ────────────────────────────────────────────────────────
-    if is_status_schema:
-        fields.append(_health_field(status))
-
-    # ── Factor Legend ─────────────────────────────────────────────────────────
-    fields.append(_DIV)
-    fields.append({
-        "name":  "📖 Factor Legend",
-        "value": (
-            "*IC=Insider Conviction · IB=Insider Breadth · NB=News Buzz · "
-            "MO=Momentum · CG=Congress · AC=Analyst Consensus · AR=Analyst Revision · "
-            "VA=Volume Attention · FCF=Free Cash Flow Yield · AMH=Amihud Shock · "
-            "PB=Price-to-Book · PT=Price Target · QF=Piotroski Quality*"
-        ),
-        "inline": False,
-    })
-
-    # ── Satellite (cyclicals + cannibals) — appended last ─────────────────────
-    try:
-        if satellite:
-            month_label = satellite.get("month", "")
-            cyclicals = satellite.get("cyclicals") or []
-            cannibals = satellite.get("cannibals") or []
-            if cyclicals and len(fields) < 24:
-                lines = [
-                    f"**{c['ticker']}** {_score_bar(c['win_rate'], 6)} "
-                    f"`{c['win_rate']:.0%}` win  |  `{c['median_return']:+.1%}` med  |  `{c.get('years', '?')}y`"
-                    for c in cyclicals
-                ]
-                fields.append({
-                    "name":   f"🌀  Seasonal Cyclicals — {month_label}",
-                    "value":  _truncate("\n".join(lines)),
-                    "inline": False,
-                })
-            if cannibals and len(fields) < 24:
-                lines = [
-                    f"**{c['ticker']}**  `{c.get('buyback_yield', 0):.1%}` buyback"
-                    f"  |  P/E `{c.get('pe', 0):.1f}`  |  `{c.get('price_vs_52w_low', 0):.2f}x` vs 52w low"
-                    for c in cannibals
-                ]
-                fields.append({
-                    "name":   "🐷  Share Cannibals",
-                    "value":  _truncate("\n".join(lines)),
-                    "inline": False,
-                })
-    except Exception as exc:
-        log.warning("satellite embed fields skipped: %s", exc)
-
-    # ── Discord 25-field hard limit guard ─────────────────────────────────────
-    if len(fields) > 25:
-        log.warning(
-            "Discord 25-field limit exceeded (%d fields) — truncating to 25", len(fields))
-        fields = fields[:25]
-
-    # ── Footer ────────────────────────────────────────────────────────────────
-    footer_text = f"Run: {run_id}  |  Pipeline: EDGAR-first"
-
-    embed = {
-        "title":       f"⚡ Alpha Pipeline  [{date_str}]",
-        "description": description,
-        "color":       color,
-        "fields":      fields,
-        "footer":      {"text": footer_text},
-        "timestamp":   datetime.now(timezone.utc).isoformat(),
-    }
-    return {"embeds": [embed]}
-
-
-def build_alert_payload(reason: str) -> Dict[str, Any]:
-    return {
-        "embeds": [{
-            "title":       "⚠️ Alpha Pipeline — DATA UNAVAILABLE",
-            "description": (
-                f"**Reason:** {reason}\n\n"
-                "The EDGAR pipeline may not have completed its last run.\n"
-                "Check the `edgar_3x` workflow on GitHub Actions."
-            ),
-            "color":       _COLOR_RED,
-            "timestamp":   datetime.now(timezone.utc).isoformat(),
-            "footer":      {"text": "regime_trader · EDGAR-first pipeline"},
-        }]
-    }
-
-
-# ── Self-contained test suite ──────────────────────────────────────────────────
-
-def run_tests() -> int:
-    import traceback
-    failures: List[str] = []
-
-    def _check(name: str, cond: bool, detail: str = "") -> None:
-        if not cond:
-            failures.append(f"FAIL [{name}]{': ' + detail if detail else ''}")
-
-    def _base_status(**overrides) -> Dict[str, Any]:
-        st: Dict[str, Any] = {
-            "generated_at":  datetime.now(timezone.utc).isoformat(),
-            "run_id":        "test",
-            "vix":           17.0,
-            "kill_switch":   False,
-            "weights":       {k: v for k, v in [
-                ("insider_conviction", 0.30), ("insider_breadth", 0.15),
-                ("congress", 0.22), ("news_sentiment", 0.10),
-                ("news_buzz", 0.05), ("momentum_long",
-                                      0.15), ("volume_attention", 0.03),
-            ]},
-            "top_by_market": {"US": [], "EUROPE": [], "ASIA": []},
-            "results":       [],
-            "_edgar_meta":   {"ticker_count": 0, "error_count": 0, "quarantine_count": 0},
-            "factor_orthogonality": {
-                "max_abs_correlation": 0.35,
-                "max_pair": ["momentum_long_score", "news_buzz_score"],
-                "low_density_pairs": [],
-                "factor_densities":  {"insider_conviction_score": 0.11, "congress_score": 0.0},
-                "errors": [], "warnings": [],
-            },
-        }
-        st.update(overrides)
-        return st
-
-    def _entry(ticker: str, sector: str = "Information Technology",
-               score: float = 0.45, **kw) -> Dict[str, Any]:
-        factors = {
-            "insider_conviction": 0.50, "insider_breadth": 0.70,
-            "congress": 0.0, "news_sentiment": 0.40,
-            "news_buzz": 0.50, "momentum_long": 0.30, "volume_attention": 0.0,
-        }
-        factors.update(kw.pop("factors", {}))
-        return {
-            "ticker": ticker, "final_score": score, "badge": _badge_from_score(score),
-            "sector": sector, "market_cap": 1e11, "cap_tier": "large",
-            "ceo_buy": False, "ceo_conviction_tier": "none",
-            "congress_boost": 0.0, "factors": factors, "market": "USA",
-            **kw,
-        }
-
-    # ── Test 1: factor matrix renders expected labels ────────────────────────
-    try:
-        e = _entry("AAPL", score=0.45)
-        field = _ticker_detail_field(1, e, all_scores=[0.45])
-        val = field["value"]
-        expected_labels = ["IC", "IB", "CG",
-                           "NS", "NB", "MO", "VA", "AR", "PT"]
-        for lbl in expected_labels:
-            _check(f"factor_matrix_{lbl}", lbl in val,
-                   f"lbl={lbl!r} not in val={val!r}")
-    except Exception:
-        failures.append(
-            f"FAIL [factor_matrix_labels]: {traceback.format_exc()}")
-
-    # ── Test 2: zeros render as — ─────────────────────────────────────────────
-    try:
-        e = _entry("AAPL", score=0.45)
-        e["factors"]["congress"] = 0.0
-        e["factors"]["volume_attention"] = 0.0
-        field = _ticker_detail_field(1, e, all_scores=[0.45])
-        val = field["value"]
-        # congress and volume_attention should show — not 0.00
-        lines = val.split("\n")
-        matrix_line = lines[0] if len(lines) > 0 else ""
-        _check("zero_congress_is_dash",
-               "CG:—" in matrix_line, f"matrix={matrix_line!r}")
-        _check("zero_volume_attention_is_dash",
-               "VA:—" in matrix_line, f"matrix={matrix_line!r}")
-        # non-zero factors must NOT be dash
-        _check("nonzero_ic_not_dash", "IC:—" not in matrix_line,
-               f"matrix={matrix_line!r}")
-    except Exception:
-        failures.append(f"FAIL [zeros_as_dash]: {traceback.format_exc()}")
-
-    # ── Test 3: action section picks top 3 ───────────────────────────────────
-    try:
-        entries = [
-            _entry("CHTR", score=0.49),
-            _entry("NKE",  score=0.42),
-            _entry("PSX",  score=0.40),
-            _entry("ETN",  score=0.38),
+        shown_entries = [
+            e for key, _, _ in _REGION_KEYS
+            for e in self._region_entries(key)[:self.MAX_DESK_ENTRIES]
         ]
-        all_sc = [0.10, 0.20, 0.30, 0.35, 0.38, 0.40, 0.42, 0.49]
-        action = _action_section(entries, all_sc)
-        _check("action_not_none",      action is not None)
-        _check("action_has_chtr",
-               action is not None and "CHTR" in action["value"])
-        _check("action_has_nke",
-               action is not None and "NKE" in action["value"])
-        _check("action_has_psx",
-               action is not None and "PSX" in action["value"])
-        _check("action_not_etn",
-               action is not None and "ETN" not in action["value"])
-    except Exception:
-        failures.append(f"FAIL [action_section]: {traceback.format_exc()}")
+        heatmap = _sector_heatmap_structured(shown_entries)
+        if heatmap:
+            sector_bits = [f"{lbl} ({len(pairs)})" for lbl, pairs
+                           in sorted(heatmap.items(), key=lambda kv: -len(kv[1]))]
+            lines.append("🗺 Sectors: " + " · ".join(sector_bits))
 
-    # ── Test 4: health field includes orthogonality ───────────────────────────
-    try:
-        st = _base_status()
-        health = _health_field(st)
-        val = health["value"]
-        _check("health_has_rho",    "rho=" in val,          f"val={val!r}")
-        _check("health_has_latency", "Latency" in val,       f"val={val!r}")
-        _check("health_has_ceo",     "CEO tiers" in val,     f"val={val!r}")
-        _check("health_has_dead",    "Dead factors" in val,  f"val={val!r}")
-    except Exception:
-        failures.append(f"FAIL [health_field]: {traceback.format_exc()}")
-
-    # ── Test 5: build_payload with status schema — no crash ───────────────────
-    try:
-        e = _entry("CHTR", score=0.49)
-        st = _base_status()
-        st["top_by_market"] = {"US": [e]}
-        st["results"] = [e]
-        payload = build_payload(st)
-        embed = payload["embeds"][0]
-        _check("payload_has_title",   "Alpha Pipeline" in embed.get("title", ""))
-        _check("payload_has_fields",  len(embed.get("fields", [])) > 0)
-        _check("payload_has_health",  any(
-            "PIPELINE HEALTH" in f["name"] for f in embed["fields"]))
-    except Exception:
-        failures.append(
-            f"FAIL [build_payload_status]: {traceback.format_exc()}")
-
-    # ── Test 6: build_payload with legacy top_lists schema — no crash ─────────
-    try:
-        tl = {
-            "generated_at":  datetime.now(timezone.utc).isoformat(),
-            "source_run_id": "test-legacy",
-            "vix":           17.0,
-            "kill_switch":   False,
-            "weights":       {},
-            "top_buys":      [_entry("AAPL", score=0.45)],
-            "mid_caps":      [],
+        if not lines:
+            return None
+        return {
+            "name":   "⚖️ 4 · PORTFOLIO CONSTRUCTION",
+            "value":  _truncate("\n".join(lines)),
+            "inline": False,
         }
-        payload = build_payload(tl)
-        embed = payload["embeds"][0]
-        _check("legacy_payload_no_crash", True)
-        # New format: "USA" appears in conviction plays field VALUE, not name
-        _check("legacy_has_usa_section",
-               any("USA" in f["name"] or "USA" in f.get("value", "") or "CONVICTION" in f["name"]
-                   for f in embed["fields"]))
-    except Exception:
-        failures.append(
-            f"FAIL [build_payload_legacy]: {traceback.format_exc()}")
 
-    # ── Test 7: empty top_buys → no ticker fields ─────────────────────────────
-    try:
-        st = _base_status()
-        payload = build_payload(st)
-        embed = payload["embeds"][0]
-        field_names = [f["name"] for f in embed["fields"]]
-        _check("empty_no_ticker_fields", not any(n.startswith("#")
-               for n in field_names))
-    except Exception:
-        failures.append(
-            f"FAIL [empty_no_ticker_fields]: {traceback.format_exc()}")
+    def _anchors_field(self, population: List[float]) -> Dict[str, Any]:
+        watchlist = self._region_entries("watchlist")
+        if not watchlist:
+            return {
+                "name":  "🛡 STRUCTURAL ANCHORS",
+                "value": ("0 assets met defensive survival thresholds — "
+                          "cash allocation 100%"),
+                "inline": False,
+            }
+        lines: List[str] = [
+            f"×{self.multiplier:.2f} dampened · force-badged WATCHLIST",
+        ]
+        for rank, entry in enumerate(watchlist[:self.MAX_DESK_ENTRIES * 2], 1):
+            lines.extend(self._desk_lines(entry, rank, population))
+        return {
+            "name":   "🛡 STRUCTURAL ANCHORS (WATCHLIST)",
+            "value":  _truncate("\n".join(lines)),
+            "inline": False,
+        }
 
-    # ── Test 8: missing sector → Misc in heatmap ──────────────────────────────
-    try:
-        entries = [_entry("AAPL", sector=""), _entry("MSFT", sector="")]
-        result = _sector_heatmap_structured(entries)
-        _check("misc_fallback", _SECTOR_MISC in result, f"result={result!r}")
-    except Exception:
-        failures.append(f"FAIL [misc_fallback]: {traceback.format_exc()}")
+    @staticmethod
+    def _legend_field() -> Dict[str, Any]:
+        return {
+            "name": "📖 LEGEND",
+            "value": (
+                "*IC Insider Conviction · IB Insider Breadth · "
+                "CG Congress (US-only) · NS News Sentiment · NB News Buzz · "
+                "MO Momentum 12-1m · VA Volume Attention · "
+                "AC Analyst Consensus · QF Piotroski Quality · "
+                "FCF Free Cash Flow Yield · AMH Amihud Liquidity · "
+                "PB Price-to-Book · ROI ROIC Quality (intl only)*"
+            ),
+            "inline": False,
+        }
 
-    # ── Test 9: VIX regime labels ─────────────────────────────────────────────
-    try:
-        _check("vix_low",    "VIX" in get_market_regime(12.0))
-        _check("vix_mid",    "VIX" in get_market_regime(18.0))
-        _check("vix_high",   "VIX" in get_market_regime(28.0))
-    except Exception:
-        failures.append(f"FAIL [vix_regime]: {traceback.format_exc()}")
+    def _footer(self) -> Dict[str, str]:
+        run_id = (self.data.get("run_id")
+                  or self.data.get("source_run_id") or "local")
+        gen = (self.data.get("generated_at") or "")[:16]
+        return {"text": f"regime_trader · cook→audit→send · gen {gen} · run {run_id}"}
 
-    # ── Test 10: EU / Asia sections only appear when non-empty ────────────────
-    try:
-        eu = _entry("SAP.DE", sector="Information Technology", score=0.42)
-        eu["market"] = "EUROPE"
-        st = _base_status()
-        st["top_by_market"] = {"US": [], "EUROPE": [eu], "ASIA": []}
-        st["results"] = [eu]
-        payload = build_payload(st)
-        names = [f["name"] for f in payload["embeds"][0]["fields"]]
-        # New format: EU entries appear in the GLOBAL FACTOR RADAR value, not in field names
-        all_values = " ".join(f.get("value", "") for f in payload["embeds"][0]["fields"])
-        _check("europe_section_present",
-               "EU" in all_values or "EUROPE" in all_values, f"names={names}")
-        _check("usa_section_absent", not any(
-            "USA" in n for n in names), f"names={names}")
-        _check("asia_section_absent", not any(
-            "Asia" in n for n in names),  f"names={names}")
-    except Exception:
-        failures.append(f"FAIL [market_sections]: {traceback.format_exc()}")
+    def _title(self) -> str:
+        try:
+            ts = datetime.fromisoformat(
+                self.data.get("generated_at", "").replace("Z", "+00:00"))
+            stamp = ts.strftime("%b %d %H:%M UTC")
+        except ValueError:
+            stamp = self.data.get("generated_at", "")[:10] or "—"
+        return f"⚡ REGIME TRADER — DAILY BRIEF · {stamp}"
 
-    # ── Test 11: percentile badge on LINE 1 ───────────────────────────────────
-    try:
-        e = _entry("CHTR", score=0.49)
-        field = _ticker_detail_field(
-            1, e, all_scores=[0.10, 0.20, 0.30, 0.40, 0.49])
-        line1 = field["name"]
-        _check("line1_has_percentile", "p" in line1 and any(c.isdigit()
-               for c in line1), f"line1={line1!r}")
-        _check("line1_has_score",      "0.4900" in line1, f"line1={line1!r}")
-        _check("line1_has_badge",
-               "WATCHLIST" in line1 or "BUY" in line1, f"line1={line1!r}")
-    except Exception:
-        failures.append(f"FAIL [line1_format]: {traceback.format_exc()}")
+    # ── Assembly ──────────────────────────────────────────────────────────────
 
-    # ── Test 12: catalyst line present ───────────────────────────────────────
-    try:
-        e = _entry("CHTR", score=0.49)
-        field = _ticker_detail_field(1, e, all_scores=[0.49])
-        lines = field["value"].split("\n")
-        _check("has_two_lines", len(lines) >= 2, f"lines={lines}")
-        _check(
-            "catalyst_line_present",
-            any(kw in field["value"] for kw in ["Insider",
-                "EPS", "congress", "vs SPY", "no primary"]),
-            f"Catalyst line missing expected pattern: value={field['value']!r}",
-        )
+    @staticmethod
+    def _embed_size(embed: Dict[str, Any]) -> int:
+        return (len(embed.get("title", ""))
+                + len(embed.get("description", ""))
+                + sum(len(f["name"]) + len(f["value"])
+                      for f in embed.get("fields", []))
+                + len((embed.get("footer") or {}).get("text", "")))
 
-        # Zero-signal entry → _NO_CATALYST
-        e_zero = _entry("ZERO", score=0.10)
-        e_zero["insider_usd"] = 0.0
-        e_zero["earnings_surprise_pct"] = None
-        cat_zero = _compute_catalyst(e_zero)
-        _check("zero_signal_fallback", cat_zero.startswith(_NO_CATALYST),
-               f"cat_zero={cat_zero!r}")
-    except Exception:
-        failures.append(f"FAIL [catalyst_line]: {traceback.format_exc()}")
+    def _render(self, matrix_rows: int, desk_n: int) -> Dict[str, Any]:
+        population = self._population()
+        color = _COLOR_RED if (self.is_panic or self._is_stale) \
+            else _REGIME_STYLE[self.regime][3]
 
-    # ── Test 13: EPS surprise appended to catalyst when within 90-day window ──
-    try:
-        e = _entry("NVDA", score=0.72)
-        e["earnings_surprise_pct"] = 0.153   # +15.3% beat
-        e["earnings_surprise_days"] = 8
-        # +20% vs SPY — triggers second signal → · separator
-        e["momentum_spy_relative"] = 0.20
-        cat = _compute_catalyst(e)
-        _check("eps_in_catalyst_beat",  "EPS +15.3%" in cat, f"cat={cat!r}")
-        _check("eps_days_in_catalyst",  "8d ago" in cat, f"cat={cat!r}")
-        _check("eps_separator",         "·" in cat, f"cat={cat!r}")
+        fields: List[Dict[str, Any]] = []
+        if self.is_panic:
+            fields.append(self._anchors_field(population))
+            if self._region_entries("watchlist") and matrix_rows:
+                matrix = self._matrix_field(matrix_rows)
+                if matrix:
+                    fields.append(matrix)
+        else:
+            for key, flag, label in _REGION_KEYS:
+                field = self._desk_field(key, flag, label, population, desk_n)
+                if field:
+                    fields.append(field)
+            if matrix_rows:
+                matrix = self._matrix_field(matrix_rows)
+                if matrix:
+                    fields.append(matrix)
+            portfolio = self._portfolio_field()
+            if portfolio:
+                fields.append(portfolio)
+        fields.append(self._legend_field())
 
-        # Negative surprise
-        e2 = _entry("INTC", score=0.30)
-        e2["earnings_surprise_pct"] = -0.087
-        e2["earnings_surprise_days"] = 45
-        cat2 = _compute_catalyst(e2)
-        _check("eps_in_catalyst_miss",
-               "EPS miss 8.7%" in cat2, f"cat2={cat2!r}")
-        _check("eps_days_miss",
-               "45d ago" not in cat2, f"cat2={cat2!r}")
+        description = self._macro_description()
+        if len(description) > _LIMIT_DESC:  # prose after the ANSI block only
+            head, _, tail = description.partition("```\n\n")
+            description = head + "```\n\n" + _truncate(
+                tail, _LIMIT_DESC - len(head) - 5)
 
-        # Outside 90-day window → no EPS fragment
-        e3 = _entry("AAPL", score=0.55)
-        e3["earnings_surprise_pct"] = 0.20
-        e3["earnings_surprise_days"] = 95
-        cat3 = _compute_catalyst(e3)
-        _check("eps_absent_outside_window",
-               "EPS" not in cat3, f"cat3={cat3!r}")
+        return {
+            "title":       self._title(),
+            "description": description,
+            "color":       color,
+            "fields":      fields[:25],
+            "footer":      self._footer(),
+            "timestamp":   self.now.isoformat(),
+        }
 
-        # None surprise → no EPS fragment
-        e4 = _entry("MSFT", score=0.60)
-        e4["earnings_surprise_pct"] = None
-        e4["earnings_surprise_days"] = 0
-        cat4 = _compute_catalyst(e4)
-        _check("eps_absent_when_none", "EPS" not in cat4, f"cat4={cat4!r}")
-    except Exception:
-        failures.append(f"FAIL [eps_catalyst]: {traceback.format_exc()}")
+    def build(self) -> Dict[str, Any]:
+        """Render the embed, degrading structurally until the 6000-char
+        message budget holds (matrix rows first, then desk depth — the macro
+        section and legend are never trimmed)."""
+        attempts = [
+            (self.MAX_MATRIX_ROWS, self.MAX_DESK_ENTRIES),
+            (2, self.MAX_DESK_ENTRIES),
+            (1, self.MAX_DESK_ENTRIES),
+            (0, self.MAX_DESK_ENTRIES),
+            (0, 2),
+            (0, 1),
+        ]
+        embed = self._render(*attempts[0])
+        for matrix_rows, desk_n in attempts:
+            embed = self._render(matrix_rows, desk_n)
+            if self._embed_size(embed) <= _LIMIT_TOTAL:
+                break
+        return {"embeds": [embed]}
 
-    # ── Report ────────────────────────────────────────────────────────────────
-    total_assertions = 40
-    if failures:
-        for f in failures:
-            print(f, file=sys.stderr)
-        print(f"\n{len(failures)} test(s) FAILED", file=sys.stderr)
-        return 1
-    print(f"All tests passed ({total_assertions} assertions)")
-    return 0
+    # ── Alert (DATA UNAVAILABLE contract) ─────────────────────────────────────
+
+    @classmethod
+    def build_alert(cls, reason: str) -> Dict[str, Any]:
+        """High-visibility alert when input is missing/corrupt/invalid.
+
+        Title MUST contain "DATA UNAVAILABLE" — asserted by
+        .github/workflows/test_daily_toplists_absence.yml on embeds[0].title.
+        """
+        return {
+            "embeds": [{
+                "title":       "⚠️ Alpha Pipeline — DATA UNAVAILABLE",
+                "description": (
+                    f"**Reason:** {reason}\n\n"
+                    "The pipeline may not have completed its last run.\n"
+                    "Check `edgar_3x` / `daily_trading_pipeline` on GitHub Actions."
+                ),
+                "color":       _COLOR_RED,
+                "timestamp":   datetime.now(timezone.utc).isoformat(),
+                "footer":      {"text": "regime_trader · cook→audit→send"},
+            }]
+        }
 
 
 # ── HTTP send with retry ───────────────────────────────────────────────────────
@@ -2401,8 +855,7 @@ def send_to_discord(
     for attempt in range(max_retries):
         if attempt > 0:
             wait = backoff_base_s * attempt
-            log.warning("Retry %d/%d in %.0fs ...",
-                        attempt + 1, max_retries, wait)
+            log.warning("Retry %d/%d in %.0fs ...", attempt + 1, max_retries, wait)
             time.sleep(wait)
         try:
             resp = requests.post(webhook, json=payload, timeout=15.0)
@@ -2416,8 +869,7 @@ def send_to_discord(
                     retry_after = 0.0
                 if not retry_after:
                     retry_after = float(resp.headers.get("Retry-After", 30))
-                log.warning(
-                    "Discord rate-limited — waiting %.1fs", retry_after)
+                log.warning("Discord rate-limited — waiting %.1fs", retry_after)
                 time.sleep(retry_after)
                 continue
             log.warning(
@@ -2434,16 +886,21 @@ def send_to_discord(
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
+def _print_payload(payload: Dict[str, Any]) -> None:
+    sys.stdout.buffer.write(
+        (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Send daily market checkup to Discord")
+        description="Send the institutional daily brief to Discord")
     parser.add_argument(
-        "--input", type=Path, default=Path("logs/intel_source_status.json"),
-        help="Path to intel_source_status.json (default: logs/intel_source_status.json)",
+        "--input", type=Path, default=Path("logs/top_lists.json"),
+        help="Path to cooked top_lists.json (default: logs/top_lists.json)",
     )
     parser.add_argument(
         "--log-dir", type=Path, default=Path("logs"),
-        help="Directory for discord_send.log and satellite/anomaly files",
+        help="Directory for discord_send.log and the archive/ delta snapshots",
     )
     parser.add_argument(
         "--webhook", type=str, default=None,
@@ -2453,123 +910,95 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--dry-run", action="store_true",
         help="Print payload JSON without sending",
     )
-    parser.add_argument(
-        "--run-tests", action="store_true",
-        help="Run built-in self-test suite and exit",
-    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
-    if args.run_tests:
-        logging.basicConfig(level=logging.WARNING)
-        return run_tests()
-
     log_level = logging.DEBUG if args.verbose else logging.INFO
     args.log_dir.mkdir(parents=True, exist_ok=True)
-    discord_log = args.log_dir / "discord_send.log"
-
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s %(levelname)s %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(discord_log, encoding="utf-8"),
+            logging.FileHandler(args.log_dir / "discord_send.log", encoding="utf-8"),
         ],
     )
 
     webhook: str = args.webhook or os.getenv("DISCORD_WEBHOOK_URL", "")
-    if not webhook:
+    if not webhook and not args.dry_run:
         log.critical(
             "DISCORD_WEBHOOK_URL is not set and --webhook was not supplied. "
             "Cannot deliver output. Exiting with code 2."
         )
-        return 2   # non-zero → CI detects failure; 2 distinguishes config error from data error
+        return 2  # config error — distinct from data errors
 
-    # Try intel_source_status.json first; fall back to top_lists.json
-    input_path = args.input
-    if not input_path.exists() and input_path.name == "intel_source_status.json":
-        fallback = args.log_dir / "top_lists.json"
-        if fallback.exists():
-            log.warning(
-                "intel_source_status.json not found — falling back to top_lists.json")
-            input_path = fallback
-
-    if not input_path.exists():
-        log.warning("%s not found — sending alert", input_path)
-        payload = build_alert_payload(f"File not found: {input_path}")
+    if not args.input.exists():
+        log.warning("%s not found — sending alert", args.input)
+        payload = DiscordPayloadBuilder.build_alert(f"File not found: {args.input}")
         if args.dry_run:
-            sys.stdout.buffer.write(
-                (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-            )
+            _print_payload(payload)
             return 0
         return 0 if send_to_discord(webhook, payload) else 1
 
     try:
-        status = json.loads(input_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        log.error("could not parse %s: %s", input_path.name, exc)
-        payload = build_alert_payload(f"JSON parse error: {exc}")
+        status = json.loads(args.input.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.error("could not parse %s: %s", args.input.name, exc)
+        payload = DiscordPayloadBuilder.build_alert(f"JSON parse error: {exc}")
         if args.dry_run:
-            sys.stdout.buffer.write(
-                (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-            )
+            _print_payload(payload)
             return 0
         send_to_discord(webhook, payload)
         return 1
 
-    # Side-load macro overlay (VIX, kill_switch) from top_lists.json — these
-    # live in the sibling artifact, not in intel_source_status.json.
-    # NOTE (A-3): _load_top_lists_overlay reads top_lists.json, which is a
-    # *different* file from --input (intel_source_status.json).  There is no
-    # redundant re-read here.  If the pipeline ever merges both artifacts into
-    # a single file, refactor this to accept the pre-loaded dict instead of
-    # reading from disk again.
-    # TODO(A-3): when top_lists.json is loaded by the caller before this point,
-    # pass it as a pre-loaded dict to avoid the extra file I/O.
-    if input_path.name == "intel_source_status.json":
-        overlay = _load_top_lists_overlay(args.log_dir, input_path=input_path)
-        for k, v in overlay.items():
-            status.setdefault(k, v)
-        log.info(
-            "Loaded macro overlay: vix=%s kill_switch=%s vix_multiplier=%s",
-            status.get("vix"), status.get("kill_switch"), status.get("vix_multiplier"),
-        )
-
-    # Pre-flight schema audit — catches score-range violations, badge mismatches,
-    # sort-order errors, and cross-contamination before they reach Discord.
+    # Pre-flight schema audit — catches score-range violations, badge
+    # mismatches, sort-order errors and cross-contamination before Discord.
     try:
         from src.delivery.audit_payload import (  # noqa: PLC0415
             audit as _audit,
             PipelineAuditError as _PAE,
         )
         try:
-            _audit(str(input_path))
+            _audit(str(args.input))
         except _PAE as _schema_exc:
             log.error("Pre-flight audit FAILED: %s", _schema_exc)
-            _alert = build_alert_payload(f"AUDIT GATE FAILED: {_schema_exc}")
+            alert = DiscordPayloadBuilder.build_alert(
+                f"AUDIT GATE FAILED: {_schema_exc}")
             if not args.dry_run:
-                send_to_discord(webhook, _alert)
+                send_to_discord(webhook, alert)
             return 1
     except ImportError as _imp_exc:
-        log.warning("audit_payload module not importable — skipping pre-flight: %s", _imp_exc)
+        log.warning("audit_payload not importable — skipping pre-flight: %s",
+                    _imp_exc)
 
-    satellite = _load_satellite(args.log_dir)
-    anomaly_map = _load_anomaly_report(args.log_dir)
-    payload = build_payload(status, satellite=satellite,
-                            anomaly_map=anomaly_map)
+    yesterday_scores, yesterday_age_h = _load_yesterday_scores(
+        args.log_dir / "archive")
+    builder = DiscordPayloadBuilder(
+        status,
+        yesterday_scores=yesterday_scores,
+        yesterday_age_h=yesterday_age_h,
+    )
 
-    if args.dry_run:
-        sys.stdout.buffer.write(
-            (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-        )
-        return 0
-
-    ok = send_to_discord(webhook, payload)
-    if not ok:
-        log.error("All Discord send attempts failed")
+    problems = builder.validate()
+    if problems:
+        log.error("Schema validation failed: %s", "; ".join(problems))
+        payload = DiscordPayloadBuilder.build_alert(
+            "Schema validation failed: " + "; ".join(problems))
+        if args.dry_run:
+            _print_payload(payload)
+            return 0
+        send_to_discord(webhook, payload)
         return 1
 
-    log.info("Daily market checkup sent successfully")
+    payload = builder.build()
+    if args.dry_run:
+        _print_payload(payload)
+        return 0
+
+    if not send_to_discord(webhook, payload):
+        log.error("All Discord send attempts failed")
+        return 1
+    log.info("Daily brief sent successfully")
     return 0
 
 
