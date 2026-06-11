@@ -144,6 +144,27 @@ def _enrich(ticker: str, meta: dict) -> dict | None:
     }
 
 
+def _stratified(candidates: dict, cap: int) -> list:
+    """Round-robin candidates by exchange suffix before applying the cap.
+
+    A plain alphabetical cut is suffix-biased: digit-first tickers (KR 6-digit,
+    HK 4-digit) monopolize the cap and whole markets (JP .T, IN .NS) vanish.
+    Interleaving keeps every exchange represented at any cap size.
+    """
+    from collections import defaultdict
+    groups: dict = defaultdict(list)
+    for ticker in sorted(candidates):
+        suffix = ticker.rsplit(".", 1)[-1] if "." in ticker else ""
+        groups[suffix].append(ticker)
+    queues = [groups[k] for k in sorted(groups)]
+    out: list = []
+    while len(out) < cap and any(queues):
+        for q in queues:
+            if q and len(out) < cap:
+                out.append(q.pop(0))
+    return out
+
+
 def build_region(region: str, out_dir: Path, max_candidates: int,
                  use_screener: bool, registry_path: Path) -> Path:
     print(f"\n== {region} universe ==")
@@ -161,7 +182,8 @@ def build_region(region: str, out_dir: Path, max_candidates: int,
           f"get_region != {target_region})")
 
     rows = []
-    for ticker, meta in sorted(in_region.items())[:max_candidates]:
+    for ticker in _stratified(in_region, max_candidates):
+        meta = in_region[ticker]
         enriched = _enrich(ticker, meta)
         if enriched is None:
             continue
@@ -190,7 +212,7 @@ def main(argv=None) -> int:
     parser.add_argument("--region", choices=["EU", "APAC", "both"],
                         default="both")
     parser.add_argument("--out-dir", type=Path, default=Path("config"))
-    parser.add_argument("--max-candidates", type=int, default=250)
+    parser.add_argument("--max-candidates", type=int, default=600)
     parser.add_argument("--no-screener", action="store_true",
                         help="registry seed only (offline-ish mode)")
     parser.add_argument("--registry", type=Path,
