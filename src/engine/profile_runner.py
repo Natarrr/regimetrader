@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Path: scripts/run_pipeline_profile.py
+# Path: src/engine/profile_runner.py
 import argparse
 import json
 import sys

@@ -168,7 +168,7 @@ def build_large_cap_anchors(entries: list[dict]) -> list[dict]:
             "ticker":       e["ticker"],
             "allocation":   alloc,
             "final_score":  e.get("final_score", 0.0),
-            "price_target": e.get("price_target"),
+            "price_target": e.get("target_price") or e.get("price_target"),
             "exit_anchors": e.get("exit_anchors", {}),
             "tier":         "LARGE_CAP_ANCHOR",
         }

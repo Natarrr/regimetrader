@@ -48,7 +48,9 @@ from src.config.weights import (
     get_region, _piotroski_gate_multiplier,
 )
 # VIX regime thresholds — src.risk.regime is the single source of truth.
-from src.risk.regime import BEAR_THRESHOLD, CAPITULATION_THRESHOLD, get_regime, is_panic
+from src.risk.regime import (
+    BEAR_THRESHOLD, CAPITULATION_THRESHOLD, get_regime, is_panic, vix_multiplier,
+)
 from backend.market_intel.portfolio_optimizer import run_optimizer
 
 log = logging.getLogger("generate_top_lists")
@@ -124,6 +126,25 @@ _BADGES = [
     (0.60, "TACTICAL BUY"),
     (0.00, "WATCHLIST"),
 ]
+
+# Raw run_pipeline row fields forwarded verbatim for Discord catalyst /
+# exit-anchor display (mirror of src/engine/engine.py _DISPLAY_META_KEYS for
+# the INTL side). NOT scoring inputs — send_discord._compute_catalyst and
+# src/risk/exit_rules read them by exactly these names; without this
+# passthrough the EPS / upgrade / CEO-tier / revision catalyst branches can
+# never fire for US entries.
+_DISPLAY_META_KEYS = (
+    "ceo_conviction_tier",
+    "earnings_surprise_pct",
+    "earnings_surprise_days",
+    "recent_upgrade_downgrade",
+    "analyst_revision_score",
+    "analyst_revision_n",
+    "quality_piotroski_score",
+    "target_price",
+    "current_price",
+    "atr_14",
+)
 
 # Absolute market-cap thresholds (standard institutional definitions)
 _LARGE_FLOOR = 10_000_000_000   # >= $10B  → large cap
@@ -361,17 +382,12 @@ def _apply_vix_overlay(score: float, vix: Optional[float]) -> float:
       VIX ≥ BEAR_THRESHOLD    : ×0.80 — elevated risk, mild penalty (bear at 20)
       VIX  < BEAR_THRESHOLD   : ×1.00 — no adjustment
 
-    Thresholds sourced from src.risk.regime — the single source of truth.
+    Multiplier sourced from src.risk.regime.vix_multiplier — the single source
+    of truth shared with cook_toplists (US/INTL dampening symmetry).
     """
     if vix is None:
         return score
-    if vix >= 40:
-        return score * 0.20
-    if vix >= CAPITULATION_THRESHOLD:
-        return score * 0.50
-    if vix >= BEAR_THRESHOLD:
-        return score * 0.80
-    return score
+    return score * vix_multiplier(vix)
 
 
 def _ticker_effective_weights(
@@ -467,6 +483,9 @@ def _to_entry(
         # PATCH-03: audit fields — momentum regime dampening
         "momentum_multiplier":     momentum_multiplier,
         "pipeline":                "US",
+        # Display-meta passthrough: only keys present in the raw row are
+        # forwarded (absent keys stay absent — no None spray).
+        **{k: row[k] for k in _DISPLAY_META_KEYS if k in row},
     }
 
 

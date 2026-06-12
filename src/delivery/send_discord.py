@@ -265,10 +265,16 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
         rep_str = reps[0][:12] if reps else "members"
         signals.append(f"{cg_buys}x congress buy · {rep_str}")
 
+    # INTL entries carry no SPY-relative momentum (cook forwards the absolute
+    # listing-market 12-1m return instead) — label honestly, never "vs SPY".
     rel = _safe_float(entry.get("momentum_spy_relative"))
+    mom_label = "vs SPY 12m"
+    if not rel and entry.get("pipeline") == "INTL":
+        rel = _safe_float(entry.get("return_12_1m"))
+        mom_label = "12-1m abs"
     if abs(rel) > 0.05:
         sign = "+" if rel >= 0 else ""
-        signals.append(f"{sign}{rel * 100:.1f}% vs SPY 12m")
+        signals.append(f"{sign}{rel * 100:.1f}% {mom_label}")
 
     if not signals:
         n = int(entry.get("analyst_revision_n_analysts",
@@ -487,7 +493,8 @@ class DiscordPayloadBuilder:
     def _population(self) -> List[float]:
         """All scores in the artifact — denominator for percentile ranks."""
         keys = ("top_buys_usa", "top_buys_europe", "top_buys_asia",
-                "usa_overflow", "eu_overflow", "asia_overflow", "watchlist")
+                "usa_overflow", "eu_overflow", "asia_overflow", "watchlist",
+                "eu_mid_small", "asia_mid_small")
         return [
             _safe_float(e.get("final_score"))
             for k in keys for e in (self.data.get(k) or [])

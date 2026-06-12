@@ -79,6 +79,10 @@ def _iter_all_entries(data: dict):
         "top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
         "usa_overflow", "eu_overflow", "asia_overflow",
         "mid_caps", "small_caps",
+        # CAPITULATION moves every entry into watchlist (cook_toplists) — the
+        # safety gate must keep auditing in exactly that regime. eu/asia
+        # mid-small are cooked into the combined payload alongside it.
+        "watchlist", "eu_mid_small", "asia_mid_small",
     ):
         for entry in data.get(bucket, []):
             key = (bucket, entry.get("ticker", ""))

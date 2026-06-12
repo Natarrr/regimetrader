@@ -10,8 +10,10 @@ lowest-beta structural anchors — assets historically offering asymmetric risk-
 during market capitulation events (Greenblatt 1980; Druckenmiller drawdown theory).
 
 Criteria for CAPITULATION survivors:
-  - Beta ≤ 1.2 (trailing 30-day rolling vs SPY/benchmark)
   - quality_piotroski (normalized) ≥ 0.70  OR  debt_to_equity (normalized) ≤ 0.30
+  - Beta ≤ 1.2 (trailing 30-day rolling vs SPY/benchmark) — enforced only when
+    the producer supplies a beta factor; no current producer does, so this
+    gate is inert until beta is added to the factor payloads
 """
 from __future__ import annotations
 
@@ -59,6 +61,35 @@ def score_multiplier(regime: RiskRegime) -> float:
     }[regime]
 
 
+_CRASH_THRESHOLD = 40.0
+CRASH_THRESHOLD = _CRASH_THRESHOLD
+
+
+def vix_multiplier(vix: float) -> float:
+    """Single source of truth for the VIX macro-overlay multiplier.
+
+    Unlike score_multiplier (regime-level, 3 tiers), this carries the
+    additional Crash tier so the US pipeline (generate_top_lists) and the
+    INTL cook (cook_toplists) apply byte-identical dampening:
+
+      VIX ≥ 40 (Crash) : ×0.20
+      VIX ≥ 30 (Panic) : ×0.50
+      VIX ≥ 20 (Bear)  : ×0.80
+      VIX <  20        : ×1.00
+
+    Raises ValueError on NaN/negative VIX (NaN comparisons are all False in
+    Python and would silently bypass dampening).
+    """
+    get_regime(vix)  # validates NaN / negative / non-numeric
+    if vix >= _CRASH_THRESHOLD:
+        return 0.20
+    if vix >= _CAPITULATION_THRESHOLD:
+        return 0.50
+    if vix >= _BEAR_THRESHOLD:
+        return 0.80
+    return 1.00
+
+
 def strategy_label(regime: RiskRegime) -> str:
     return {
         RiskRegime.NORMAL: "NORMAL / FULL POSITIONING",
@@ -70,42 +101,49 @@ def strategy_label(regime: RiskRegime) -> str:
 def _is_capitulation_survivor(entry: dict) -> bool:
     """True if entry qualifies for CAPITULATION distressed alpha shortlist.
 
-    Survivor criteria (beta gate AND quality gate):
-      beta       ≤ 1.2                                   (low-beta filter)
-      piotroski  ≥ 0.70  OR  debt_to_equity ≤ 0.30      (quality gate)
+    Survivor criteria:
+      beta ≤ 1.2            — applied only when the producer supplies beta;
+                              neither the US pipeline (FACTOR_FIELDS) nor the
+                              INTL profile emits it today, so the gate is
+                              inert until beta lands in factors
+      debt_to_equity ≤ 0.30 — same producer caveat; qualifies when present
+      piotroski ≥ 0.70      — the only always-produced gate (US: normalized
+                              cross-sectional; INTL: raw profile score)
     """
     factors = entry.get("factors", {})
-    beta = float(factors.get("beta") or factors.get("beta_30d") or 0.0)
-    piotroski = float(factors.get("quality_piotroski") or 0.0)
-    de_ratio = float(factors.get("debt_to_equity") or 1.0)  # default high if missing
-
-    if beta > _BETA_MAX:
+    beta_raw = factors.get("beta") or factors.get("beta_30d")
+    if beta_raw is not None and float(beta_raw) > _BETA_MAX:
         return False
-    return piotroski >= _PIOTROSKI_FLOOR or de_ratio <= _DE_CEILING
+    de_raw = factors.get("debt_to_equity")
+    if de_raw is not None and float(de_raw) <= _DE_CEILING:
+        return True
+    return float(factors.get("quality_piotroski") or 0.0) >= _PIOTROSKI_FLOOR
 
 
 def apply_capitulation_filter(entries: List[dict], vix: float) -> List[dict]:
     """Apply CAPITULATION DISTRESSED REGIME filter when VIX ≥ 30.
 
-    Surfaces highest-quality, lowest-beta structural anchors with 0.50× dampening.
-    All survivors are force-badged WATCHLIST — no new BUY signals during Panic/Crash.
-    Callers (cook_toplists.py) must move survivors from top_buys_* into a watchlist
-    key so the Discord embed does not render them as "Active Buy Signals."
+    Pure filter + badge pass — it does NOT multiply final_score. The regime
+    multiplier is applied exactly once upstream: US entries by
+    generate_top_lists._apply_vix_overlay, INTL entries by
+    cook_toplists._normalize_intl_entry (both via vix_multiplier). Multiplying
+    here again double-dampened US scores 0.25×/0.10× vs INTL 0.50×.
+
+    All survivors are force-badged WATCHLIST — no new BUY signals during
+    Panic/Crash. (Upstream dampening keeps survivor scores ≤ 0.50, below the
+    0.60 TACTICAL BUY threshold, so the forced badge matches audit check B.)
+    Callers (cook_toplists.py) must move survivors from top_buys_* into a
+    watchlist key so the Discord embed does not render them as buy signals.
     Non-capitulation regime: returns entries unchanged.
     """
     if not is_panic(vix):
         return entries
 
-    mult = score_multiplier(RiskRegime.CAPITULATION)
     result = []
     for entry in entries:
         if not _is_capitulation_survivor(entry):
             continue
         e = dict(entry)
-        e["final_score"] = round(float(e.get("final_score", 0)) * mult, 4)
-        # Force WATCHLIST — no BUY labels during CAPITULATION regime.
-        # (After 0.50× dampening the score is always < 0.60, so HIGH BUY /
-        # TACTICAL BUY thresholds can never trigger anyway; making intent explicit.)
         e["badge"] = "WATCHLIST"
         e["_capitulation_survivor"] = True
         result.append(e)

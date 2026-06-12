@@ -57,8 +57,15 @@ _REPORT_JSON  = ROOT / "logs" / "backtest_report_latest.json"
 _LEDGER_CSV   = ROOT / "logs" / "backtest_ledger_latest.csv"
 _SUMMARY_MD   = ROOT / "logs" / "backtest_summary.md"
 
-# Canonical factor order; 'macro' is the renamed 'momentum'
-_CANONICAL_FACTORS = ("edgar", "insider", "congress", "news", "momentum")
+# Canonical factors: current 9-factor schema first, then the legacy 5-factor
+# names so pre-2026 archive snapshots keep parsing. 'macro' is the renamed
+# 'momentum'.
+_CANONICAL_FACTORS = (
+    "insider_conviction", "insider_breadth", "congress", "news_sentiment",
+    "news_buzz", "momentum_long", "volume_attention", "analyst_consensus",
+    "quality_piotroski",
+    "edgar", "insider", "news", "momentum",   # legacy eras
+)
 _FACTOR_ALIASES = {"macro": "momentum"}
 
 # Pre-market cutoff: signals generated before 13:30 UTC use same-day close;
@@ -165,11 +172,12 @@ class SegmentStats:
 # ── Log ingestion ──────────────────────────────────────────────────────────────
 
 def _normalize_factors(raw: Dict[str, float]) -> Dict[str, float]:
-    """Rename 'macro' → 'momentum' and drop unknown keys."""
+    """Rename 'macro' → 'momentum', drop unknown keys and absent (None) factors
+    (INTL factor_snapshots preserve None for no-coverage factors)."""
     return {
-        _FACTOR_ALIASES.get(k, k): v
+        _FACTOR_ALIASES.get(k, k): float(v)
         for k, v in raw.items()
-        if _FACTOR_ALIASES.get(k, k) in _CANONICAL_FACTORS
+        if v is not None and _FACTOR_ALIASES.get(k, k) in _CANONICAL_FACTORS
     }
 
 
@@ -205,9 +213,14 @@ def _parse_snapshot(path: Path) -> List[SignalRecord]:
 
     weights = _normalize_weights(data.get("weights", {}))
 
-    # Collect every list section (top_buys, mid_caps, small_caps, sector_picks)
+    # Collect every list section — legacy US artifact (top_buys, mid_caps,
+    # small_caps, sector_picks) AND combined cooked payload
+    # (top_buys_usa/_europe/_asia). watchlist is intentionally excluded:
+    # CAPITULATION survivors are force-badged WATCHLIST (not a buy signal)
+    # and would be dropped by the badge filter below anyway.
     entries: List[Dict[str, Any]] = []
-    for key in ("top_buys", "mid_caps", "small_caps"):
+    for key in ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
+                "mid_caps", "small_caps"):
         entries.extend(data.get(key) or [])
     for sector_list in (data.get("sector_picks") or {}).values():
         entries.extend(sector_list or [])
@@ -387,6 +400,15 @@ def compute_returns(
             ret = (exit_price - entry_price_raw) / entry_price_raw
             rec.returns[h] = float(ret)
 
+            # FX isolation: intl prices are listing-currency (JPY for .T,
+            # GBp for .L, …). Percent returns are dimensionless and safe,
+            # but alpha vs the USD-denominated SPY would embed FX drift —
+            # leave alpha unset until explicit currency conversion exists.
+            if rec.market != "USA":
+                rec.spy_returns[h] = None
+                rec.alpha[h] = None
+                continue
+
             # SPY benchmark over identical window
             if spy_prices is not None:
                 spy_entry = _trading_day_offset(spy_prices, entry_date, entry_offset)
@@ -504,12 +526,19 @@ def _primary_failure_factor(rec: SignalRecord) -> str:
     The 'primary failure factor' is the factor that contributed most to the
     score but failed to predict forward returns — i.e., highest weighted score.
     """
-    weights = rec.weights or {
-        "edgar": 0.28, "insider": 0.23, "congress": 0.22,
-        "news": 0.15, "momentum": 0.12,
-    }
+    weights = rec.weights
+    if not weights:
+        # Combined cooked snapshots carry no top-level weights key. Equal-weight
+        # the factors actually present so attribution reflects the highest
+        # factor score instead of a fabricated legacy-weight ranking.
+        present = [f for f in _CANONICAL_FACTORS if f in rec.factors]
+        if present:
+            weights = {f: 1.0 / len(present) for f in present}
+        else:
+            weights = {"edgar": 0.28, "insider": 0.23, "congress": 0.22,
+                       "news": 0.15, "momentum": 0.12}
     contributions = {
-        f: rec.factors.get(f, 0.0) * weights.get(f, 0.0)
+        f: float(rec.factors.get(f) or 0.0) * weights.get(f, 0.0)
         for f in _CANONICAL_FACTORS
     }
     return max(contributions, key=lambda k: contributions[k])

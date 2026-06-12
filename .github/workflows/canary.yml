@@ -178,36 +178,39 @@ jobs:
               print('::error::Per-factor dead signal detected — check bulk cache or price feed')
               sys.exit(1)
 
-          # Additional 9-factor checks
-          tl = Path('logs/top_lists.json')
-          if tl.exists():
-              d = json.loads(tl.read_text())
-              buys = d.get('top_buys', [])
-              if buys:
-                  # Check new factors are populated
-                  sample_fac = buys[0].get('factors', {})
-                  for key in ('analyst_consensus', 'quality_piotroski'):
-                      if key not in sample_fac:
-                          print(f'::error::Factor {key!r} missing from top_buys schema')
+          # Additional 9-factor checks — run against intel_source_status.json,
+          # the artifact this workflow actually produces. (The previous
+          # logs/top_lists.json block was vacuous: the canary never runs
+          # generate_top_lists or cook_toplists, so the file cannot exist and
+          # every assertion silently skipped.)
+          st = Path('logs/intel_source_status.json')
+          if st.exists():
+              status = json.loads(st.read_text())
+              rows = status.get('results', [])
+              if rows:
+                  for key in ('analyst_consensus_score', 'quality_piotroski_score'):
+                      if key not in rows[0]:
+                          print(f'::error::Factor {key!r} missing from results schema')
                           sys.exit(1)
 
-                  # Check weights_us has non-zero values for sprint factors (M-3)
-                  weights_us = d.get('weights_us', {})
+                  # Check WEIGHTS has non-zero values for sprint factors (M-3)
+                  weights = status.get('weights', {})
                   for key in ('analyst_consensus', 'quality_piotroski'):
-                      w = weights_us.get(key, 0.0)
-                      if w == 0.0:
-                          print(f'::error::WEIGHTS_US[{key!r}] is zero in artifact — sprint factor not active')
+                      if weights and weights.get(key, 0.0) == 0.0:
+                          print(f'::error::WEIGHTS[{key!r}] is zero in artifact — sprint factor not active')
                           sys.exit(1)
 
-                  # Check EU/Asia congress contamination
-                  eu_tickers = [t for t in d.get('top_buys', [])
-                                if '.' in t['ticker']]  # .PA, .DE, .L etc.
-                  contaminated = [t['ticker'] for t in eu_tickers
-                                  if t.get('factors', {}).get('congress', 0) != 0.0]
+                  # Check EU/Asia congress contamination (suffix-bearing tickers)
+                  contaminated = [r.get('ticker') for r in rows
+                                  if '.' in (r.get('ticker') or '')
+                                  and float(r.get('congress_score') or 0.0) != 0.0]
                   if contaminated:
                       print(f'::error::CROSS-CONTAMINATION: EU/Asia congress != 0: {contaminated}')
                       sys.exit(1)
-                  print(f'9-factor schema OK. {len(eu_tickers)} EU/Asia tickers, congress=0.0 confirmed.')
+                  print(f'9-factor schema OK across {len(rows)} results rows, congress contamination clean.')
+          else:
+              print('::error::intel_source_status.json not produced — pipeline failed silently')
+              sys.exit(1)
 
           tl_intl = Path('logs/top_lists_intl.json')
           if tl_intl.exists():

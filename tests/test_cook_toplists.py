@@ -450,6 +450,36 @@ def test_vix_dampening_applied_to_intl_entries(cook_mod, registry, tmp_path):
     assert eu_entry["badge"] == "WATCHLIST"
 
 
+def test_capitulation_dampening_symmetric_us_vs_intl(cook_mod, registry, tmp_path):
+    """US final_score arrives pre-dampened from generate_top_lists
+    (_apply_vix_overlay ×0.50 at VIX 35); the cook must NOT multiply it
+    again, while applying exactly one ×0.50 to the raw INTL composite.
+    Identical raw strength (1.0) must yield identical watchlist scores."""
+    us_path = tmp_path / "top_lists_us.json"
+    us_path.write_text(json.dumps({
+        "top_buys_usa": [{
+            "ticker": "JNJ", "final_score": 0.50, "badge": "WATCHLIST",
+            "market": "USA", "pipeline": "US",
+            "factors": {"quality_piotroski": 0.9},
+        }],
+        "vix": 35.0, "vix_regime": "CAPITULATION", "kill_switch": True, "ticker_count": 1,
+    }), encoding="utf-8")
+    intl_path = tmp_path / "top_lists_intl.json"
+    intl_path.write_text(json.dumps([{
+        "ticker": "SAP.DE", "composite_score": 1.0, "region_applied": "INTL",
+        "factor_snapshots": {"quality_piotroski": 0.9},
+        "pipeline": "INTL",
+    }]), encoding="utf-8")
+    out = tmp_path / "out.json"
+    cook_mod.cook(us_path, intl_path, registry, out)
+    watchlist = json.loads(out.read_text())["watchlist"]
+    scores = {e["ticker"]: e["final_score"] for e in watchlist}
+    assert abs(scores["JNJ"] - 0.50) < 1e-4, (
+        f"US score re-dampened: expected 0.50, got {scores['JNJ']}")
+    assert abs(scores["SAP.DE"] - 0.50) < 1e-4
+    assert scores["JNJ"] == scores["SAP.DE"]
+
+
 class TestSectorCountCap:
     def _make_entries(self, sectors):
         return [
@@ -590,7 +620,10 @@ def test_intl_insider_meta_flows_engine_to_discord(cook_mod, registry, tmp_path)
     normalized = cook_mod._normalize_intl_entry(engine_entry, reg_map, vix=17.0)
     assert normalized["insider_usd"] == 150_000.0
     assert normalized["market_cap"] == 5e9
-    assert normalized["momentum_spy_relative"] == 0.18
+    # INTL has no SPY-relative momentum: the absolute return is forwarded
+    # under its own name, never as momentum_spy_relative.
+    assert normalized["return_12_1m"] == 0.18
+    assert "momentum_spy_relative" not in normalized
     assert normalized["market"] == "EUROPE"
 
     # Currency guard: $5B-looking cap must NOT bracket an INTL entry.
@@ -612,7 +645,32 @@ def test_intl_insider_meta_flows_engine_to_discord(cook_mod, registry, tmp_path)
     eu_field = next(f for f in payload["embeds"][0]["fields"]
                     if "EUROPE" in f["name"])
     assert "Insider $150k" in eu_field["value"]
-    assert "+18.0% vs SPY 12m" in eu_field["value"]
+    assert "+18.0% 12-1m abs" in eu_field["value"]
+    assert "vs SPY" not in eu_field["value"]
+
+
+def test_unregistered_intl_ticker_is_dropped(cook_mod, registry, tmp_path, capsys):
+    """Registry is authoritative: an unregistered ticker must be dropped with a
+    warning — never defaulted to EUROPE (which mislabeled it and could fail
+    audit check D, blocking the whole send)."""
+    us_path = tmp_path / "top_lists_us.json"
+    us_path.write_text(json.dumps({
+        "top_buys": [], "vix": 15.0, "vix_regime": "Normal", "kill_switch": False, "ticker_count": 0,
+    }), encoding="utf-8")
+    intl_path = tmp_path / "top_lists_intl.json"
+    intl_path.write_text(json.dumps([
+        {"ticker": "GHOST", "composite_score": 0.90, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+        {"ticker": "SAP.DE", "composite_score": 0.75, "region_applied": "INTL", "factor_snapshots": {}, "pipeline": "INTL"},
+    ]), encoding="utf-8")
+    out = tmp_path / "out.json"
+    cook_mod.cook(us_path, intl_path, registry, out)
+    result = json.loads(out.read_text())
+    all_intl = (result["top_buys_europe"] + result["top_buys_asia"]
+                + result["eu_mid_small"] + result["asia_mid_small"])
+    tickers = {e["ticker"] for e in all_intl}
+    assert "GHOST" not in tickers
+    assert "SAP.DE" in tickers
+    assert "not in ticker_registry.json" in capsys.readouterr().out
 
 
 def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):

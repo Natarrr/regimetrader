@@ -76,9 +76,15 @@ def compute_breakout_extension(
 
 
 def enrich_with_exit_anchors(entry: dict, atr_14: Optional[float]) -> dict:
-    """Attach exit_anchors to entry. Reads current_price, price_target, rsi_14, vwap_ratio."""
+    """Attach exit_anchors to entry. Reads current_price, price_target, rsi_14, vwap_ratio.
+
+    Accepts both price-target key spellings: the FMP fetcher / engine / cook
+    forward the consensus PT as "target_price"; legacy callers use
+    "price_target".
+    """
     price  = float(entry.get("current_price") or 0)
-    pt_raw = entry.get("price_target") or entry.get("factors", {}).get("price_target_consensus")
+    pt_raw = (entry.get("price_target") or entry.get("target_price")
+              or entry.get("factors", {}).get("price_target_consensus"))
     pt     = float(pt_raw) if pt_raw else None
     rsi    = entry.get("rsi_14") or entry.get("factors", {}).get("rsi_14")
     vwap_r = entry.get("vwap_ratio") or entry.get("factors", {}).get("vwap_ratio")

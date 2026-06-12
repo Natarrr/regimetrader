@@ -171,6 +171,11 @@ jobs:
               # Regime-scaled quintile floor (aligned with src/risk/regime.py):
               # BEAR (20 <= VIX < 30) raises the floor from 80 to 85 so only
               # the strongest candidates reach Claude during graduated caution.
+              #
+              # Filter on raw_score (pre-VIX-overlay): final_score already
+              # carries the x0.80 BEAR multiplier, capping it at 0.80 — a
+              # floor of 85 on the dampened scale is mathematically
+              # unsatisfiable and silently emptied the BEAR shortlist.
               try:
                   vix = float(data.get("vix") or 0)
               except (TypeError, ValueError):
@@ -181,9 +186,9 @@ jobs:
               n_before = len(top_buys)
               top_buys = [
                   e for e in top_buys
-                  if float(e.get("final_score") or 0) * 100 >= floor
+                  if float(e.get("raw_score", e.get("final_score")) or 0) * 100 >= floor
               ]
-              print(f"[FLOOR AUDIT] vix={vix:.1f} floor={floor:.0f} kept={len(top_buys)}/{n_before}")
+              print(f"[FLOOR AUDIT] vix={vix:.1f} floor={floor:.0f} kept={len(top_buys)}/{n_before} (raw_score basis)")
 
               shortlist = [e["ticker"] for e in top_buys]
               candidates = [
