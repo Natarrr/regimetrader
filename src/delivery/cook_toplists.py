@@ -37,6 +37,31 @@ _MID_CAP_MAX         = 10_000_000_000
 _SMALL_CAP_MIN       =    300_000_000
 _SMALL_CAP_MAX       =  2_000_000_000
 
+# ── SMID leverage sleeve (US-only) ────────────────────────────────────────────
+# Composite re-rank of the already-vetted US buy list toward the small/mid-cap
+# leverage profile: final_score carries the full 9-factor alpha (VIX overlay,
+# Piotroski gate and momentum-regime dampening already applied upstream);
+# momentum_long is re-emphasized per [Jegadeesh & Titman, 1993] (12-1m momentum
+# persists strongest outside mega-caps; size premium [Banz, 1981]) and
+# quality_piotroski per [Piotroski, 2000] (F-score alpha concentrates in
+# small/neglected names).
+_SMID_LEVERAGE_WEIGHTS = {
+    "final_score":       0.50,
+    "momentum_long":     0.30,
+    "quality_piotroski": 0.20,
+}
+assert abs(sum(_SMID_LEVERAGE_WEIGHTS.values()) - 1.0) < 1e-6
+
+_SMID_CAP_MIN = _SMALL_CAP_MIN         # $300M inclusive
+_SMID_CAP_MAX = _LARGE_CAP_THRESHOLD   # $10B inclusive (large bracket starts > $10B)
+_SMID_TOP_N   = 3
+# Post-earnings-announcement drift: positive surprises drift upward for roughly
+# 60 days post-announcement [Bernard & Thomas, 1989]. Boost is applied ONLY on
+# affirmative evidence — absent earnings meta must never read as bearish.
+# Mirrored in send_discord._SMID_PEAD_WINDOW_DAYS (flag must agree with boost).
+_SMID_PEAD_WINDOW_DAYS = 60
+_SMID_PEAD_BOOST       = 1.10
+
 _BADGE_THRESHOLDS = [(0.80, "HIGH BUY"), (0.60, "TACTICAL BUY"), (0.00, "WATCHLIST")]
 
 
@@ -77,6 +102,49 @@ def _segment_by_market_cap(entries: list) -> tuple[list, list, list]:
         elif _SMALL_CAP_MIN <= cap < _MID_CAP_MIN:
             small.append(entry)
     return large, mid, small
+
+
+def _build_smid_leverage_pool(entries: list, top_n: int = _SMID_TOP_N) -> list:
+    """Top-N US small/mid-cap entries re-ranked by the leverage composite.
+
+    leverage_score = (0.50*final_score + 0.30*momentum_long
+                      + 0.20*quality_piotroski) * pead_boost
+
+    pead_boost = 1.10 iff earnings_surprise_pct > 0 and
+    0 < earnings_surprise_days <= 60 [Bernard & Thomas, 1989]; 1.00 otherwise
+    (data absence is NEVER bearish). leverage_score is a RANKING key, not a
+    calibrated probability — it may exceed 1.0 (max 1.10) and is deliberately
+    not gated by audit check A, which validates final_score only.
+
+    INTL entries are excluded (same FX-normalization guard as
+    _segment_by_market_cap). Returns COPIES ({**e, "leverage_score": ...}) —
+    candidates are shared by reference with top_buys_usa/usa_overflow and
+    must not be mutated.
+    """
+    w = _SMID_LEVERAGE_WEIGHTS
+    scored: list = []
+    for entry in entries:
+        if entry.get("pipeline") == "INTL":
+            continue
+        cap = entry.get("market_cap", 0) or 0
+        if not (_SMID_CAP_MIN <= cap <= _SMID_CAP_MAX):
+            continue
+        factors = entry.get("factors") or {}
+        base = (
+            w["final_score"]         * float(entry.get("final_score") or 0.0)
+            + w["momentum_long"]     * float(factors.get("momentum_long") or 0.0)
+            + w["quality_piotroski"] * float(factors.get("quality_piotroski") or 0.0)
+        )
+        boost = 1.0
+        pct = entry.get("earnings_surprise_pct")
+        days = int(entry.get("earnings_surprise_days") or 0)
+        if pct is not None and float(pct) > 0 and 0 < days <= _SMID_PEAD_WINDOW_DAYS:
+            boost = _SMID_PEAD_BOOST
+        scored.append({**entry, "leverage_score": round(base * boost, 4)})
+    scored.sort(key=lambda e: (-e["leverage_score"],
+                               -float(e.get("final_score") or 0.0),
+                               e.get("ticker", "")))
+    return scored[:top_n]
 
 
 def _badge(score: float) -> str:
@@ -254,6 +322,11 @@ def cook(
     top_buys_europe, eu_overflow     = _apply_sector_count_cap(top_buys_europe, sector_count_cap)
     top_buys_asia,   asia_overflow   = _apply_sector_count_cap(top_buys_asia,   sector_count_cap)
 
+    # ── SMID leverage sleeve — candidates AFTER capitulation gate and sector
+    # cap; overflow is included so the sleeve is NOT sector-constrained.
+    # Under CAPITULATION both inputs are empty ⇒ pool is [] by construction.
+    top_buys_smid = _build_smid_leverage_pool(top_buys_usa + usa_overflow)
+
     # ── 3-tier capital allocation ─────────────────────────────────────────────
     mvo_pools: dict = {}
     if _EXTENSIONS_AVAILABLE and mvo_enabled:
@@ -324,6 +397,9 @@ def cook(
         "top_buys_usa":    top_buys_usa,
         "top_buys_europe": top_buys_europe,
         "top_buys_asia":   top_buys_asia,
+        # US SMID leverage sleeve, ranked by leverage_score (always present —
+        # [] under CAPITULATION or when no US name falls in the $300M–$10B band)
+        "top_buys_smid":   top_buys_smid,
         "watchlist":       watchlist,          # populated under CAPITULATION regime
         "usa_overflow":    usa_overflow,
         "eu_overflow":     eu_overflow,
@@ -347,7 +423,7 @@ def cook(
     print(
         f"[COOK] Combined payload -> {output} "
         f"({len(top_buys_usa)} US + {len(top_buys_europe)} EU "
-        f"+ {len(top_buys_asia)} Asia{watchlist_note})"
+        f"+ {len(top_buys_asia)} Asia + {len(top_buys_smid)} smid{watchlist_note})"
     )
 
 

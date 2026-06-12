@@ -546,3 +546,130 @@ class TestLoadYesterdayScores:
         scores, age_h = _load_yesterday_scores(root, now=_NOW)
         assert scores == {}
         assert age_h is None
+
+
+# ── 11. SMID leverage desk ─────────────────────────────────────────────────────
+
+def _smid_entry(ticker, lev=0.7480, score=0.72, mom=0.182, **kw):
+    e = _entry(ticker, score, market="USA", **kw)
+    e["leverage_score"] = lev
+    e["momentum_spy_relative"] = mom
+    return e
+
+
+class TestSmidLeverageDesk:
+    """top_buys_smid → '🚀 2b · SMALL-CAP / MID-CAP LEVERAGE DESK' field:
+    plain ASCII code block, ljust(9) tickers, equal-length rows, max 3
+    entries, graceful omission for pre-SMID artifacts and under kill-switch."""
+
+    _TITLE = "SMALL-CAP / MID-CAP LEVERAGE DESK"
+
+    def _smid_field(self, **overrides):
+        return _field(_embed(_build(**overrides)), self._TITLE)
+
+    def _rows(self, field):
+        return [line for line in field["value"].splitlines()
+                if line.strip() and "```" not in line]
+
+    def test_field_title_contains_contract_substring(self):
+        f = self._smid_field(top_buys_smid=[_smid_entry("AAOI")])
+        assert f is not None
+        assert "🚀 2b" in f["name"]
+
+    def test_renders_top_three_of_five(self):
+        entries = [_smid_entry(f"TK{i}", lev=0.80 - 0.01 * i) for i in range(5)]
+        f = self._smid_field(top_buys_smid=entries)
+        for t in ("TK0", "TK1", "TK2"):
+            assert t in f["value"]
+        for t in ("TK3", "TK4"):
+            assert t not in f["value"]
+
+    def test_rows_equal_length_and_ticker_ljust9(self):
+        f = self._smid_field(top_buys_smid=[
+            _smid_entry("AB"),
+            _smid_entry("ABCDEFGHIJK", lev=0.7000),  # 11 chars → sliced to 9
+        ])
+        rows = self._rows(f)
+        assert len({len(r) for r in rows}) == 1, (
+            f"Misaligned SMID rows: {[(len(r), r) for r in rows]}"
+        )
+        ab_row = next(r for r in rows if r.startswith("AB "))
+        assert ab_row.startswith("AB" + " " * 7), "ticker must be ljust(9)"
+        assert any(r.startswith("ABCDEFGHI ") for r in rows), (
+            "long ticker must be sliced to 9 chars"
+        )
+
+    def test_plain_code_block_no_ansi_balanced_fences(self):
+        f = self._smid_field(top_buys_smid=[_smid_entry("AAOI")])
+        assert f["value"].count("```") == 2
+        assert not f["value"].startswith("```ansi")
+        assert ESC not in f["value"]
+        inner = f["value"].split("```")[1]
+        assert "—" not in inner
+        assert "\t" not in inner
+
+    def test_absent_key_omits_field(self):
+        """Backward compat: pre-SMID artifacts carry no top_buys_smid key."""
+        assert self._smid_field() is None
+
+    def test_empty_list_omits_field(self):
+        assert self._smid_field(top_buys_smid=[]) is None
+
+    def test_capitulation_skips_smid(self):
+        """Defense in depth: even a (foreign/stale) artifact carrying a
+        populated pool must not render a leverage desk under kill-switch."""
+        f = self._smid_field(
+            vix=34.0, kill_switch=True,
+            top_buys_usa=[], top_buys_europe=[], top_buys_asia=[],
+            mvo_pools={}, watchlist=[_entry("JNJ", 0.41, badge="WATCHLIST")],
+            top_buys_smid=[_smid_entry("AAOI")],
+        )
+        assert f is None
+
+    def test_shows_leverage_momentum_and_flags(self):
+        f = self._smid_field(top_buys_smid=[_smid_entry(
+            "AAOI", lev=0.7480, mom=0.182,
+            earnings_surprise_pct=12.0, earnings_surprise_days=45,
+            quality_piotroski_score=0.625,
+        )])
+        assert "0.7480" in f["value"]
+        assert "+18.2%" in f["value"]
+        assert "E45d" in f["value"]   # PEAD recency flag
+        assert "F5" in f["value"]     # 0.625 * 8 = 5 Piotroski points
+
+    def test_flags_dash_when_meta_absent(self):
+        f = self._smid_field(top_buys_smid=[_smid_entry("AAOI")])
+        row = next(r for r in self._rows(f) if r.startswith("AAOI"))
+        assert row.rstrip().endswith("-")
+        assert "E" not in row.replace("AAOI", "")
+        assert "F" not in row.replace("AAOI", "")
+
+    def test_budget_respected_with_smid(self):
+        usa = [_entry(f"TICK{i:02d}", 0.85 - i * 0.01,
+                      insider_usd=2_000_000 + i,
+                      momentum_spy_relative=0.15)
+               for i in range(12)]
+        eu = [_entry(f"EU{i:02d}.PA", 0.80 - i * 0.01, market="EUROPE",
+                     weight_coverage=0.55) for i in range(12)]
+        asia = [_entry(f"60131{i}.SS", 0.78 - i * 0.01, market="ASIA",
+                       weight_coverage=0.55) for i in range(12)]
+        smid = [_smid_entry(f"SM{i:02d}", lev=0.80 - 0.01 * i)
+                for i in range(12)]
+        e = _embed(_build(top_buys_usa=usa, top_buys_europe=eu,
+                          top_buys_asia=asia, top_buys_smid=smid))
+        total = (len(e.get("title", "")) + len(e.get("description", ""))
+                 + sum(len(f["name"]) + len(f["value"]) for f in e["fields"])
+                 + len((e.get("footer") or {}).get("text", "")))
+        assert total <= 6000, f"total embed chars {total} > 6000"
+        for f in e["fields"]:
+            assert len(f["value"]) <= 1024, f"{f['name']} too long"
+            assert f["value"].count("```") % 2 == 0
+        assert "LEGEND" in e["fields"][-1]["name"]
+
+    def test_smid_positioned_after_desks_before_matrix(self):
+        e = _embed(_build(top_buys_smid=[_smid_entry("AAOI")]))
+        names = [f["name"] for f in e["fields"]]
+        i_asia = next(i for i, n in enumerate(names) if "ASIA" in n)
+        i_smid = next(i for i, n in enumerate(names) if self._TITLE in n)
+        i_matrix = next(i for i, n in enumerate(names) if "FACTOR MATRIX" in n)
+        assert i_asia < i_smid < i_matrix
