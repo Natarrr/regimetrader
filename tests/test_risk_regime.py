@@ -8,6 +8,7 @@ from src.risk.regime import (
     score_multiplier,
     strategy_label,
     apply_capitulation_filter,
+    vix_multiplier,
 )
 
 
@@ -60,6 +61,20 @@ class TestRiskRegime:
         with pytest.raises(ValueError):
             get_regime(-1.0)
 
+    def test_vix_multiplier_tiers(self):
+        """Shared US/INTL overlay multiplier — includes the Crash tier that
+        score_multiplier (regime-level) does not carry."""
+        assert vix_multiplier(15.0) == 1.00
+        assert vix_multiplier(20.0) == 0.80
+        assert vix_multiplier(30.0) == 0.50
+        assert vix_multiplier(40.0) == 0.20
+        assert vix_multiplier(55.0) == 0.20
+
+    def test_vix_multiplier_nan_raises(self):
+        # NaN comparisons are all False — silent ×1.00 bypass must be impossible
+        with pytest.raises(ValueError):
+            vix_multiplier(float("nan"))
+
 
 class TestCapitulationFilter:
     def _make_entries(self):
@@ -99,11 +114,15 @@ class TestCapitulationFilter:
         result = apply_capitulation_filter(entries, vix=18.0)
         assert result == entries  # unchanged
 
-    def test_scores_dampened_in_capitulation(self):
+    def test_filter_does_not_remultiply_scores(self):
+        """Dampening is applied exactly once upstream (US: _apply_vix_overlay,
+        INTL: cook._normalize_intl_entry). The filter must leave final_score
+        untouched or US entries end up 0.25×/0.10× vs INTL 0.50×."""
         entries = self._make_entries()
+        original = {e["ticker"]: e["final_score"] for e in entries}
         result = apply_capitulation_filter(entries, vix=31.0)
         for e in result:
-            assert e["final_score"] <= 0.50  # 0.50× multiplier applied
+            assert e["final_score"] == original[e["ticker"]]
 
     def test_capitulation_survivor_flag_set(self):
         entries = self._make_entries()

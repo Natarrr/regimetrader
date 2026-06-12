@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Path: scripts/cook_toplists.py
+# Path: src/delivery/cook_toplists.py
 """Merge US top_lists.json + INTL top_lists_intl.json into a unified combined payload.
 
 Schema transformation for INTL StrategyEngine output:
@@ -18,7 +18,7 @@ from src.risk.regime import (
     RiskRegime,
     apply_capitulation_filter,
     get_regime,
-    score_multiplier,
+    vix_multiplier,
 )
 
 try:
@@ -113,15 +113,17 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     Applies VIX dampening to final_score. congress is forced to 0.0 (audit check E).
     """
     ticker = raw.get("ticker", "")
-    _registry_meta = ticker_market_map.get(ticker, {"market": "EUROPE", "cap_tier": "large"})
+    # No fallback: the caller (cook) drops unregistered tickers before this
+    # point — a silent EUROPE default mislabeled unknown tickers and could
+    # block the whole send via audit check D (GeographicLeakageError).
+    _registry_meta = ticker_market_map[ticker]
     market = _registry_meta["market"]
-    cap_tier = _registry_meta["cap_tier"]
+    cap_tier = _registry_meta.get("cap_tier", "large")
     composite_score = float(raw.get("composite_score", 0.0))
-    regime = get_regime(vix)
-    # CAPITULATION dampening is applied by apply_capitulation_filter() — skip here
-    # to avoid double-dampening (BEAR and NORMAL still receive their multiplier)
-    if regime != RiskRegime.CAPITULATION:
-        composite_score = round(composite_score * score_multiplier(regime), 4)
+    # Single dampening point for INTL — vix_multiplier carries the Crash tier
+    # (×0.20 at VIX ≥ 40) so US and INTL stay symmetric in every regime.
+    # apply_capitulation_filter() no longer multiplies (filter + badge only).
+    composite_score = round(composite_score * vix_multiplier(vix), 4)
     factor_snapshots = raw.get("factor_snapshots", {})
     # Strip any congress value from snapshots then pin to 0.0 (cannot be overridden)
     factors = {k: v for k, v in factor_snapshots.items() if k != "congress"}
@@ -136,7 +138,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         "factors":         factors,
         "pipeline":        raw.get("pipeline", "INTL"),
         "weight_coverage": raw.get("weight_coverage", 0.0),
-        # Forward raw prices for PT badge display in send_discord.py
+        # Forward raw prices for exit-anchor enrichment (src/risk/exit_rules)
         "target_price":    raw.get("target_price"),
         "current_price":   raw.get("current_price"),
         # Forward analyst meta for badge lines
@@ -149,7 +151,10 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         "earnings_surprise_days":      int(raw.get("earnings_surprise_days") or 0),
         "insider_usd":                 float(raw.get("insider_usd") or 0.0),
         "market_cap":                  float(raw.get("market_cap") or 0.0),
-        "momentum_spy_relative":       float(raw.get("return_12_1m") or 0.0),
+        # Absolute 12-1m return in the listing market — INTL has no SPY-relative
+        # momentum, so momentum_spy_relative is intentionally NOT set (the old
+        # mapping rendered absolute returns as "vs SPY 12m" in catalysts).
+        "return_12_1m":                float(raw.get("return_12_1m") or 0.0),
         "analyst_consensus_score":     factor_snapshots.get("analyst_consensus"),
     }
 
@@ -185,6 +190,13 @@ def cook(
     eu_mid_small: list = []
     asia_mid_small: list = []
     for raw_entry in intl_raw:
+        # Registry is authoritative: unregistered tickers are dropped LOUDLY.
+        # (The previous EUROPE default mislabeled them and could fail the
+        # combined audit's geographic-leakage check, blocking the send.)
+        if raw_entry.get("ticker") not in ticker_market:
+            print(f"[COOK] WARN: {raw_entry.get('ticker')!r} not in "
+                  f"ticker_registry.json — entry dropped")
+            continue
         normalized = _normalize_intl_entry(raw_entry, ticker_market, vix)
         cap = normalized["cap_tier"]
         if normalized["market"] == "EUROPE":
@@ -197,7 +209,12 @@ def cook(
                 asia_mid_small.append(normalized)
             else:
                 top_buys_asia.append(normalized)
-        # Tickers absent from registry are silently dropped — registry is authoritative
+
+    # Snapshot the scored intl breadth BEFORE the capitulation move and sector
+    # cap mutate the lists — ticker_count reports scored coverage, and under
+    # CAPITULATION the regional lists are emptied into watchlist.
+    intl_scored_count = (len(top_buys_europe) + len(top_buys_asia)
+                         + len(eu_mid_small) + len(asia_mid_small))
 
     # ── Capitulation regime gate ──────────────────────────────────────────────
     regime = get_regime(vix)
@@ -264,7 +281,7 @@ def cook(
                         "ticker":       e["ticker"],
                         "allocation":   round(mid_weights.get(e["ticker"], 0.0), 4),
                         "final_score":  e["final_score"],
-                        "price_target": e.get("price_target"),
+                        "price_target": e.get("target_price") or e.get("price_target"),
                         "exit_anchors": e.get("exit_anchors", {}),
                     }
                     for e in mid_entries if mid_weights.get(e["ticker"], 0.0) > 0.001
@@ -272,6 +289,10 @@ def cook(
             }
 
         if len(small_entries) >= 2:
+            # ADV liquidity gate is currently INERT: no upstream producer
+            # emits adv_20d_usd yet, and run_optimizer additionally requires
+            # portfolio_value_usd (not passed here) before it caps anything.
+            # Forward-compat plumbing only — do not read this as a live control.
             adv_map = {
                 e["ticker"]: e.get("adv_20d_usd")
                 for e in small_entries if e.get("adv_20d_usd")
@@ -291,7 +312,7 @@ def cook(
                         "ticker":       e["ticker"],
                         "allocation":   round(small_weights.get(e["ticker"], 0.0), 4),
                         "final_score":  e["final_score"],
-                        "price_target": e.get("price_target"),
+                        "price_target": e.get("target_price") or e.get("price_target"),
                         "exit_anchors": e.get("exit_anchors", {}),
                     }
                     for e in small_entries if small_weights.get(e["ticker"], 0.0) > 0.001
@@ -313,7 +334,10 @@ def cook(
         "vix":             vix,
         "vix_regime":      vix_regime,
         "kill_switch":     kill_switch,
-        "ticker_count":    us_ticker_count + len(top_buys_europe) + len(top_buys_asia),
+        # Scored coverage (universe semantics): US universe count + every
+        # registered intl ticker that was scored — independent of the sector
+        # cap and the CAPITULATION watchlist move.
+        "ticker_count":    us_ticker_count + intl_scored_count,
         "generated_at":    datetime.now(timezone.utc).isoformat(),
     }
 

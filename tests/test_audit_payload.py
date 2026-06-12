@@ -60,6 +60,25 @@ def test_score_below_0_raises():
         audit(payload)
 
 
+def test_capitulation_watchlist_bucket_is_audited():
+    """Regression: under CAPITULATION the cook empties top_buys_* and moves
+    everything into watchlist — the safety gate must still see those entries."""
+    payload = _make_payload(vix=35.0)
+    payload["watchlist"] = [_entry(ticker="JNJ", score=1.5, badge="WATCHLIST")]
+    with pytest.raises(ScoreDivergenceError):
+        audit(payload)
+
+
+def test_intl_mid_small_buckets_are_audited():
+    payload = _make_payload()
+    payload["eu_mid_small"] = [
+        _entry(ticker="KGX.DE", score=0.45, badge="WATCHLIST",
+               market="EUROPE", congress=0.8),
+    ]
+    with pytest.raises(CrossContaminationError):
+        audit(payload)
+
+
 # ---------------------------------------------------------------------------
 # B. Badge consistency
 # ---------------------------------------------------------------------------

@@ -26,8 +26,13 @@ _DISPLAY_META_KEYS = (
     "earnings_surprise_days",
     "analyst_consensus_source",
     "analyst_revision_score",
+    "analyst_revision_n_analysts",
     "price_target_upside_score",
     "quality_piotroski_score",
+    # Exit-anchor / liquidity inputs — forwarded when the fetcher produces
+    # them (atr_14 / adv_20d_usd are not fetched yet; keys are forward-compat).
+    "atr_14",
+    "adv_20d_usd",
 )
 
 # v3.0 shadow: engine factor name → INTL metrics column carrying its raw value.
@@ -59,9 +64,9 @@ class StrategyEngine:
         self.active_factors = self.profile["active_factors"]
         self.output_filename = self.profile["output_filename"]
 
-        # Verify weights sum exactly to 1.0 (100%)
+        # Verify weights sum exactly to 1.0 (100%) — 1e-6 per CLAUDE.md §3
         total_weight = sum(self.active_factors.values())
-        if abs(total_weight - 1.0) > 1e-4:
+        if abs(total_weight - 1.0) > 1e-6:
             raise ValueError(f"Profile {self.region} weights sum to {total_weight}, must be exactly 1.0")
 
     def score_ticker_pool(self, raw_universe_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

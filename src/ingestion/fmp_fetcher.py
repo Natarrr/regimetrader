@@ -416,9 +416,11 @@ class FMPFetcher(BaseMarketFetcher):
 
         # ── 5. Analyst revision momentum ──────────────────────────────────────
         analyst_revision_score = None  # None = API failure; 0.0 = no revision signal
+        analyst_revision_n = 0         # coverage count for Discord catalyst display
         try:
             rev_pct, rev_n = client.get_analyst_estimate_revision(ticker)
             analyst_revision_score = 0.0
+            analyst_revision_n = int(rev_n or 0)
             if rev_pct is not None and rev_n >= 3:
                 clipped = max(-0.30, min(0.30, rev_pct))
                 analyst_revision_score = round(
@@ -578,6 +580,7 @@ class FMPFetcher(BaseMarketFetcher):
             "insider_usd":               float(total_usd) if total_usd else 0.0,
             "earnings_surprise_pct":     _eps_pct_intl,
             "earnings_surprise_days":    _eps_days_intl,
+            "analyst_revision_n_analysts": analyst_revision_n,
             # Company meta (sector for Discord sector heatmap)
             "sector":                    sector_from_quote,
         }
