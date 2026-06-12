@@ -281,3 +281,53 @@ def test_international_score_overflow_error_not_exported():
     assert not hasattr(ap_module, "InternationalScoreOverflowError"), (
         "InternationalScoreOverflowError was removed in v2.2-global"
     )
+
+
+# ---------------------------------------------------------------------------
+# SMID leverage sleeve bucket (top_buys_smid)
+# ---------------------------------------------------------------------------
+
+def test_smid_bucket_score_range_audited():
+    """Check A must cover the SMID bucket."""
+    payload = _make_payload()
+    payload["top_buys_smid"] = [_entry(ticker="AAOI", score=1.5, badge="WATCHLIST")]
+    with pytest.raises(ScoreDivergenceError):
+        audit(payload)
+
+
+def test_smid_bucket_badge_audited():
+    """Check B must cover the SMID bucket."""
+    payload = _make_payload()
+    payload["top_buys_smid"] = [_entry(ticker="AAOI", score=0.85, badge="WATCHLIST")]
+    with pytest.raises(BadgeMismatchError):
+        audit(payload)
+
+
+def test_smid_bucket_geo_leak_audited():
+    """Check D must cover the SMID bucket (US-only pool by construction)."""
+    payload = _make_payload()
+    payload["top_buys_smid"] = [
+        _entry(ticker="BAD.DE", score=0.75, badge="TACTICAL BUY", market="USA")
+    ]
+    with pytest.raises(GeographicLeakageError):
+        audit(payload)
+
+
+def test_smid_not_sort_checked():
+    """top_buys_smid is sorted by leverage_score, not final_score — check C
+    deliberately excludes it, so ascending final_score must pass."""
+    payload = _make_payload()
+    payload["top_buys_smid"] = [
+        _entry(ticker="LOW", score=0.70, badge="TACTICAL BUY"),
+        _entry(ticker="HIGH", score=0.90, badge="HIGH BUY"),
+    ]
+    assert audit(payload) is True
+
+
+def test_smid_leverage_score_above_one_passes():
+    """leverage_score is a ranking key (max 1.10) — check A gates final_score only."""
+    payload = _make_payload()
+    entry = _entry(ticker="AAOI", score=0.85, badge="HIGH BUY")
+    entry["leverage_score"] = 1.05
+    payload["top_buys_smid"] = [entry]
+    assert audit(payload) is True

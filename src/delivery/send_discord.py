@@ -134,6 +134,21 @@ _REGION_KEYS: List[Tuple[str, str, str]] = [
 ]
 _MEDAL: Dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+# ── SMID leverage desk (plain ASCII code block — ANSI stays in the action bar) ─
+_SMID_TICKER_W = 9   # ticker.ljust(9) — matches _MATRIX_TICKER_W_MAX
+_SMID_LEV_W    = 6   # "0.0000".."1.1000"; leverage_score may exceed 1.0 (ranking key)
+_SMID_MOM_W    = 8   # "+999.9%" worst case after the ±9.999 display clamp
+_SMID_FLAG_W   = 8   # "E60d F8" worst case
+_SMID_HEADER = (
+    "TICKER".ljust(_SMID_TICKER_W) + " "
+    + "LEV".rjust(_SMID_LEV_W) + " "
+    + "vsSPY".rjust(_SMID_MOM_W) + " "
+    + "FLAGS".ljust(_SMID_FLAG_W)
+)
+# Mirrors cook_toplists._SMID_PEAD_WINDOW_DAYS — the flag must agree with the
+# PEAD boost window [Bernard & Thomas, 1989].
+_SMID_PEAD_WINDOW_DAYS = 60
+
 # ── Sector normalisation ───────────────────────────────────────────────────────
 _SECTOR_SHORT: Dict[str, str] = {
     "Information Technology": "🖥️ Tech",
@@ -309,6 +324,36 @@ def _compute_catalyst(entry: Dict[str, Any]) -> str:
     return catalyst_str
 
 
+def _smid_flags(entry: Dict[str, Any]) -> str:
+    """Compact display-meta flags: PEAD recency + Piotroski points.
+
+    'E{days}d' iff positive surprise within the PEAD window (same affirmative-
+    evidence rule as the cook boost — absence is NOT bearish, it renders '-').
+    'F{n}' recovers the raw 0-8 point count from the normalized points/8
+    quality_piotroski_score (see momentum_signals.score_quality_piotroski)."""
+    bits: List[str] = []
+    pct = entry.get("earnings_surprise_pct")
+    days = int(entry.get("earnings_surprise_days") or 0)
+    if pct is not None and _safe_float(pct) > 0 and 0 < days <= _SMID_PEAD_WINDOW_DAYS:
+        bits.append(f"E{days}d")
+    qps = entry.get("quality_piotroski_score")
+    if qps is not None and _safe_float(qps) > 0:
+        bits.append(f"F{round(_safe_float(qps) * 8):d}")
+    return (" ".join(bits) or "-")[:_SMID_FLAG_W]
+
+
+def _smid_row(entry: Dict[str, Any]) -> str:
+    """One fixed-width SMID desk row — every row is the same length as
+    _SMID_HEADER by construction (equal-length invariant)."""
+    ticker = str(entry.get("ticker") or "?")[:_SMID_TICKER_W].ljust(_SMID_TICKER_W)
+    lev = f"{_safe_float(entry.get('leverage_score')):.4f}".rjust(_SMID_LEV_W)
+    # Display clamp only (±999.9%) — keeps the column width invariant; the
+    # underlying datum is never modified.
+    mom = max(-9.999, min(9.999, _safe_float(entry.get("momentum_spy_relative"))))
+    mom_s = f"{mom:+.1%}".rjust(_SMID_MOM_W)
+    return f"{ticker} {lev} {mom_s} {_smid_flags(entry).ljust(_SMID_FLAG_W)}"
+
+
 def _spy_qqq_snapshot() -> str:
     """Return a one-line market snapshot for SPY + QQQ, or '' on failure."""
     try:
@@ -428,6 +473,7 @@ class DiscordPayloadBuilder:
 
     MAX_DESK_ENTRIES = 3
     MAX_MATRIX_ROWS = 3  # per region sub-table
+    MAX_SMID_ENTRIES = 3  # SMID leverage desk depth
 
     def __init__(
         self,
@@ -591,6 +637,24 @@ class DiscordPayloadBuilder:
         return {
             "name":   f"{flag} 2 · ALPHA DESK — {label}",
             "value":  _truncate("\n".join(lines)),
+            "inline": False,
+        }
+
+    def _smid_field(self, max_entries: int) -> Optional[Dict[str, Any]]:
+        """SMID leverage desk — plain ``` block, graceful None when the key
+        is absent/empty (backward compat with pre-SMID artifacts)."""
+        entries = self._region_entries("top_buys_smid")
+        if not entries:
+            return None
+        rows = [_SMID_HEADER] + [_smid_row(e) for e in entries[:max_entries]]
+        # Structural fit: drop whole rows, never slice a fenced block.
+        while len(rows) > 1 and len("\n".join(rows)) + 8 > _LIMIT_FIELD:
+            rows.pop()
+        if len(rows) <= 1:
+            return None
+        return {
+            "name":   "🚀 2b · SMALL-CAP / MID-CAP LEVERAGE DESK",
+            "value":  "```\n" + "\n".join(rows) + "\n```",
             "inline": False,
         }
 
@@ -777,6 +841,12 @@ class DiscordPayloadBuilder:
                 field = self._desk_field(key, flag, label, population, desk_n)
                 if field:
                     fields.append(field)
+            # SMID leverage desk — never rendered under CAPITULATION (this is
+            # the non-panic branch; cook also empties the pool — defense in
+            # depth). min(·, desk_n) keeps the build() ladder monotone.
+            smid = self._smid_field(min(self.MAX_SMID_ENTRIES, desk_n))
+            if smid:
+                fields.append(smid)
             if matrix_rows:
                 matrix = self._matrix_field(matrix_rows)
                 if matrix:

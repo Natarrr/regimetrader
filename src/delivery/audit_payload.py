@@ -77,6 +77,11 @@ def _iter_all_entries(data: dict):
     seen: set = set()
     for bucket in (
         "top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
+        # SMID leverage sleeve: copies of US entries ranked by leverage_score —
+        # covered by checks A/B/D/E; deliberately EXCLUDED from check C (the
+        # list is not sorted by final_score) and leverage_score itself is a
+        # ranking key that check A does not gate (it may exceed 1.0).
+        "top_buys_smid",
         "usa_overflow", "eu_overflow", "asia_overflow",
         "mid_caps", "small_caps",
         # CAPITULATION moves every entry into watchlist (cook_toplists) — the

@@ -687,3 +687,151 @@ def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):
     cook_mod.cook(us_path, intl_path, registry, out)
     result = json.loads(out.read_text())
     assert result["top_buys_europe"][0].get("pipeline") == "INTL"
+
+
+# ---------------------------------------------------------------------------
+# SMID leverage pool tests
+# ---------------------------------------------------------------------------
+
+
+class TestSmidLeveragePool:
+    """_build_smid_leverage_pool: US small/mid-cap leverage sleeve.
+
+    leverage_score = (0.50*final_score + 0.30*momentum_long
+                      + 0.20*quality_piotroski) * pead_boost
+    PEAD boost [Bernard & Thomas, 1989]: 1.10 iff earnings_surprise_pct > 0
+    and 0 < earnings_surprise_days <= 60; absence is NEVER bearish.
+    """
+
+    def _us(self, ticker, score=0.72, cap=5e9, mom=0.70, qp=0.60, **kw):
+        badge = ("HIGH BUY" if score >= 0.80
+                 else "TACTICAL BUY" if score >= 0.60 else "WATCHLIST")
+        return {"ticker": ticker, "final_score": score, "badge": badge,
+                "market": "USA", "pipeline": "US", "market_cap": cap,
+                "factors": {"momentum_long": mom, "quality_piotroski": qp,
+                            "sector": kw.pop("sector", "Technology")}, **kw}
+
+    # ── unit: composite + selection ──────────────────────────────────────
+
+    def test_weights_sum_to_one(self, cook_mod):
+        assert abs(sum(cook_mod._SMID_LEVERAGE_WEIGHTS.values()) - 1.0) < 1e-6
+
+    def test_cap_bounds_inclusive(self, cook_mod):
+        entries = [
+            self._us("FLOOR",  cap=300_000_000),
+            self._us("CEIL",   cap=10_000_000_000),
+            self._us("MICRO",  cap=299_999_999),
+            self._us("MEGA",   cap=10_000_000_001),
+            self._us("NOCAP",  cap=0),
+        ]
+        pool = cook_mod._build_smid_leverage_pool(entries, top_n=10)
+        tickers = {e["ticker"] for e in pool}
+        assert tickers == {"FLOOR", "CEIL"}
+
+    def test_top3_cap_and_descending(self, cook_mod):
+        entries = [self._us(f"T{i}", score=0.60 + 0.05 * i) for i in range(5)]
+        pool = cook_mod._build_smid_leverage_pool(entries)
+        assert len(pool) == 3
+        levs = [e["leverage_score"] for e in pool]
+        assert levs == sorted(levs, reverse=True)
+        assert [e["ticker"] for e in pool] == ["T4", "T3", "T2"]
+
+    def test_intl_pipeline_excluded(self, cook_mod):
+        """Same FX-normalization guard as _segment_by_market_cap: INTL
+        market_cap is listing-currency, never bracketed as USD."""
+        intl = self._us("ASML.AS", cap=5e9)
+        intl["pipeline"] = "INTL"
+        pool = cook_mod._build_smid_leverage_pool([intl, self._us("AAOI")])
+        assert [e["ticker"] for e in pool] == ["AAOI"]
+
+    def test_pead_boost_changes_ranking(self, cook_mod):
+        a = self._us("AAA", score=0.70, mom=0.70, qp=0.70)
+        b = self._us("BBB", score=0.68, mom=0.68, qp=0.68,
+                     earnings_surprise_pct=5.0, earnings_surprise_days=30)
+        pool = cook_mod._build_smid_leverage_pool([a, b])
+        assert [e["ticker"] for e in pool] == ["BBB", "AAA"]
+        assert pool[0]["leverage_score"] == round(0.68 * 1.10, 4)  # 0.748
+        assert pool[1]["leverage_score"] == 0.70
+
+    def test_pead_window_and_sign_boundaries(self, cook_mod):
+        def lev(**kw):
+            entry = self._us("X", score=0.70, mom=0.70, qp=0.70, **kw)
+            return cook_mod._build_smid_leverage_pool([entry])[0]["leverage_score"]
+
+        base = lev()  # no earnings meta at all
+        assert base == 0.70
+        assert lev(earnings_surprise_pct=5.0, earnings_surprise_days=60) == 0.77
+        assert lev(earnings_surprise_pct=5.0, earnings_surprise_days=61) == base
+        assert lev(earnings_surprise_pct=5.0, earnings_surprise_days=0) == base
+        assert lev(earnings_surprise_pct=0.0, earnings_surprise_days=30) == base
+        assert lev(earnings_surprise_pct=-3.0, earnings_surprise_days=30) == base
+        # Absence is NEVER bearish: None meta scores identically to no meta.
+        assert lev(earnings_surprise_pct=None, earnings_surprise_days=None) == base
+
+    def test_source_entries_not_mutated(self, cook_mod):
+        import copy
+        entries = [self._us("AAA"), self._us("BBB", score=0.81)]
+        snapshot = copy.deepcopy(entries)
+        cook_mod._build_smid_leverage_pool(entries)
+        assert entries == snapshot
+        for original in entries:
+            assert "leverage_score" not in original
+
+    def test_leverage_score_may_exceed_one_final_score_untouched(self, cook_mod):
+        entry = self._us("MAX", score=1.0, mom=1.0, qp=1.0,
+                         earnings_surprise_pct=10.0, earnings_surprise_days=10)
+        pool = cook_mod._build_smid_leverage_pool([entry])
+        assert pool[0]["leverage_score"] == 1.1
+        assert pool[0]["final_score"] == 1.0  # audit check A gates this key only
+
+    # ── integration: cook() plumbing ─────────────────────────────────────
+
+    def _cook(self, cook_mod, registry, tmp_path, us_data):
+        us_path = tmp_path / "us.json"
+        us_path.write_text(json.dumps(us_data), encoding="utf-8")
+        intl_path = tmp_path / "intl.json"
+        intl_path.write_text(json.dumps([]), encoding="utf-8")
+        out = tmp_path / "out.json"
+        cook_mod.cook(us_path, intl_path, registry, out)
+        return json.loads(out.read_text())
+
+    def test_cook_always_emits_top_buys_smid_key(self, cook_mod, registry, tmp_path):
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys": [], "vix": 18.0, "vix_regime": "NORMAL",
+            "kill_switch": False, "ticker_count": 0,
+        })
+        assert "top_buys_smid" in result
+        assert result["top_buys_smid"] == []
+
+    def test_cook_smid_includes_sector_overflow(self, cook_mod, registry, tmp_path):
+        """The leverage sleeve is NOT sector-constrained: names pushed to
+        usa_overflow by the sector count cap remain SMID candidates."""
+        entries = [self._us(f"T{i}", score=0.80 - 0.01 * i, sector="Tech")
+                   for i in range(3)]
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys_usa": entries, "vix": 17.0, "vix_regime": "NORMAL",
+            "kill_switch": False, "ticker_count": 3,
+        })
+        assert len(result["top_buys_usa"]) == 2  # sector cap = 2
+        assert {e["ticker"] for e in result["top_buys_smid"]} == {"T0", "T1", "T2"}
+
+    def test_cook_capitulation_empties_smid(self, cook_mod, registry, tmp_path):
+        entry = self._us("JNJ", score=0.50, qp=0.90)
+        entry["factors"]["beta"] = 0.5
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys_usa": [entry], "vix": 35.0, "vix_regime": "CAPITULATION",
+            "kill_switch": True, "ticker_count": 1,
+        })
+        assert result["top_buys_smid"] == []
+
+    def test_cook_smid_excludes_large_caps(self, cook_mod, registry, tmp_path):
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys_usa": [
+                self._us("MSFT", score=0.90, cap=3e12, sector="Tech"),
+                self._us("AAOI", score=0.70, cap=1.4e9, sector="Optics"),
+            ],
+            "vix": 17.0, "vix_regime": "NORMAL",
+            "kill_switch": False, "ticker_count": 2,
+        })
+        assert result["top_buys_usa"][0]["ticker"] == "MSFT"
+        assert [e["ticker"] for e in result["top_buys_smid"]] == ["AAOI"]
