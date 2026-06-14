@@ -331,3 +331,124 @@ def test_smid_leverage_score_above_one_passes():
     entry["leverage_score"] = 1.05
     payload["top_buys_smid"] = [entry]
     assert audit(payload) is True
+
+
+# ---------------------------------------------------------------------------
+# H. On-demand single-ticker block (on_demand_ticker)
+# ---------------------------------------------------------------------------
+
+def _on_demand_payload(ticker="TSLA", pipeline="US", market="USA",
+                       score=0.64, badge="TACTICAL BUY", congress=0.0,
+                       vix=17.0, **block_overrides):
+    """Minimal on-demand payload — no top_buys_* buckets by design."""
+    payload = {
+        "on_demand": True,
+        "on_demand_ticker": {
+            "ticker": ticker,
+            "pipeline": pipeline,
+            "scoring_mode": "absolute",
+            "entry": _entry(ticker=ticker, score=score, badge=badge,
+                            market=market, congress=congress),
+        },
+        "vix": vix,
+        "kill_switch": False,
+        "ticker_count": 1,
+        "generated_at": "2026-06-12T15:40:00+00:00",
+    }
+    payload["on_demand_ticker"].update(block_overrides)
+    return payload
+
+
+def test_on_demand_valid_us_passes():
+    assert audit(_on_demand_payload()) is True
+
+
+def test_on_demand_valid_intl_passes():
+    payload = _on_demand_payload(
+        ticker="SAP.DE", pipeline="INTL", market="EUROPE",
+        score=0.71, badge="TACTICAL BUY",
+    )
+    assert audit(payload) is True
+
+
+def test_on_demand_score_above_1_raises():
+    payload = _on_demand_payload(score=1.01, badge="HIGH BUY")
+    with pytest.raises(ScoreDivergenceError):
+        audit(payload)
+
+
+def test_on_demand_badge_mismatch_raises():
+    payload = _on_demand_payload(score=0.85, badge="WATCHLIST")
+    with pytest.raises(BadgeMismatchError):
+        audit(payload)
+
+
+def test_on_demand_intl_congress_raises():
+    payload = _on_demand_payload(
+        ticker="SAP.DE", pipeline="INTL", market="EUROPE", congress=0.3,
+    )
+    with pytest.raises(CrossContaminationError):
+        audit(payload)
+
+
+def test_on_demand_geo_leak_raises():
+    """Suffixed ticker tagged USA must trip check D inside the block."""
+    payload = _on_demand_payload(ticker="SAP.DE", pipeline="INTL", market="USA")
+    with pytest.raises(GeographicLeakageError):
+        audit(payload)
+
+
+def test_on_demand_bad_ticker_format_raises():
+    payload = _on_demand_payload(ticker="toolong123")
+    with pytest.raises(StructuralIntegrityError):
+        audit(payload)
+
+
+def test_on_demand_missing_entry_raises():
+    payload = _on_demand_payload()
+    del payload["on_demand_ticker"]["entry"]
+    with pytest.raises(StructuralIntegrityError):
+        audit(payload)
+
+
+def test_on_demand_block_entry_ticker_mismatch_raises():
+    payload = _on_demand_payload()
+    payload["on_demand_ticker"]["entry"]["ticker"] = "MSFT"
+    with pytest.raises(StructuralIntegrityError):
+        audit(payload)
+
+
+def test_on_demand_bad_pipeline_raises():
+    payload = _on_demand_payload(pipeline="EMEA")
+    with pytest.raises(StructuralIntegrityError):
+        audit(payload)
+
+
+def test_on_demand_missing_scoring_mode_raises():
+    payload = _on_demand_payload()
+    del payload["on_demand_ticker"]["scoring_mode"]
+    with pytest.raises(StructuralIntegrityError):
+        audit(payload)
+
+
+def test_on_demand_intl_score_above_1_raises():
+    """E2 / check-A semantics hold inside the block for INTL entries."""
+    payload = _on_demand_payload(
+        ticker="SAP.DE", pipeline="INTL", market="EUROPE",
+        score=1.01, badge="HIGH BUY",
+    )
+    with pytest.raises(ScoreDivergenceError):
+        audit(payload)
+
+
+def test_on_demand_vix_still_gated():
+    """Check F runs on the root regardless of payload shape."""
+    payload = _on_demand_payload(vix=999.0)
+    with pytest.raises(VIXCoherenceError):
+        audit(payload)
+
+
+def test_daily_payload_without_on_demand_key_unaffected():
+    """Regression pin: a normal daily payload never enters the on-demand branch."""
+    payload = _make_payload(top_buys=[_entry(score=0.75)])
+    assert audit(payload) is True

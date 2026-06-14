@@ -171,6 +171,76 @@ def test_module_loads_standalone_by_path():
     assert hasattr(mod, "main")
 
 
+def _cooked_on_demand(tmp_path: Path, badge="TACTICAL BUY", **overrides) -> Path:
+    """On-demand single-ticker payload — no top_buys_* keys by design."""
+    data = {
+        "on_demand": True,
+        "on_demand_ticker": {
+            "ticker": "MSFT",
+            "pipeline": "US",
+            "scoring_mode": "absolute",
+            "entry": {
+                "ticker": "MSFT", "final_score": 0.72, "badge": badge,
+                "market": "USA", "pipeline": "US",
+                "factors": {"insider_conviction": 0.6, "momentum_long": 0.7},
+                "validation_metadata": {"is_complete": True,
+                                        "missing_sources": []},
+                "weight_coverage": 0.92,
+            },
+        },
+        "vix":          17.0,
+        "vix_regime":   "NORMAL",
+        "kill_switch":  False,
+        "ticker_count": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    data.update(overrides)
+    path = tmp_path / "top_lists.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+class TestOnDemandCli:
+    def test_dry_run_renders_audit_embed(self, tmp_path, monkeypatch, capfd):
+        """Valid on-demand payload passes the REAL audit gate and renders the
+        factor-audit layout (not the daily brief)."""
+        path = _cooked_on_demand(tmp_path)
+        rc = _run_main(
+            ["--input", str(path), "--log-dir", str(tmp_path), "--dry-run"],
+            monkeypatch, webhook=None)
+        assert rc == 0
+        payload = _extract_payload(capfd.readouterr().out)
+        embed = payload["embeds"][0]
+        assert "ON-DEMAND FACTOR AUDIT: MSFT" in embed["title"]
+        assert "REGIME TRADER" not in embed["title"]
+
+    def test_audit_gate_blocks_bad_on_demand_payload(self, tmp_path, monkeypatch):
+        """Safety-gate coverage: badge mismatch inside the on_demand block must
+        be caught by the REAL audit → alert + exit 1, nothing else sent."""
+        path = _cooked_on_demand(tmp_path, badge="HIGH BUY")  # 0.72 ≠ HIGH BUY
+        sent = {}
+
+        def _fake_send(webhook, payload, **kw):
+            sent["payload"] = payload
+            return True
+
+        monkeypatch.setattr(
+            "src.delivery.send_discord.send_to_discord", _fake_send)
+        rc = _run_main(["--input", str(path), "--log-dir", str(tmp_path)],
+                       monkeypatch)
+        assert rc == 1
+        assert "AUDIT GATE FAILED" in sent["payload"]["embeds"][0]["description"]
+
+    def test_send_path_exit_0(self, tmp_path, monkeypatch):
+        path = _cooked_on_demand(tmp_path)
+        monkeypatch.setattr(
+            "src.delivery.send_discord.send_to_discord",
+            lambda *a, **kw: True)
+        rc = _run_main(["--input", str(path), "--log-dir", str(tmp_path)],
+                       monkeypatch)
+        assert rc == 0
+
+
 def test_audit_gate_failure_sends_alert(tmp_path, monkeypatch):
     """PipelineAuditError from the pre-flight audit → alert + exit 1."""
     from src.delivery.audit_payload import PipelineAuditError

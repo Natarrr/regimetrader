@@ -1,0 +1,6 @@
+# Path: scripts/requirements-bot.txt
+# Discord ChatOps bot daemon deps — deliberately NOT in requirements.txt /
+# requirements-ci.txt: the bot runs outside the CI/pipeline hot path and
+# discord.py must never bloat the Actions images.
+discord.py>=2.3.0
+requests>=2.31.0

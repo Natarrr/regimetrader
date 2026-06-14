@@ -96,6 +96,116 @@ def _iter_all_entries(data: dict):
                 yield entry
 
 
+_ON_DEMAND_PIPELINES = {"US", "INTL"}
+
+
+def _audit_on_demand(data: dict) -> None:
+    """Check H — on-demand single-ticker block (on_demand_ticker).
+
+    The block lives outside the bulk buckets, so checks A-E/G never see it;
+    this applies the same gate semantics to the embedded entry. Daily payloads
+    never carry the key, so this is a no-op for the standard pipeline.
+    """
+    block = data["on_demand_ticker"]
+    if not isinstance(block, dict):
+        raise StructuralIntegrityError(
+            f"on_demand_ticker must be a dict, got {type(block).__name__}"
+        )
+
+    ticker = block.get("ticker")
+    if not isinstance(ticker, str) or not ticker:
+        raise StructuralIntegrityError(
+            f"on_demand_ticker.ticker={ticker!r} must be a non-empty string"
+        )
+    if not _TICKER_RE.match(ticker):
+        raise StructuralIntegrityError(
+            f"on_demand ticker {ticker!r} does not match allowed format "
+            f"(e.g. 'MSFT', 'SAP.DE')"
+        )
+
+    pipeline = block.get("pipeline")
+    if pipeline not in _ON_DEMAND_PIPELINES:
+        raise StructuralIntegrityError(
+            f"on_demand_ticker.pipeline={pipeline!r} must be one of "
+            f"{sorted(_ON_DEMAND_PIPELINES)}"
+        )
+
+    if "scoring_mode" not in block:
+        raise StructuralIntegrityError(
+            "on_demand_ticker.scoring_mode is missing — single-ticker scores "
+            "must disclose their normalization mode"
+        )
+
+    entry = block.get("entry")
+    if not isinstance(entry, dict):
+        raise StructuralIntegrityError(
+            "on_demand_ticker.entry is missing or not a dict"
+        )
+    if entry.get("ticker") != ticker:
+        raise StructuralIntegrityError(
+            f"on_demand_ticker.ticker={ticker!r} != entry.ticker="
+            f"{entry.get('ticker')!r}"
+        )
+
+    # A. Score range
+    score = entry.get("final_score")
+    if score is None or not (0.0 <= score <= 1.0):
+        raise ScoreDivergenceError(
+            f"On-demand ticker {ticker!r}: final_score={score!r} is outside [0, 1]"
+        )
+
+    # B. Badge consistency
+    badge = entry.get("badge", "")
+    expected = _expected_badge(score)
+    if badge != expected:
+        raise BadgeMismatchError(
+            f"On-demand ticker {ticker!r}: score={score:.4f} expects "
+            f"badge={expected!r}, got {badge!r}"
+        )
+
+    # D. Geographic leakage — suffix vs market
+    market = entry.get("market", "USA")
+    has_suffix = "." in ticker
+    if has_suffix and market not in _FOREIGN_MARKETS:
+        raise GeographicLeakageError(
+            f"On-demand ticker {ticker!r} has an international suffix but "
+            f"market={market!r}; expected EUROPE or ASIA"
+        )
+    if not has_suffix and market in _FOREIGN_MARKETS:
+        raise GeographicLeakageError(
+            f"On-demand ticker {ticker!r} has no suffix but market={market!r}; "
+            f"expected USA"
+        )
+
+    # E. Cross-contamination — non-US entries must have congress == 0
+    if market in _FOREIGN_MARKETS:
+        congress_val = entry.get("factors", {}).get("congress", 0.0)
+        if congress_val > 0.0:
+            raise CrossContaminationError(
+                f"On-demand ticker {ticker!r} ({market}): congress factor="
+                f"{congress_val!r} > 0; non-US tickers must not carry a "
+                f"congress signal"
+            )
+
+    # E2. Dynamic INTL ceiling — same semantics as the bulk check
+    if market in _FOREIGN_MARKETS:
+        try:
+            from src.config.weights import get_weights as _get_weights
+            _weights = _get_weights(ticker)
+            _avail = sum(
+                w for f, w in _weights.items()
+                if f not in {"congress", "transcript_tone"}
+            ) if _weights else 1.0
+        except Exception:
+            _avail = 1.0
+        if float(score) > round(_avail, 6) + 1e-4:
+            raise ScoreDivergenceError(
+                f"On-demand ticker {ticker!r} ({market}): final_score="
+                f"{score:.4f} exceeds dynamic available-factor ceiling "
+                f"{_avail:.4f}. Possible US-factor injection."
+            )
+
+
 # ---------------------------------------------------------------------------
 # Public audit function
 # ---------------------------------------------------------------------------
@@ -118,6 +228,12 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
         data = top_lists_path
     else:
         data = json.loads(Path(top_lists_path).read_text(encoding="utf-8"))
+
+    # ------------------------------------------------------------------
+    # H. On-demand single-ticker block — key-gated, daily payloads skip
+    # ------------------------------------------------------------------
+    if "on_demand_ticker" in data:
+        _audit_on_demand(data)
 
     # ------------------------------------------------------------------
     # A. Score range — every entry across all buckets

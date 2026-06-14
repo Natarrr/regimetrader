@@ -126,6 +126,30 @@ _MATRIX_INTL_COLS: List[Tuple[str, str]] = [
 _MATRIX_CELL_W = 5
 _MATRIX_TICKER_W_MAX = 9
 
+# ── On-demand factor audit (ChatOps single-ticker) ────────────────────────────
+# Fixed-width vertical stack: LABEL(17) + VALUE(6) + " " + NOTE(14) = 38 chars
+# per row — equal-length invariant, ASCII-only inside the fence (same rules as
+# the SMID desk and factor matrix).
+_OD_TITLE_FMT = "── 📊 ON-DEMAND FACTOR AUDIT: {ticker} ──"
+_OD_LABEL_W = 17
+_OD_VALUE_W = 6
+_OD_NOTE_W = 14
+_OD_FACTOR_LABELS: Dict[str, str] = {
+    "insider_conviction": "Insider Conv",
+    "insider_breadth":    "Insider Breadth",
+    "congress":           "Congress",
+    "news_sentiment":     "News Sentiment",
+    "news_buzz":          "News Buzz",
+    "momentum_long":      "Momentum 12-1m",
+    "volume_attention":   "Volume Attn",
+    "analyst_consensus":  "Analyst Cons",
+    "quality_piotroski":  "Quality F-Score",
+    "fcf_yield":          "FCF Yield",
+    "amihud_shock":       "Amihud Liquid",
+    "pb_value_up":        "P/B Value",
+    "roic_quality":       "ROIC Quality",
+}
+
 _REGION_KEYS: List[Tuple[str, str, str]] = [
     # (top_lists key, flag, label)
     ("top_buys_usa",    "🇺🇸", "USA"),
@@ -499,6 +523,14 @@ class DiscordPayloadBuilder:
             problems.append(f"vix missing or non-numeric: {vix!r}")
         if not (self.data.get("generated_at") or "").strip():
             problems.append("generated_at missing")
+        if "on_demand_ticker" in self.data:
+            # ChatOps single-ticker payload — regional keys are absent by
+            # design (bulk consumers must never mistake it for a daily brief).
+            block = self.data.get("on_demand_ticker")
+            entry = block.get("entry") if isinstance(block, dict) else None
+            if not isinstance(entry, dict) or not entry.get("ticker"):
+                problems.append("on_demand_ticker.entry.ticker missing")
+            return problems
         if not any(k in self.data for k in (
                 "top_buys_usa", "top_buys_europe", "top_buys_asia", "watchlist")):
             problems.append(
@@ -890,6 +922,125 @@ class DiscordPayloadBuilder:
                 break
         return {"embeds": [embed]}
 
+    # ── On-demand single-ticker audit (ChatOps) ───────────────────────────────
+
+    @staticmethod
+    def _on_demand_stack_rows(entry: Dict[str, Any]) -> List[str]:
+        """Fixed-width vertical factor stack — every row 38 chars (equal-length
+        invariant), ASCII-only, '-' for zero/absent values (matrix convention),
+        'missing' note for schema-gate flagged sources."""
+        def _row(label: str, value: str, note: str = "") -> str:
+            return (label[:_OD_LABEL_W].ljust(_OD_LABEL_W)
+                    + value[:_OD_VALUE_W].rjust(_OD_VALUE_W) + " "
+                    + note[:_OD_NOTE_W].ljust(_OD_NOTE_W))
+
+        score = _safe_float(entry.get("final_score"))
+        badge = entry.get("badge") or _badge_from_score(score)
+        is_intl = (entry.get("market") or "USA").upper() in ("EUROPE", "ASIA", "EU")
+        cols = _MATRIX_INTL_COLS if is_intl else _MATRIX_US_COLS
+        missing = set(
+            (entry.get("validation_metadata") or {}).get("missing_sources") or []
+        )
+        factors = entry.get("factors") or {}
+
+        rows = [
+            _row("FACTOR", "VALUE", "NOTE"),
+            _row("FINAL SCORE", f"{score:.4f}", badge),
+        ]
+        raw = entry.get("raw_score")
+        if raw is not None:
+            rows.append(_row("ALPHA (RAW)", f"{_safe_float(raw):.4f}", "pre-overlay"))
+        for key, _lbl in cols:
+            val = factors.get(key)
+            v = _safe_float(val) if val is not None else 0.0
+            rows.append(_row(
+                _OD_FACTOR_LABELS.get(key, key),
+                "-" if v <= 0 else f"{v:.2f}",
+                "missing" if key in missing else "",
+            ))
+        return rows
+
+    def build_on_demand(self) -> Dict[str, Any]:
+        """Render the on-demand single-ticker factor audit embed.
+
+        Layout contract: title `── 📊 ON-DEMAND FACTOR AUDIT: {ticker} ──`,
+        ANSI confined to the leading action bar (reset before the closing
+        fence), plain-ASCII fixed-width factor stack, catalyst + disclosure
+        + legend fields. Kill-switch/regime styling comes from the same
+        properties as the daily brief — never bypassed.
+        """
+        block = self.data.get("on_demand_ticker") or {}
+        entry = block.get("entry") or {}
+        ticker = block.get("ticker") or entry.get("ticker", "?")
+        score = _safe_float(entry.get("final_score"))
+        badge = entry.get("badge") or _badge_from_score(score)
+        regime = self.regime
+        color = _COLOR_RED if (self.is_panic or self._is_stale) \
+            else _REGIME_STYLE[regime][3]
+
+        name = ""
+        if ticker in _TICKER_NAMES:
+            name = f" ({_TICKER_NAMES[ticker][:14]})"
+        verdict = [
+            (f"**{ticker}**{name} — **{badge}** · `{score:.4f}` · "
+             f"{block.get('pipeline', '?')} pipeline"),
+            (f"• Regime **{regime.value}** · VIX `{float(self.data['vix']):.1f}` "
+             f"· overlay `×{self.multiplier:.2f}` · {strategy_label(regime)}"),
+        ]
+        if self._is_stale:
+            verdict.append(f"⚠️ **DATA STALE — {self._age_hours:.0f}h old**")
+        if self.is_panic:
+            verdict.append(
+                "🔴 **KILL-SWITCH ACTIVE — BUY SIGNALS SUPPRESSED · "
+                "SELL/EXIT SIGNALS REMAIN LIVE**")
+        description = self._ansi_bar() + "\n".join(verdict)
+
+        # Structural budget fit: drop whole factor rows, never slice a fence.
+        rows = self._on_demand_stack_rows(entry)
+        while len(rows) > 2 and len("\n".join(rows)) + 8 > _LIMIT_FIELD:
+            rows.pop()
+        fields: List[Dict[str, Any]] = [
+            {
+                "name":   "🧬 FACTOR STACK",
+                "value":  "```\n" + "\n".join(rows) + "\n```",
+                "inline": False,
+            },
+            {
+                "name":   "🎯 CATALYST",
+                "value":  _truncate(f"└ {_compute_catalyst(entry)}"),
+                "inline": False,
+            },
+        ]
+
+        disclosure = [
+            (f"• Scoring: **{block.get('scoring_mode', 'absolute')}** "
+             "(single ticker — no peer-group normalization)"),
+        ]
+        cov = entry.get("weight_coverage")
+        if cov is not None:
+            cov_f = _safe_float(cov, 1.0)
+            warn = " ⚠COV" if cov_f < 0.70 else ""
+            disclosure.append(f"• Weight coverage: `{cov_f:.0%}`{warn}")
+        missing = (entry.get("validation_metadata") or {}).get("missing_sources") or []
+        if missing:
+            disclosure.append("• Missing sources: " + ", ".join(missing[:8]))
+        fields.append({
+            "name":   "⚠️ DATA DISCLOSURE",
+            "value":  _truncate("\n".join(disclosure)),
+            "inline": False,
+        })
+        fields.append(self._legend_field())
+
+        embed = {
+            "title":       _OD_TITLE_FMT.format(ticker=ticker),
+            "description": description,
+            "color":       color,
+            "fields":      fields,
+            "footer":      self._footer(),
+            "timestamp":   self.now.isoformat(),
+        }
+        return {"embeds": [embed]}
+
     # ── Alert (DATA UNAVAILABLE contract) ─────────────────────────────────────
 
     @classmethod
@@ -1067,7 +1218,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         send_to_discord(webhook, payload)
         return 1
 
-    payload = builder.build()
+    # On-demand single-ticker payloads render the factor-audit layout; the
+    # daily brief path is untouched (key-presence dispatch).
+    if "on_demand_ticker" in status:
+        payload = builder.build_on_demand()
+    else:
+        payload = builder.build()
     if args.dry_run:
         _print_payload(payload)
         return 0

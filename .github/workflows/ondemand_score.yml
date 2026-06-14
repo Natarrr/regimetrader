@@ -1,0 +1,309 @@
+name: ondemand_score
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ChatOps on-demand single-ticker scoring.
+#
+# Triggered by scripts/discord_bot.py (?score TICKER) via workflow_dispatch.
+# Scores exactly one ticker through the existing factor pipeline and posts an
+# ON-DEMAND FACTOR AUDIT embed to DISCORD_WEBHOOK_URL (same channel as the daily
+# brief). Routes US vs INTL by config/ticker_registry.json.
+#
+# Isolation guarantees (cannot perturb the daily pipeline):
+#   • permissions: contents: read   → cannot commit logs/archive snapshots
+#   • actions/cache/restore (no save) → never writes the daily cache keys
+#   • own concurrency group           → never queue-blocks daily_trading_pipeline
+#   • emits logs/top_lists.json with an on_demand_ticker block and NO top_buys_*
+#     keys → bulk consumers can never mistake it for a daily artifact
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Target symbol (US: TSLA · INTL must be in ticker_registry.json: SAP.DE)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ondemand_score-${{ inputs.ticker }}
+  cancel-in-progress: false
+
+jobs:
+  score_one:
+    name: Score ${{ inputs.ticker }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      TICKER: ${{ inputs.ticker }}
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python 3.11 + pip cache ───────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Validate ticker & resolve route (US vs INTL) ─────────────────────
+      # Regex mirrors src/delivery/audit_payload._TICKER_RE; a dotted ticker
+      # absent from the registry is rejected here (clear ::error) rather than
+      # burning a scoring run that the safety gate would later block.
+      - name: Validate & route
+        id: route
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, sys
+          raw = os.environ["TICKER"]
+          ticker = raw.strip().upper()
+          if not re.match(r"^([A-Z]{1,5}|[A-Z0-9]{1,6}\.[A-Z]{1,2})$", ticker):
+              print(f"::error::Invalid ticker {raw!r} (expected e.g. TSLA or SAP.DE)")
+              sys.exit(1)
+
+          route, market, sector, cap_tier = "us", "USA", "Unknown", "large"
+          if "." in ticker:
+              reg = json.load(open("config/ticker_registry.json", encoding="utf-8"))
+              found = None
+              for section in ("europe", "europe_mid", "asia", "asia_mid"):
+                  for e in reg.get(section, []):
+                      if e.get("ticker") == ticker:
+                          found = (e, section)
+                          break
+                  if found:
+                      break
+              if not found:
+                  print(f"::error::{ticker} has an international suffix but is not "
+                        f"in ticker_registry.json — INTL scoring only covers "
+                        f"registered tickers")
+                  sys.exit(1)
+              entry, section = found
+              route = "intl"
+              market = "EUROPE" if section.startswith("europe") else "ASIA"
+              sector = entry.get("sector", "Unknown")
+              cap_tier = entry.get("cap_tier", "large")
+
+          out = os.environ["GITHUB_OUTPUT"]
+          with open(out, "a", encoding="utf-8") as fh:
+              fh.write(f"ticker={ticker}\n")
+              fh.write(f"route={route}\n")
+              fh.write(f"market={market}\n")
+              fh.write(f"sector={sector}\n")
+              fh.write(f"cap_tier={cap_tier}\n")
+          print(f"Resolved {ticker} -> route={route} market={market}")
+          EOF
+
+      # ── 4. Restore pipeline cache (READ-ONLY) ───────────────────────────────
+      # restore (not actions/cache) so the daily cache keys are never written
+      # by an on-demand run. A cold cache simply falls back to per-ticker FMP
+      # calls — cheap for one ticker — so the bulk pre-fetch step is skipped.
+      - name: Restore pipeline data cache (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/
+          key: ondemand-cache-${{ runner.os }}
+          restore-keys: |
+            us-pipeline-cache-${{ runner.os }}-
+            intl-pipeline-cache-${{ runner.os }}-
+            shared-cache-${{ runner.os }}-
+            pipeline-cache-${{ runner.os }}-
+
+      # ── 5. Install dependencies ──────────────────────────────────────────────
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Install full pipeline deps
+        run: pip install -r requirements.txt
+
+      # ══ US ROUTE ═════════════════════════════════════════════════════════════
+
+      # ── 6a. Write one-line universe CSV ─────────────────────────────────────
+      # Prefer the sector/cap_tier from config/universe.csv when present; else
+      # one FMP stable/profile call; else Unknown/large (cap_tier is corrected
+      # downstream from the real market cap by generate_top_lists._assign_cap_tiers).
+      - name: Write single-ticker universe
+        if: steps.route.outputs.route == 'us'
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          python3 - <<'EOF'
+          import csv, os
+          from pathlib import Path
+          ticker = os.environ["TICKER"].strip().upper()
+          sector, cap_tier = "Unknown", "large"
+
+          uni = Path("config/universe.csv")
+          if uni.exists():
+              with uni.open(encoding="utf-8") as fh:
+                  for row in csv.DictReader(fh):
+                      if (row.get("ticker") or "").strip().upper() == ticker:
+                          sector = row.get("sector") or sector
+                          cap_tier = row.get("cap_tier") or cap_tier
+                          break
+
+          if sector == "Unknown":
+              try:
+                  import requests
+                  key = os.environ.get("FMP_API_KEY", "")
+                  r = requests.get(
+                      "https://financialmodelingprep.com/stable/profile",
+                      params={"symbol": ticker, "apikey": key}, timeout=15)
+                  if r.ok and r.json():
+                      sector = r.json()[0].get("sector") or sector
+              except Exception as exc:
+                  print(f"::warning::FMP profile lookup failed: {exc}")
+
+          Path("logs").mkdir(exist_ok=True)
+          with open("logs/ondemand_universe.csv", "w", newline="", encoding="utf-8") as fh:
+              w = csv.writer(fh)
+              w.writerow(["ticker", "sector", "cap_tier"])
+              w.writerow([ticker, sector, cap_tier])
+          print(f"Wrote logs/ondemand_universe.csv: {ticker},{sector},{cap_tier}")
+          EOF
+
+      - name: Fetch US metrics (single ticker)
+        if: steps.route.outputs.route == 'us'
+        env:
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_MAX_RPS: ${{ vars.FMP_MAX_RPS || '50' }}
+        run: |
+          python src/ingestion/run_pipeline.py \
+            --tickers-file logs/ondemand_universe.csv \
+            --max-workers  2 \
+            --log-dir      logs \
+            --bulk-cache   ".cache/bulk_snapshots" \
+            --verbose
+
+      - name: Score US ticker (absolute mode)
+        if: steps.route.outputs.route == 'us'
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          python -m backend.market_intel.generate_top_lists \
+            --log-dir       logs \
+            --run-id        "$GITHUB_RUN_ID" \
+            --bulk-cache    ".cache/bulk_snapshots" \
+            --single-ticker "${{ steps.route.outputs.ticker }}" \
+            --force \
+            --verbose
+
+      # ══ INTL ROUTE ═══════════════════════════════════════════════════════════
+
+      # ── 6b. Fetch INTL raw metrics for one registered ticker ────────────────
+      # Mirrors the daily pipeline's "Fetch INTL raw metrics" step
+      # (.github/workflows/daily_trading_pipeline.yml) with tickers=[TICKER].
+      - name: Fetch INTL raw metrics (single ticker)
+        if: steps.route.outputs.route == 'intl'
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          BULK_CACHE_DIR: ".cache/bulk_snapshots"
+          ROUTE_MARKET: ${{ steps.route.outputs.market }}
+        run: |
+          mkdir -p logs
+          python3 - <<'EOF'
+          import json, os, sys, logging
+          from pathlib import Path
+          logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+          log = logging.getLogger("intl_fetch_single")
+          sys.path.insert(0, ".")
+
+          from src.ingestion.fmp_fetcher import FMPFetcher
+          from src.core.fetchers_base import MarketEnum
+
+          ticker = os.environ["TICKER"].strip().upper()
+          market = MarketEnum.EUROPE if os.environ["ROUTE_MARKET"] == "EUROPE" else MarketEnum.ASIA
+          api_key = os.environ["FMP_API_KEY"]
+          bulk_cache_dir = Path(os.environ.get("BULK_CACHE_DIR", ".cache/bulk_snapshots"))
+
+          bulk_idx, ambiguous_bases = {}, set()
+          try:
+              from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous
+              bulk_idx, ambiguous_bases = build_ticker_index_with_ambiguous(
+                  bulk_cache_dir, "upgrades-downgrades-consensus-bulk")
+          except Exception as exc:
+              log.warning("Bulk index load failed: %s — per-ticker FMP fallback", exc)
+
+          fetcher = FMPFetcher(api_key=api_key, market=market,
+                               bulk_consensus_idx=bulk_idx,
+                               ambiguous_bases=ambiguous_bases)
+          entries = fetcher.prepare([ticker])
+          payload = [{
+              "ticker":  e.ticker,
+              "metrics": e.raw_factors,
+              "sector":  e.raw_factors.get("sector", "") or getattr(e, "sector", ""),
+          } for e in entries]
+          Path("logs/raw_intl_fetcher_output.json").write_text(
+              json.dumps(payload, indent=2, default=str), encoding="utf-8")
+          log.info("Wrote %d INTL entry(ies) for %s", len(payload), ticker)
+          EOF
+
+      - name: Score INTL ticker (StrategyEngine)
+        if: steps.route.outputs.route == 'intl'
+        run: |
+          python src/engine/profile_runner.py \
+            --config   backend/market_intel/profiles/intl_strategy.json \
+            --raw-data logs/raw_intl_fetcher_output.json \
+            --out-dir  logs/
+
+      # ══ COOK → AUDIT → SEND (both routes) ════════════════════════════════════
+
+      - name: Cook on-demand payload
+        env:
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}  # INTL route fetches ^VIX
+        run: |
+          python src/delivery/cook_toplists.py \
+            --on-demand-ticker "${{ steps.route.outputs.ticker }}" \
+            --us-input         logs/top_lists_us.json \
+            --intl-input       logs/top_lists_intl.json \
+            --registry         config/ticker_registry.json \
+            --output           logs/top_lists.json
+
+      # ── Safety gate: blocks the send on any audit violation (CLAUDE.md) ──────
+      - name: Safety gate (pre-flight audit)
+        run: python src/delivery/audit_payload.py --input logs/top_lists.json
+
+      - name: Send on-demand audit to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python src/delivery/send_discord.py \
+            --input   logs/top_lists.json \
+            --log-dir logs
+
+      # ── Failure feedback: the requester always hears back in-channel ────────
+      - name: Surface failure to Discord
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
+          if not webhook:
+              raise SystemExit(0)
+          ticker = os.environ.get("TICKER", "?")
+          run_url = (f"{os.environ['GITHUB_SERVER_URL']}/"
+                     f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                     f"{os.environ['GITHUB_RUN_ID']}")
+          payload = {"embeds": [{
+              "title": f"⚠️ ON-DEMAND SCORE FAILED: {ticker}",
+              "description": (f"The scoring run did not complete.\n[View run log]({run_url})"),
+              "color": 0xFF0000,
+          }]}
+          req = urllib.request.Request(
+              webhook, data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json"})
+          urllib.request.urlopen(req, timeout=15)
+          print("Failure embed posted to Discord")
+          EOF

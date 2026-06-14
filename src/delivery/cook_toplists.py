@@ -18,6 +18,7 @@ from src.risk.regime import (
     RiskRegime,
     apply_capitulation_filter,
     get_regime,
+    is_panic,
     vix_multiplier,
 )
 
@@ -427,6 +428,133 @@ def cook(
     )
 
 
+def _fetch_vix_for_on_demand() -> float:
+    """Live ^VIX quote via FMPClient for the INTL on-demand route.
+
+    The US route lifts VIX from top_lists_us.json; StrategyEngine output
+    carries no macro state, so it is fetched here. Failures propagate
+    (FMPEndpointError / ValueError) — the safety gate requires a real VIX
+    and a silent default could mask a kill-switch regime.
+    """
+    from src.services.fmp_client import FMPClient
+    quote = FMPClient().get_quote("^VIX")
+    vix = float(quote.get("price") or quote.get("previousClose") or 0.0)
+    if vix <= 0.0:
+        raise ValueError(
+            "FMP ^VIX quote returned no usable price — cannot run safety gate"
+        )
+    return vix
+
+
+def cook_on_demand(
+    ticker: str,
+    us_input: Path,
+    intl_input: Path,
+    registry: Path,
+    output: Path,
+) -> dict:
+    """ChatOps single-ticker payload: emit an on_demand_ticker block.
+
+    Routes by ticker shape — dotted tickers (SAP.DE, 7203.T) must be in
+    ticker_registry.json and read from the INTL StrategyEngine output; bare
+    tickers read from the US top_lists_us.json. The payload deliberately
+    contains NO top_buys_* / mvo_pools keys so bulk consumers can never
+    mistake it for a daily artifact.
+
+    Raises ValueError (unknown/unscored ticker, missing macro state) or
+    FileNotFoundError (missing input artifact); cook() is untouched.
+    """
+    ticker = ticker.strip().upper()
+    is_intl = "." in ticker
+
+    if is_intl:
+        ticker_market = _build_registry_map(Path(registry))
+        if ticker not in ticker_market:
+            raise ValueError(
+                f"{ticker!r} has an international suffix but is not in "
+                f"ticker_registry.json — on-demand INTL scoring only covers "
+                f"registered tickers"
+            )
+        intl_path = Path(intl_input)
+        if not intl_path.exists():
+            raise FileNotFoundError(f"INTL input not found: {intl_path}")
+        intl_raw: list = json.loads(intl_path.read_text(encoding="utf-8"))
+        raw_entry = next(
+            (r for r in intl_raw if r.get("ticker") == ticker), None)
+        if raw_entry is None:
+            raise ValueError(
+                f"{ticker!r} not present in {intl_path} — INTL fetch/scoring "
+                f"produced no row for it"
+            )
+        vix = _fetch_vix_for_on_demand()
+        kill_switch = is_panic(vix)
+        vix_regime = get_regime(vix).value
+        entry = _normalize_intl_entry(raw_entry, ticker_market, vix)
+        pipeline = "INTL"
+        # StrategyEngine scores Σ(w·s)/Σ(w_available) per ticker — absolute
+        # by construction, no peer group involved.
+        scoring_mode = "absolute"
+        source_run_id = None
+    else:
+        us_path = Path(us_input)
+        if not us_path.exists():
+            raise FileNotFoundError(f"US input not found: {us_path}")
+        us_data = json.loads(us_path.read_text(encoding="utf-8"))
+        bucket = us_data.get("top_buys_usa") or us_data.get("top_buys", [])
+        entry = next((e for e in bucket if e.get("ticker") == ticker), None)
+        if entry is None:
+            raise ValueError(
+                f"{ticker!r} not present in {us_path} — run generate_top_lists "
+                f"--single-ticker {ticker} first"
+            )
+        vix = us_data.get("vix")
+        if vix is None:
+            raise ValueError(
+                "US payload missing 'vix' — safety gate requires macro state"
+            )
+        kill_switch = us_data.get("kill_switch", False)
+        vix_regime = us_data.get("vix_regime") or get_regime(float(vix)).value
+        pipeline = "US"
+        scoring_mode = us_data.get("scoring_mode", "absolute")
+        source_run_id = us_data.get("source_run_id")
+        if "weight_coverage" not in entry:
+            # Display-only coverage: share of canonical US weight whose factor
+            # survived the schema gate (missing_sources counts None AND 0.0).
+            from src.config.weights import WEIGHTS as _US_WEIGHTS
+            _missing = set(
+                (entry.get("validation_metadata") or {}).get("missing_sources") or []
+            )
+            entry["weight_coverage"] = round(
+                sum(w for f, w in _US_WEIGHTS.items() if f not in _missing), 4
+            )
+
+    combined = {
+        "on_demand": True,
+        "on_demand_ticker": {
+            "ticker":       ticker,
+            "pipeline":     pipeline,
+            "scoring_mode": scoring_mode,
+            "entry":        entry,
+        },
+        "vix":           vix,
+        "vix_regime":    vix_regime,
+        "kill_switch":   kill_switch,
+        "ticker_count":  1,
+        "source_run_id": source_run_id,
+        "generated_at":  datetime.now(timezone.utc).isoformat(),
+    }
+
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(combined, indent=2), encoding="utf-8")
+    print(
+        f"[COOK] On-demand payload -> {output} "
+        f"({ticker} via {pipeline}, score={entry.get('final_score')}, "
+        f"vix={vix}, kill_switch={kill_switch})"
+    )
+    return combined
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Merge US + INTL top_lists artifacts into a combined payload"
@@ -451,12 +579,35 @@ def main() -> int:
         default="logs/top_lists.json",
         help="Destination for combined payload (overwrites US input by default)",
     )
+    parser.add_argument(
+        "--on-demand-ticker",
+        default=None,
+        help="ChatOps single-ticker mode: emit an on_demand_ticker payload for "
+             "exactly this ticker (US route reads --us-input, INTL route reads "
+             "--intl-input + --registry) instead of the merged daily toplists",
+    )
     args = parser.parse_args()
 
     us_input = Path(args.us_input)
     intl_input = Path(args.intl_input)
     registry = Path(args.registry)
     output = Path(args.output)
+
+    if args.on_demand_ticker:
+        # Only the routed input is required — the other artifact does not
+        # exist in an on-demand workflow run.
+        try:
+            cook_on_demand(
+                ticker=args.on_demand_ticker,
+                us_input=us_input,
+                intl_input=intl_input,
+                registry=registry,
+                output=output,
+            )
+            return 0
+        except (ValueError, FileNotFoundError) as exc:
+            print(f"[COOK] ERROR: {exc}", file=sys.stderr)
+            return 1
 
     if not us_input.exists():
         print(f"[COOK] ERROR: US input not found: {us_input}", file=sys.stderr)
