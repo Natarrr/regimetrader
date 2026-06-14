@@ -673,3 +673,141 @@ class TestSmidLeverageDesk:
         i_smid = next(i for i, n in enumerate(names) if self._TITLE in n)
         i_matrix = next(i for i, n in enumerate(names) if "FACTOR MATRIX" in n)
         assert i_asia < i_smid < i_matrix
+
+
+# ── 13. On-demand single-ticker audit (ChatOps) ────────────────────────────────
+
+def _on_demand_data(ticker="TSLA", pipeline="US", market="USA", score=0.6432,
+                    vix=17.3, kill_switch=False, entry_extra=None, **overrides):
+    entry = _entry(ticker, score, market=market,
+                   insider_usd=120_000, momentum_spy_relative=0.124,
+                   weight_coverage=0.86)
+    entry["pipeline"] = pipeline
+    entry["validation_metadata"] = {
+        "is_complete": True,
+        "missing_sources": ["congress", "transcript_tone"],
+    }
+    entry.update(entry_extra or {})
+    data = {
+        "on_demand": True,
+        "on_demand_ticker": {
+            "ticker": ticker,
+            "pipeline": pipeline,
+            "scoring_mode": "absolute",
+            "entry": entry,
+        },
+        "vix": vix,
+        "vix_regime": "NORMAL",
+        "kill_switch": kill_switch,
+        "ticker_count": 1,
+        "generated_at": (_NOW - timedelta(hours=0.2)).isoformat(),
+    }
+    data.update(overrides)
+    return data
+
+
+def _build_on_demand(**kw):
+    from src.delivery.send_discord import DiscordPayloadBuilder
+    builder = DiscordPayloadBuilder(_on_demand_data(**kw), now=_NOW)
+    return builder.build_on_demand()
+
+
+def _fenced_blocks(text):
+    """Return the contents of every ``` code fence in text."""
+    parts = text.split("```")
+    # parts[1], parts[3], ... are inside fences
+    return [parts[i] for i in range(1, len(parts), 2)]
+
+
+class TestOnDemand:
+    def test_title_exact_contract(self):
+        e = _embed(_build_on_demand(ticker="TSLA"))
+        assert e["title"] == "── 📊 ON-DEMAND FACTOR AUDIT: TSLA ──"
+
+    def test_validate_accepts_on_demand_only_payload(self):
+        from src.delivery.send_discord import DiscordPayloadBuilder
+        builder = DiscordPayloadBuilder(_on_demand_data(), now=_NOW)
+        assert builder.validate() == []
+
+    def test_validate_still_rejects_missing_vix(self):
+        from src.delivery.send_discord import DiscordPayloadBuilder
+        data = _on_demand_data()
+        del data["vix"]
+        builder = DiscordPayloadBuilder(data, now=_NOW)
+        assert builder.validate() != []
+
+    def test_ansi_hygiene(self):
+        e = _embed(_build_on_demand())
+        desc = e["description"]
+        assert desc.startswith("```ansi\n")
+        close = desc.index("\n```")
+        assert ESC + "[0m" in desc[:close], "reset must occur inside the block"
+        assert "```\n\n" in desc
+        after_block = desc[desc.index("\n```") + 4:]
+        assert ESC not in after_block
+        for f in e["fields"]:
+            assert ESC not in f["name"]
+            assert ESC not in f["value"]
+
+    def test_factor_stack_rows_equal_length(self):
+        f = _field(_embed(_build_on_demand()), "FACTOR STACK")
+        assert f is not None
+        rows = [r for r in _fenced_blocks(f["value"])[0].splitlines() if r]
+        lengths = {len(r) for r in rows}
+        assert len(lengths) == 1, f"unequal row lengths: {sorted(lengths)}"
+
+    def test_factor_stack_ascii_only_inside_fence(self):
+        f = _field(_embed(_build_on_demand()), "FACTOR STACK")
+        for block in _fenced_blocks(f["value"]):
+            assert all(ord(c) < 128 for c in block), "non-ASCII inside code fence"
+
+    def test_factor_stack_shows_final_and_raw(self):
+        f = _field(_embed(_build_on_demand(score=0.6432)), "FACTOR STACK")
+        assert "0.6432" in f["value"]
+        assert "FINAL SCORE" in f["value"]
+
+    def test_us_stack_has_congress_no_intl_factors(self):
+        f = _field(_embed(_build_on_demand(market="USA")), "FACTOR STACK")
+        assert "Congress" in f["value"]
+        assert "FCF" not in f["value"]
+
+    def test_intl_stack_has_intl_factors_no_congress(self):
+        e = _embed(_build_on_demand(ticker="SAP.DE", pipeline="INTL",
+                                    market="EUROPE"))
+        f = _field(e, "FACTOR STACK")
+        assert "FCF Yield" in f["value"]
+        assert "Congress" not in f["value"]
+
+    def test_catalyst_field_renders_evidence(self):
+        f = _field(_embed(_build_on_demand()), "CATALYST")
+        assert f is not None
+        assert "Insider $120k" in f["value"]
+
+    def test_disclosure_shows_absolute_mode(self):
+        f = _field(_embed(_build_on_demand()), "DISCLOSURE")
+        assert f is not None
+        assert "absolute" in f["value"]
+        assert "congress" in f["value"]  # missing_sources surfaced
+
+    def test_legend_present(self):
+        e = _embed(_build_on_demand())
+        assert _field(e, "LEGEND") is not None
+
+    def test_kill_switch_forces_capitulation_render(self):
+        e = _embed(_build_on_demand(kill_switch=True))
+        assert e["color"] == 0xFF0000
+        assert "KILL-SWITCH ACTIVE" in e["description"]
+        assert "CAPITULATION" in e["description"]
+
+    def test_budget_limits_hold(self):
+        from src.delivery.send_discord import DiscordPayloadBuilder
+        e = _embed(_build_on_demand())
+        assert len(e["description"]) <= 4096
+        for f in e["fields"]:
+            assert len(f["value"]) <= 1024
+        assert DiscordPayloadBuilder._embed_size(e) <= 6000
+
+    def test_fences_balanced(self):
+        e = _embed(_build_on_demand())
+        text = _all_text(e)
+        assert text.count("```") % 2 == 0

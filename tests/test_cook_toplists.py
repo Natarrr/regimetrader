@@ -835,3 +835,112 @@ class TestSmidLeveragePool:
         })
         assert result["top_buys_usa"][0]["ticker"] == "MSFT"
         assert [e["ticker"] for e in result["top_buys_smid"]] == ["AAOI"]
+
+
+# ---------------------------------------------------------------------------
+# cook_on_demand — ChatOps single-ticker payload
+# ---------------------------------------------------------------------------
+
+
+class TestCookOnDemand:
+    def _run(self, cook_mod, tmp_path, ticker, us_input=None, intl_input=None,
+             registry_path=None):
+        out = tmp_path / "on_demand_top_lists.json"
+        cook_mod.cook_on_demand(
+            ticker=ticker,
+            us_input=us_input or tmp_path / "missing_us.json",
+            intl_input=intl_input or tmp_path / "missing_intl.json",
+            registry=registry_path or tmp_path / "missing_registry.json",
+            output=out,
+        )
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    # -- US route ------------------------------------------------------------
+
+    def test_us_route_block_structure(self, cook_mod, us_payload, tmp_path):
+        result = self._run(cook_mod, tmp_path, "MSFT", us_input=us_payload)
+        block = result["on_demand_ticker"]
+        assert result["on_demand"] is True
+        assert block["ticker"] == "MSFT"
+        assert block["pipeline"] == "US"
+        assert "scoring_mode" in block
+        assert block["entry"]["final_score"] == 0.87
+
+    def test_us_route_lifts_macro_state(self, cook_mod, us_payload, tmp_path):
+        result = self._run(cook_mod, tmp_path, "MSFT", us_input=us_payload)
+        assert result["vix"] == 17.3
+        assert result["kill_switch"] is False
+        assert result["ticker_count"] == 1
+        assert "generated_at" in result
+
+    def test_us_route_no_bulk_keys(self, cook_mod, us_payload, tmp_path):
+        """Bulk consumers must never mistake an on-demand payload for a daily one."""
+        result = self._run(cook_mod, tmp_path, "MSFT", us_input=us_payload)
+        for key in ("top_buys_usa", "top_buys_europe", "top_buys_asia",
+                    "top_buys_smid", "mvo_pools", "watchlist"):
+            assert key not in result, f"bulk key {key} leaked into on-demand payload"
+
+    def test_us_route_ticker_absent_raises(self, cook_mod, us_payload, tmp_path):
+        with pytest.raises(ValueError):
+            self._run(cook_mod, tmp_path, "ZZZZ", us_input=us_payload)
+
+    def test_us_route_missing_input_raises(self, cook_mod, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            self._run(cook_mod, tmp_path, "MSFT")
+
+    def test_us_route_passes_audit(self, cook_mod, us_payload, tmp_path):
+        from src.delivery.audit_payload import audit
+        result = self._run(cook_mod, tmp_path, "MSFT", us_input=us_payload)
+        assert audit(result) is True
+
+    # -- INTL route ----------------------------------------------------------
+
+    def test_intl_route_normalized(self, cook_mod, registry, intl_payload,
+                                   tmp_path, monkeypatch):
+        monkeypatch.setattr(cook_mod, "_fetch_vix_for_on_demand", lambda: 17.3)
+        result = self._run(cook_mod, tmp_path, "SAP.DE",
+                           intl_input=intl_payload, registry_path=registry)
+        block = result["on_demand_ticker"]
+        entry = block["entry"]
+        assert block["pipeline"] == "INTL"
+        assert entry["market"] == "EUROPE"
+        assert entry["factors"]["congress"] == 0.0
+        # composite 0.81 * vix_multiplier(17.3)=1.0 -> 0.81, badge HIGH BUY
+        assert entry["final_score"] == pytest.approx(0.81)
+        assert entry["badge"] == "HIGH BUY"
+        assert result["vix"] == 17.3
+
+    def test_intl_route_panic_vix_sets_kill_switch(self, cook_mod, registry,
+                                                   intl_payload, tmp_path,
+                                                   monkeypatch):
+        monkeypatch.setattr(cook_mod, "_fetch_vix_for_on_demand", lambda: 35.0)
+        result = self._run(cook_mod, tmp_path, "SAP.DE",
+                           intl_input=intl_payload, registry_path=registry)
+        assert result["kill_switch"] is True
+        assert result["vix_regime"] == "CAPITULATION"
+        # 0.81 * 0.50 capitulation dampening
+        entry = result["on_demand_ticker"]["entry"]
+        assert entry["final_score"] == pytest.approx(0.405)
+
+    def test_intl_route_unregistered_raises(self, cook_mod, registry,
+                                            intl_payload, tmp_path):
+        with pytest.raises(ValueError):
+            self._run(cook_mod, tmp_path, "BAD.XX",
+                      intl_input=intl_payload, registry_path=registry)
+
+    def test_intl_route_ticker_not_scored_raises(self, cook_mod, registry,
+                                                 intl_payload, tmp_path,
+                                                 monkeypatch):
+        """Registered ticker missing from the INTL scoring output (fetch failed)."""
+        monkeypatch.setattr(cook_mod, "_fetch_vix_for_on_demand", lambda: 17.3)
+        with pytest.raises(ValueError):
+            self._run(cook_mod, tmp_path, "9984.T",
+                      intl_input=intl_payload, registry_path=registry)
+
+    def test_intl_route_passes_audit(self, cook_mod, registry, intl_payload,
+                                     tmp_path, monkeypatch):
+        from src.delivery.audit_payload import audit
+        monkeypatch.setattr(cook_mod, "_fetch_vix_for_on_demand", lambda: 17.3)
+        result = self._run(cook_mod, tmp_path, "SAP.DE",
+                           intl_input=intl_payload, registry_path=registry)
+        assert audit(result) is True

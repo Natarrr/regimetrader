@@ -186,6 +186,7 @@ def _badge(score: float) -> str:
 def _schema_gate(
     results: List[Dict[str, Any]],
     universe_size: int,
+    enforce_circuit_breaker: bool = True,
 ) -> List[Dict[str, Any]]:
     """Validate each ticker's factor completeness; raise if universe collapses.
 
@@ -248,9 +249,11 @@ def _schema_gate(
                 missing,
             )
 
-    # Circuit breaker — abort before writing any output
+    # Circuit breaker — abort before writing any output. Single-ticker mode
+    # disables it: relative completeness is meaningless at n=1 and a thin name
+    # must still score (validation_metadata carries the warning instead).
     min_required = max(1, round(_CIRCUIT_BREAKER_MIN_FRACTION * universe_size))
-    if complete_count < min_required:
+    if enforce_circuit_breaker and complete_count < min_required:
         raise PipelineIntegrityError(
             f"Schema gate: only {complete_count}/{universe_size} tickers are complete "
             f"(threshold {_CIRCUIT_BREAKER_MIN_FRACTION:.0%} = {min_required}). "
@@ -321,6 +324,26 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
         {f: round(float(normed_factors[f][i]), 4) for f in normed_factors}
         for i in range(n)
     ]
+
+
+def _absolute_factors(row: Dict[str, Any]) -> Dict[str, float]:
+    """Absolute factor mapping for single-ticker (on-demand) mode.
+
+    Cross-sectional normalization collapses an n=1 universe to neutral 0.5 for
+    every non-zero factor — meaningless for an on-demand audit. Raw factor
+    scores are already produced on a [0, 1] scale by run_pipeline, so they are
+    forwarded as-is (clipped defensively).
+
+    None → 0.0 in the display dict, mirroring _cross_sectional_normalize;
+    the SIGNED-factor contract (None must not read as bearish) is honored by
+    _ticker_effective_weights, which removes the None factor's weight from the
+    denominator entirely.
+    """
+    return {
+        factor: round(min(1.0, max(0.0, float(row[field]))), 4)
+        if row.get(field) is not None else 0.0
+        for factor, field in FACTOR_FIELDS.items()
+    }
 
 
 def _effective_weights(
@@ -764,8 +787,16 @@ def generate(
     status: Dict[str, Any],
     run_id: str,
     log_dir: Path,
+    single_ticker: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Score, rank, and tier the full ticker universe."""
+    """Score, rank, and tier the full ticker universe.
+
+    When ``single_ticker`` is set (on-demand ChatOps mode), the universe is
+    filtered to exactly that ticker and factors are scored absolutely
+    (_absolute_factors) instead of cross-sectionally; the circuit breaker,
+    MVO optimizer, congress boost, and daily dead-streak state are skipped.
+    The default (None) path is unchanged.
+    """
     results = status.get("results", [])
     if not results:
         log.warning(
@@ -813,19 +844,39 @@ def generate(
     # is US-only; the filter below is a safety guard against registry contamination.
     us_results = [r for r in results if r.get("market", "USA") == "USA"]
 
+    if single_ticker:
+        us_results = [r for r in us_results if r.get("ticker") == single_ticker]
+        if not us_results:
+            raise PipelineIntegrityError(
+                f"single-ticker mode: {single_ticker!r} not present in "
+                f"intel_source_status results — fetch stage produced no row"
+            )
+
     # Schema gate: attach validation_metadata + circuit-breaker check.
     # Raises PipelineIntegrityError (before writing anything) if < 20% of the
     # universe has complete data.  Never removes rows — normalization needs the
     # full peer group.
-    _schema_gate(us_results, universe_size=len(us_results))
+    _schema_gate(us_results, universe_size=len(us_results),
+                 enforce_circuit_breaker=not single_ticker)
 
-    norm_factor_list = _cross_sectional_normalize(us_results)
+    if single_ticker:
+        # n=1: cross-sectional ranking is undefined — score absolutely.
+        norm_factor_list = [_absolute_factors(r) for r in us_results]
+    else:
+        norm_factor_list = _cross_sectional_normalize(us_results)
     assert len(norm_factor_list) == len(us_results), (
-        f"_cross_sectional_normalize returned {len(norm_factor_list)} rows for {len(us_results)} results"
+        f"factor normalization returned {len(norm_factor_list)} rows for {len(us_results)} results"
     )
 
-    # Redistribute weight from dead factors (all 0.0) to live ones
-    eff_weights = _effective_weights(norm_factor_list, WEIGHTS)
+    if single_ticker:
+        # Dead-factor detection needs a universe; at n=1 every zero factor
+        # would look "dead" and its weight would inflate the live ones.
+        # _ticker_effective_weights (inside _to_entry) still redistributes
+        # None (API failure) weights per ticker.
+        eff_weights = dict(WEIGHTS)
+    else:
+        # Redistribute weight from dead factors (all 0.0) to live ones
+        eff_weights = _effective_weights(norm_factor_list, WEIGHTS)
     dead_factors = [f for f in WEIGHTS if f not in eff_weights]
     if dead_factors:
         log.warning(
@@ -869,10 +920,12 @@ def generate(
     # Stage 2: anomaly circuit breakers on scored universe.
     # Runs on US raw rows only — EU/Asia rows lack the fields (news_score,
     # volume_spike) that detect_anomalies expects and would cause false positives.
-    try:
-        detect_anomalies(us_results, run_id=run_id, log_dir=log_dir)
-    except Exception as exc:
-        log.warning("Stage 2 anomaly detection failed (non-fatal): %s", exc)
+    # Skipped at n=1: anomaly statistics need a peer group.
+    if not single_ticker:
+        try:
+            detect_anomalies(us_results, run_id=run_id, log_dir=log_dir)
+        except Exception as exc:
+            log.warning("Stage 2 anomaly detection failed (non-fatal): %s", exc)
 
     # Shadow score: capture raw ranking BEFORE congress boost so callers can
     # compare which tickers the boost promoted.  Shallow-copy each entry dict
@@ -886,7 +939,9 @@ def generate(
     # Congress boost: reads anomaly_report_latest.json (just written above) and
     # applies conviction multiplier to final_score in-place.  Must run AFTER
     # detect_anomalies so the report is fresh.  No-op when feed is dead.
-    _apply_congress_boost(valid_entries, log_dir)
+    # Skipped at n=1 alongside detect_anomalies (no fresh report exists).
+    if not single_ticker:
+        _apply_congress_boost(valid_entries, log_dir)
 
     # Portfolio construction: MVO weights for top-20 by composite_score.
     # Ties at position 20 broken alphabetically by ticker.
@@ -894,7 +949,10 @@ def generate(
     _sorted_for_portfolio = sorted(
         valid_entries, key=lambda e: (-e["final_score"], e["ticker"])
     )
-    _portfolio_candidates = _sorted_for_portfolio[:_TOP_N_PORTFOLIO]
+    # Single-ticker mode: MVO over one asset is noise — attach explicit zeros.
+    _portfolio_candidates = (
+        [] if single_ticker else _sorted_for_portfolio[:_TOP_N_PORTFOLIO]
+    )
 
     _prev_weights: dict = {}
     _prev_path = log_dir / "top_lists_us.json"
@@ -920,10 +978,13 @@ def generate(
     _vix = current_vix if current_vix is not None else BEAR_THRESHOLD
 
     try:
-        _opt_weights, _opt_method = run_optimizer(
-            _portfolio_tickers, _portfolio_scores, _portfolio_sectors,
-            vix=_vix, prev_weights=_prev_weights,
-        )
+        if _portfolio_tickers:
+            _opt_weights, _opt_method = run_optimizer(
+                _portfolio_tickers, _portfolio_scores, _portfolio_sectors,
+                vix=_vix, prev_weights=_prev_weights,
+            )
+        else:
+            _opt_weights, _opt_method = {}, "n/a"
     except Exception as _exc:
         log.warning("Portfolio optimizer raised: %s — using zeros", _exc)
         _opt_weights = {t: 0.0 for t in _portfolio_tickers}
@@ -1001,26 +1062,30 @@ def generate(
 
     _log_promoted(top_buys, shadow_top_buys, log_dir, run_id)
 
-    # Congress dead-streak tracking (FIX 6b)
-    congress_dead_file = Path(".cache/congress_dead_since.txt")
-    congress_scores = [
-        float(r.get("congress_score") or 0.0)
-        for r in us_results
-    ]
-    congress_is_dead = bool(congress_scores) and all(s == 0.0 for s in congress_scores)
+    # Congress dead-streak tracking (FIX 6b). Single-ticker runs must never
+    # touch this daily state: one ticker with congress=0 says nothing about
+    # the feed, and writing/unlinking here would corrupt the streak.
+    congress_is_dead = False
     congress_dead_days = 0
-    if congress_is_dead:
-        if not congress_dead_file.exists():
-            congress_dead_file.parent.mkdir(parents=True, exist_ok=True)
-            congress_dead_file.write_text(datetime.now(timezone.utc).isoformat())
-        try:
-            dead_since = datetime.fromisoformat(congress_dead_file.read_text().strip())
-            congress_dead_days = (datetime.now(timezone.utc) - dead_since).days
-        except Exception:
-            congress_dead_days = 0
-    else:
-        if congress_dead_file.exists():
-            congress_dead_file.unlink()
+    if not single_ticker:
+        congress_dead_file = Path(".cache/congress_dead_since.txt")
+        congress_scores = [
+            float(r.get("congress_score") or 0.0)
+            for r in us_results
+        ]
+        congress_is_dead = bool(congress_scores) and all(s == 0.0 for s in congress_scores)
+        if congress_is_dead:
+            if not congress_dead_file.exists():
+                congress_dead_file.parent.mkdir(parents=True, exist_ok=True)
+                congress_dead_file.write_text(datetime.now(timezone.utc).isoformat())
+            try:
+                dead_since = datetime.fromisoformat(congress_dead_file.read_text().strip())
+                congress_dead_days = (datetime.now(timezone.utc) - dead_since).days
+            except Exception:
+                congress_dead_days = 0
+        else:
+            if congress_dead_file.exists():
+                congress_dead_file.unlink()
 
     top_lists: Dict[str, Any] = {
         "generated_at":    datetime.now(timezone.utc).isoformat(),
@@ -1057,6 +1122,12 @@ def generate(
             }
         },
     }
+
+    if single_ticker:
+        # On-demand disclosure: consumers must know this score was computed
+        # absolutely (no peer-group normalization).
+        top_lists["single_ticker"] = True
+        top_lists["scoring_mode"] = "absolute"
 
     out_json = log_dir / "top_lists_us.json"
     save_json_atomic(out_json, top_lists)
@@ -1121,6 +1192,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Bulk snapshot dir (informational; data already scored by run_pipeline)")
     parser.add_argument("--force", action="store_true",
                         help="Re-generate even if top_lists_us.json is less than 2 hours old")
+    parser.add_argument("--single-ticker", type=str, default=None,
+                        help="On-demand ChatOps mode: score exactly this ticker "
+                             "absolutely (bypasses cross-sectional normalization, "
+                             "circuit breaker, MVO, and freshness skip)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -1146,8 +1221,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Skip if fresh enough AND structurally valid.
     # A mid-write crash or empty payload must not block re-runs.
+    # Single-ticker mode always regenerates — the existing file is a bulk
+    # artifact for a different universe.
     out = args.log_dir / "top_lists_us.json"
-    if out.exists() and not args.force:
+    if out.exists() and not args.force and not args.single_ticker:
         try:
             existing = json.loads(out.read_text(encoding="utf-8"))
             if "top_buys" not in existing or not existing.get("top_buys"):
@@ -1171,7 +1248,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "top_lists_us.json unreadable or malformed — forcing regeneration")
 
     try:
-        generate(status, args.run_id, args.log_dir)
+        generate(status, args.run_id, args.log_dir,
+                 single_ticker=args.single_ticker)
         return 0
     except PipelineIntegrityError as exc:
         # Circuit breaker fired — loud, non-recoverable, must fail the CI step
