@@ -758,6 +758,25 @@ class FMPClient:
         self._cache_write("ratings", ticker, result)
         return result
 
+    def get_revenue_estimates(self, symbol: str, limit: int = 6) -> list:
+        """Revenue estimate history (stable/revenue-estimates). FMP Ultimate.
+
+        Returns newest-first list of quarterly revenue estimate rows, each
+        containing estimatedRevenueAvg and numberAnalystEstimatedRevenue.
+        Used by score_revenue_revision() [Zacks, 2003].
+        """
+        if not self._api_key:
+            return []
+        cache_key = f"rev_est_{symbol}_{limit}"
+        cached = self._cache_read("ratings", cache_key)
+        if cached is not None:
+            return cached
+        data = self._get("revenue-estimates",
+                         {"symbol": symbol, "limit": limit}, bucket="ratings") or []
+        result = data if isinstance(data, list) else []
+        self._cache_write("ratings", cache_key, result)
+        return result
+
     def get_recent_upgrades_downgrades(self, ticker: str, lookback_days: int = 7) -> Dict:
         """Fetch recent upgrades/downgrades within lookback_days.
 

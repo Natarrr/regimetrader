@@ -27,20 +27,28 @@
 
 WEIGHTS_VERSION = "v2.2-global"
 
-# ── US universe (Sprint v2.3: analyst_consensus and quality_piotroski activated) ────
-# analyst_consensus (0.10) and quality_piotroski (0.08) funded from congress:
-# Congress weight reduced 0.22 → 0.04 (congress is US-structural; IC/breadth/quality
-# decay faster than quality/consensus signals at this allocation).
+# ── US universe (Sprint v2.4: transcript_tone activated) ─────────────────────
+# transcript_tone (0.05) funded from congress (0.04 → 0.01) and
+# volume_attention (0.03 → 0.01). Justification:
+#   congress sparse at 4% → reducing to 1% retains the signal for the
+#   ~50-100 large-caps with active congressional trading.
+#   volume_attention is correlated with momentum_long (both measure attention-
+#   driven flow) — reducing to 1% reduces redundancy.
+#   transcript_tone 0.05 weight: [Huang et al., 2018] documents ~3-5% alpha
+#   from earnings call guidance language in 30-90d horizon — independent of
+#   insider and news signals.
 WEIGHTS_US: dict[str, float] = {
     "insider_conviction": 0.30,
-    "insider_breadth":    0.15,
-    "congress":           0.04,
+    "insider_breadth":    0.12,   # reduced 0.15 → 0.12 (donor for revenue_revision)
+    "congress":           0.01,   # reduced 0.04 → 0.01 (donor for transcript_tone)
     "news_sentiment":     0.10,
     "news_buzz":          0.05,
     "momentum_long":      0.15,
-    "volume_attention":   0.03,
+    "volume_attention":   0.01,   # reduced 0.03 → 0.01 (donor for transcript_tone)
     "analyst_consensus":  0.10,
     "quality_piotroski":  0.08,
+    "transcript_tone":    0.05,   # Huang et al. 2018; None when no transcript
+    "revenue_revision":   0.03,   # NEW — Zacks 2003; None when n_analysts < 3
 }
 assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_US sums to {sum(WEIGHTS_US.values()):.8f}, not 1.0"
@@ -62,17 +70,18 @@ assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
 #   transcript_tone     —   → 0.00  (structurally absent)
 WEIGHTS_GLOBAL: dict[str, float] = {
     "insider_conviction":  0.28,   # −0.02 vs US — MAR Art.19 parity maintained
-    "insider_breadth":     0.14,   # −0.01 vs US
+    "insider_breadth":     0.14,   # −0.02 vs US
     "congress":            0.00,   # structurally absent outside US
     "news_sentiment":      0.13,   # +0.03 — global news corpus via FMP
-    "news_buzz":           0.04,   # −0.01 donor
+    "news_buzz":           0.02,   # reduced 0.04 → 0.02 (donor for revenue_revision)
     "momentum_long":       0.17,   # +0.02 — Rouwenhorst 1998 EU premium
-    "volume_attention":    0.04,   # −0.01 donor
-    "analyst_consensus":   0.10,   # +0.10 — stronger signal in less-covered markets
-    "quality_piotroski":   0.05,   # +0.05 — accounting-identity, universal
-    "analyst_revision":    0.02,   # activated — Chan, Jegadeesh & Lakonishok 1996
-    "price_target_upside": 0.03,   # activated — Brav & Lehavy 2003
+    "volume_attention":    0.04,
+    "analyst_consensus":   0.10,   # stronger signal in less-covered markets
+    "quality_piotroski":   0.05,   # accounting-identity, universal
+    "analyst_revision":    0.02,   # Chan, Jegadeesh & Lakonishok 1996
+    "price_target_upside": 0.03,   # Brav & Lehavy 2003
     "transcript_tone":     0.00,   # structurally absent outside US
+    "revenue_revision":    0.02,   # NEW — Zacks 2003; None when n_analysts < 3
 }
 assert abs(sum(WEIGHTS_GLOBAL.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_GLOBAL sums to {sum(WEIGHTS_GLOBAL.values()):.8f}, not 1.0"
@@ -87,18 +96,19 @@ WEIGHTS_EU: dict[str, float] = {
     "insider_breadth":     0.04,
     "congress":            0.00,   # structurally absent
     "news_sentiment":      0.05,
-    "news_buzz":           0.02,
+    "news_buzz":           0.00,   # reduced 0.02 → 0.00 (donor for revenue_revision)
     "momentum_long":       0.08,   # Rouwenhorst 1998 (moderated for EU)
     "volume_attention":    0.02,
     "analyst_consensus":   0.07,
     "quality_piotroski":   0.10,   # Piotroski 2000
     "analyst_revision":    0.10,   # Chan, Jegadeesh & Lakonishok 1996
     "price_target_upside": 0.10,   # Brav & Lehavy 2003
-    "fcf_yield":           0.14,   # Damodaran — free cash generation (NEW)
-    "amihud_shock":        0.05,   # Amihud 2002 — liquidity shock signal (NEW)
-    "pb_value_up":         0.07,   # Fama & French 1992 — value trigger (NEW)
-    "roic_quality":        0.08,   # Greenblatt 2005 — ROIC/ROE quality (NEW)
+    "fcf_yield":           0.14,   # Damodaran — free cash generation
+    "amihud_shock":        0.05,   # Amihud 2002 — liquidity shock signal
+    "pb_value_up":         0.07,   # Fama & French 1992 — value trigger
+    "roic_quality":        0.08,   # Greenblatt 2005 — ROIC/ROE quality
     "transcript_tone":     0.00,   # structurally absent outside US
+    "revenue_revision":    0.02,   # NEW — Zacks 2003; None when n_analysts < 3
 }
 assert abs(sum(WEIGHTS_EU.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_EU sums to {sum(WEIGHTS_EU.values()):.8f}, not 1.0"
@@ -113,18 +123,19 @@ WEIGHTS_ASIA: dict[str, float] = {
     "insider_breadth":     0.04,
     "congress":            0.00,   # structurally absent
     "news_sentiment":      0.10,   # Tetlock 2007
-    "news_buzz":           0.04,
+    "news_buzz":           0.02,   # reduced 0.04 → 0.02 (donor for revenue_revision)
     "momentum_long":       0.15,   # Rouwenhorst 1998 — APAC momentum premium
     "volume_attention":    0.06,   # Gervais & Odean 2001
     "analyst_consensus":   0.10,   # Givoly & Lakonishok 1979
     "analyst_revision":    0.05,
     "price_target_upside": 0.05,
     "quality_piotroski":   0.05,   # Piotroski 2000
-    "fcf_yield":           0.10,   # Damodaran — value signal (NEW)
-    "amihud_shock":        0.06,   # Amihud 2002 — especially relevant in APAC (NEW)
-    "pb_value_up":         0.06,   # Fama & French 1992 — value trigger (NEW)
-    "roic_quality":        0.06,   # Greenblatt 2005 — ROIC/ROE quality (NEW)
+    "fcf_yield":           0.10,   # Damodaran — value signal
+    "amihud_shock":        0.06,   # Amihud 2002 — especially relevant in APAC
+    "pb_value_up":         0.06,   # Fama & French 1992 — value trigger
+    "roic_quality":        0.06,   # Greenblatt 2005 — ROIC/ROE quality
     "transcript_tone":     0.00,   # structurally absent outside US
+    "revenue_revision":    0.02,   # NEW — Zacks 2003; None when n_analysts < 3
 }
 assert abs(sum(WEIGHTS_ASIA.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_ASIA sums to {sum(WEIGHTS_ASIA.values()):.8f}, not 1.0"

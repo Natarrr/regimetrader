@@ -14,10 +14,11 @@ from unittest.mock import MagicMock, patch
 
 # ── 1. WEIGHTS structure ──────────────────────────────────────────────────────
 
-def test_weights_us_sprint_v23():
-    """congress reduced to 0.04 in v2.3 sprint to fund analyst_consensus + quality_piotroski."""
+def test_weights_us_sprint_v24():
+    """congress reduced 0.04→0.01 in v2.4; transcript_tone 0.05 activated."""
     from src.config.weights import WEIGHTS_US
-    assert WEIGHTS_US["congress"] == 0.04
+    assert WEIGHTS_US["congress"] == 0.01
+    assert WEIGHTS_US["transcript_tone"] == 0.05
     assert WEIGHTS_US["analyst_consensus"] == 0.10
     assert WEIGHTS_US["quality_piotroski"] == 0.08
     assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6
@@ -199,6 +200,7 @@ def test_eu_perfect_factors_reaches_score_one():
         "amihud_shock":       1.0,
         "pb_value_up":        1.0,
         "roic_quality":       1.0,
+        "revenue_revision":   1.0,   # v2.5: WEIGHTS_EU["revenue_revision"] = 0.02
     }
     score, meta = compute_composite_score("ASML.AS", perfect)
     assert score == pytest.approx(1.0, abs=1e-4), (

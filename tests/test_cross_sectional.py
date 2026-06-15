@@ -37,6 +37,7 @@ def _make_results(n: int, overrides: dict | None = None) -> list:
         "price_target_upside_score": 0.50,
         "quality_piotroski_score":   0.50,
         "transcript_tone_score":     0.50,
+        "revenue_revision_score":    0.50,
         "fcf_yield_score":           0.50,
         "amihud_shock_score":        0.50,
         "pb_value_up_score":         0.50,
@@ -164,12 +165,13 @@ class TestEffectiveWeights:
     """Dead-factor weight redistribution."""
 
     def _all_live_norm(self, congress=0.7):
-        """Return a single-row norm dict with all 12 factors live (non-zero)."""
+        """Return a single-row norm dict with all US factors live (non-zero)."""
         return [{
             "insider_conviction": 0.3, "insider_breadth": 0.5, "congress": congress,
             "news_sentiment": 0.4, "news_buzz": 0.5, "momentum_long": 0.6,
             "volume_attention": 0.3, "analyst_consensus": 0.5, "analyst_revision": 0.4,
             "price_target_upside": 0.6, "quality_piotroski": 0.5, "transcript_tone": 0.4,
+            "revenue_revision": 0.4,
         }]
 
     def test_no_dead_factors_returns_original(self):

@@ -111,6 +111,7 @@ class FMPFetcher(BaseMarketFetcher):
             orthogonalize_insider_scores,
         )
         from src.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
+        from src.scoring.consensus_signals import score_revenue_revision  # noqa: PLC0415
 
         client = FMPClient(api_key=self._api_key)
         entries: list[TickerEntry] = []
@@ -297,9 +298,13 @@ class FMPFetcher(BaseMarketFetcher):
         mktcap_from_quote = float(quote.get("marketCap", 0) or 0)
         sector_from_quote = (quote.get("sector") or "").strip()
 
+        # source_diagnostics: per-factor reason for absent signal (api_error vs no_coverage)
+        _diag: dict[str, str] = {}
+
         # ── 2. News — sentiment + buzz ────────────────────────────────────────
         news_sentiment_score: Optional[float] = None
         news_buzz_score: Optional[float] = None
+        _news_had_exc = False
         for _sym in _symbol_candidates(ticker):
             try:
                 articles = client.get_news_raw_articles(_sym)
@@ -308,6 +313,7 @@ class FMPFetcher(BaseMarketFetcher):
                     news_buzz_score = score_news_buzz(articles) if articles else 0.0
                     break
             except Exception as exc:
+                _news_had_exc = True
                 logger.warning(
                     "FMPFetcher news ABSENT %s (%s): %s(%s) — will try next candidate",
                     ticker, _sym, type(exc).__name__, str(exc)[:80],
@@ -315,6 +321,12 @@ class FMPFetcher(BaseMarketFetcher):
         if news_sentiment_score is None:
             logger.warning(
                 "FMPFetcher news ABSENT %s: all candidates failed — excluded from denominator", ticker)
+            _tag = "api_error" if _news_had_exc else "no_coverage"
+            _diag["news_sentiment"] = _tag
+            _diag["news_buzz"] = _tag
+        elif news_sentiment_score == 0.0:
+            _diag["news_sentiment"] = "no_coverage"
+            _diag["news_buzz"] = "no_coverage"
 
         # ── 3. Insider — conviction + breadth ────────────────────────────────
         # FMP stable/insider-trading/search covers:
@@ -374,6 +386,8 @@ class FMPFetcher(BaseMarketFetcher):
                     and not btx.get("S"):
                 insider_conviction_score = None
                 insider_breadth_score = None
+                _diag["insider_conviction"] = "no_coverage"
+                _diag["insider_breadth"] = "no_coverage"
                 logger.debug(
                     "FMPFetcher: zero insider transactions for %s — "
                     "returning None (sparse EU/Asia coverage, not confirmed zero signal)",
@@ -387,6 +401,8 @@ class FMPFetcher(BaseMarketFetcher):
             )
             insider_conviction_score = None
             insider_breadth_score = None
+            _diag["insider_conviction"] = "api_error"
+            _diag["insider_breadth"] = "api_error"
 
         # ── 4. Analyst consensus — bulk index with symbol-candidate fallback ───
         analyst_consensus_score: Optional[float] = None
@@ -408,11 +424,14 @@ class FMPFetcher(BaseMarketFetcher):
                     if ratings:
                         analyst_consensus_score, _ = ac_score_record(ticker, ratings)
                         break
+                else:
+                    _diag["analyst_consensus"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher analyst_consensus ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["analyst_consensus"] = "api_error"
 
         # ── 5. Analyst revision momentum ──────────────────────────────────────
         analyst_revision_score = None  # None = API failure; 0.0 = no revision signal
@@ -426,11 +445,32 @@ class FMPFetcher(BaseMarketFetcher):
                 analyst_revision_score = round(
                     ((clipped + 0.30) / 0.60) * min(1.0, rev_n / 10.0), 4
                 )
+            elif analyst_revision_score == 0.0:
+                _diag["analyst_revision"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher analyst_revision ABSENT %s: %s(%s) — analyst_revision excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["analyst_revision"] = "api_error"
+
+        # ── 5b. Revenue estimate revision (Zacks 2003) ───────────────────────
+        revenue_revision_score: Optional[float] = None
+        try:
+            _rev_data = client.get_revenue_estimates(ticker, limit=6)
+            if _rev_data and len(_rev_data) >= 2:
+                _curr_rev = _rev_data[0].get("estimatedRevenueAvg")
+                _prior_rev = _rev_data[1].get("estimatedRevenueAvg")
+                _rrn = int(_rev_data[0].get("numberAnalystEstimatedRevenue") or 0)
+                revenue_revision_score = score_revenue_revision(_curr_rev, _prior_rev, _rrn)
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher revenue_revision ABSENT %s: %s(%s) — excluded from denominator",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+            _diag["revenue_revision"] = "api_error"
+        if revenue_revision_score is None and "revenue_revision" not in _diag:
+            _diag["revenue_revision"] = "no_coverage"
 
         # ── 6. Quality — Piotroski F-Score ────────────────────────────────────
         quality_piotroski_score = None  # None = API failure; 0.0 = no quality signal
@@ -442,11 +482,14 @@ class FMPFetcher(BaseMarketFetcher):
             quality_piotroski_score = 0.0  # API call succeeded
             if ratios:
                 quality_piotroski_score, _quality_piotroski_raw = score_quality_piotroski(ratios)
+            else:
+                _diag["quality_piotroski"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher piotroski ABSENT %s: %s(%s) — quality_piotroski excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["quality_piotroski"] = "api_error"
 
         # ── 7. Price target upside — symbol-candidate fallback ────────────────
         price_target_upside_score: Optional[float] = None
@@ -465,11 +508,14 @@ class FMPFetcher(BaseMarketFetcher):
                 if upside is not None:
                     price_target_upside_score = upside
                     break
+            else:
+                _diag["price_target_upside"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher price_target ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["price_target_upside"] = "api_error"
 
         # ── 8. Market cap ─────────────────────────────────────────────────────
         mktcap_final = mktcap_from_quote
@@ -496,13 +542,16 @@ class FMPFetcher(BaseMarketFetcher):
                     fcf_yield_score = score_fcf_yield(ttm_fcf, ev)
                 else:
                     fcf_yield_score = 0.0
+                    _diag["fcf_yield"] = "no_coverage"
             else:
                 fcf_yield_score = 0.0
+                _diag["fcf_yield"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher fcf_yield ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["fcf_yield"] = "api_error"
 
         # ── 10. Amihud Illiquidity Shock — zero new API calls ─────────────────
         amihud_shock_score: float = 0.0
@@ -525,11 +574,13 @@ class FMPFetcher(BaseMarketFetcher):
                 pb_value_up_score = score_pb_value_up(bvps, price)
             else:
                 pb_value_up_score = 0.0
+                _diag["pb_value_up"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher pb_value_up ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["pb_value_up"] = "api_error"
 
         # ── 12. ROIC / ROE Quality — Greenblatt magic formula ─────────────────
         roic_quality_score: Optional[float] = None
@@ -541,11 +592,13 @@ class FMPFetcher(BaseMarketFetcher):
                 roic_quality_score = score_roic_quality(roe, roce)
             else:
                 roic_quality_score = 0.0
+                _diag["roic_quality"] = "no_coverage"
         except Exception as exc:
             logger.warning(
                 "FMPFetcher roic_quality ABSENT %s: %s(%s) — excluded from denominator",
                 ticker, type(exc).__name__, str(exc)[:80],
             )
+            _diag["roic_quality"] = "api_error"
 
         return {
             "momentum_long_score":       momentum_long_score,
@@ -556,6 +609,7 @@ class FMPFetcher(BaseMarketFetcher):
             "insider_breadth_score":     insider_breadth_score,
             "analyst_consensus_score":   analyst_consensus_score,
             "analyst_revision_score":    analyst_revision_score,
+            "revenue_revision_score":    revenue_revision_score,
             "quality_piotroski_score":   quality_piotroski_score,
             "price_target_upside_score": price_target_upside_score,
             # EU/Asia fundamental value + quality signals
@@ -583,6 +637,8 @@ class FMPFetcher(BaseMarketFetcher):
             "analyst_revision_n_analysts": analyst_revision_n,
             # Company meta (sector for Discord sector heatmap)
             "sector":                    sector_from_quote,
+            # Per-factor missing-source reason: "api_error" | "no_coverage"
+            "source_diagnostics":        _diag,
         }
 
 
@@ -633,6 +689,7 @@ def _build_price_only_factors(
         "roic_quality_score":        None,
         "congress_score":            0.0,
         "transcript_tone_score":     0.0,
+        "revenue_revision_score":    None,
         "return_12_1m":              return_12_1m,
         "volume_spike":              volume_spike,
         "market_cap":                0.0,

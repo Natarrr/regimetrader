@@ -143,6 +143,10 @@ _OD_FACTOR_LABELS: Dict[str, str] = {
     "momentum_long":      "Momentum 12-1m",
     "volume_attention":   "Volume Attn",
     "analyst_consensus":  "Analyst Cons",
+    "analyst_revision":   "EPS Rev",
+    "revenue_revision":   "Rev Rev",
+    "price_target_upside": "PT Upside",
+    "transcript_tone":    "Transcript",
     "quality_piotroski":  "Quality F-Score",
     "fcf_yield":          "FCF Yield",
     "amihud_shock":       "Amihud Liquid",
@@ -1023,7 +1027,15 @@ class DiscordPayloadBuilder:
             disclosure.append(f"• Weight coverage: `{cov_f:.0%}`{warn}")
         missing = (entry.get("validation_metadata") or {}).get("missing_sources") or []
         if missing:
-            disclosure.append("• Missing sources: " + ", ".join(missing[:8]))
+            _no_cov = [m.split(":")[0] for m in missing if m.endswith(":no_coverage")]
+            _api_err = [m.split(":")[0] for m in missing if m.endswith(":api_error")]
+            _plain = [m for m in missing if ":" not in m]
+            if _no_cov:
+                disclosure.append("• No coverage: " + ", ".join(_no_cov[:8]))
+            if _api_err:
+                disclosure.append("• API errors: " + ", ".join(_api_err[:8]))
+            if _plain:
+                disclosure.append("• Missing sources: " + ", ".join(_plain[:8]))
         fields.append({
             "name":   "⚠️ DATA DISCLOSURE",
             "value":  _truncate("\n".join(disclosure)),

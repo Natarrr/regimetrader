@@ -31,35 +31,43 @@ def test_weights_global_congress_zero():
 def test_weights_us_congress_nonzero():
     assert WEIGHTS_US["congress"] > 0.0
 
-def test_weights_us_sprint_v23():
-    """US weights must reflect v2.3 sprint allocation (analyst_consensus + quality_piotroski activated)."""
+def test_weights_us_sprint_v24():
+    """US weights must reflect v2.4/v2.5 sprint allocation (transcript_tone + revenue_revision activated)."""
     expected = {
         "insider_conviction": 0.30,
-        "insider_breadth":    0.15,
-        "congress":           0.04,
+        "insider_breadth":    0.12,   # reduced 0.15→0.12 (donor for revenue_revision)
+        "congress":           0.01,   # reduced 0.04→0.01 (donor for transcript_tone)
         "news_sentiment":     0.10,
         "news_buzz":          0.05,
         "momentum_long":      0.15,
-        "volume_attention":   0.03,
+        "volume_attention":   0.01,   # reduced 0.03→0.01 (donor for transcript_tone)
         "analyst_consensus":  0.10,
         "quality_piotroski":  0.08,
+        "transcript_tone":    0.05,   # Huang et al. 2018
+        "revenue_revision":   0.03,   # NEW — Zacks 2003
     }
     assert WEIGHTS_US == expected
 
 def test_weights_global_redistribution_correct():
-    """WEIGHTS_GLOBAL vs WEIGHTS_US deltas (v2.3-global: congress absent + quality/momentum tilt)."""
-    delta = {k: WEIGHTS_GLOBAL[k] - WEIGHTS_US[k] for k in WEIGHTS_US}
-    # congress fully absent outside US (WEIGHTS_US now 0.04 after sprint; WEIGHTS_GLOBAL 0.00)
-    assert delta["congress"]           == pytest.approx(-0.04)
-    assert delta["insider_conviction"] == pytest.approx(-0.02)   # −0.02 — MAR Art.19 parity
-    assert delta["insider_breadth"]    == pytest.approx(-0.01)   # −0.01 donor
-    assert delta["news_buzz"]          == pytest.approx(-0.01)   # −0.01 donor
-    assert delta["volume_attention"]   == pytest.approx(+0.01)   # net +0.01 vs US
+    """WEIGHTS_GLOBAL vs WEIGHTS_US deltas (v2.4-global)."""
+    # Only compare factors present in BOTH weight sets
+    common = {k for k in WEIGHTS_US if k in WEIGHTS_GLOBAL}
+    delta = {k: WEIGHTS_GLOBAL[k] - WEIGHTS_US[k] for k in common}
+    # congress: US 0.01 vs GLOBAL 0.00 (structurally absent outside US)
+    assert delta["congress"]           == pytest.approx(-0.01)
+    assert delta["insider_conviction"] == pytest.approx(-0.02)   # MAR Art.19 parity
+    assert delta["insider_breadth"]    == pytest.approx(+0.02)   # GLOBAL 0.14 vs US 0.12
+    assert delta["news_buzz"]          == pytest.approx(-0.03)   # GLOBAL 0.02 vs US 0.05
+    assert delta["volume_attention"]   == pytest.approx(+0.03)   # GLOBAL 0.04 vs US 0.01
     assert delta["analyst_consensus"]  == pytest.approx(0.00)    # same in both (0.10)
     assert delta["momentum_long"]      == pytest.approx(+0.02)   # Rouwenhorst EU premium
     assert delta["quality_piotroski"]  == pytest.approx(-0.03)   # GLOBAL 0.05 < US 0.08
     assert delta["news_sentiment"]     == pytest.approx(+0.03)   # Tetlock 2007 global corpus
-    # New factors present in GLOBAL only
+    # transcript_tone: US 0.05, GLOBAL 0.00 (FMP transcripts US-only)
+    assert delta["transcript_tone"]    == pytest.approx(-0.05)
+    # revenue_revision: both have it; GLOBAL 0.02 < US 0.03
+    assert delta["revenue_revision"]   == pytest.approx(-0.01)
+    # Factors present in GLOBAL only (not in common set)
     assert WEIGHTS_GLOBAL["analyst_revision"]    == pytest.approx(0.02)
     assert WEIGHTS_GLOBAL["price_target_upside"] == pytest.approx(0.03)
 
@@ -97,7 +105,7 @@ def test_congress_not_eligible_asia():
 def test_get_weights_us_returns_copy():
     w = get_weights("AAPL")
     w["congress"] = 999.0
-    assert WEIGHTS_US["congress"] == 0.04   # original not mutated
+    assert WEIGHTS_US["congress"] == 0.01   # original not mutated
 
 def test_get_weights_eu_returns_copy():
     from src.config.weights import WEIGHTS_EU
