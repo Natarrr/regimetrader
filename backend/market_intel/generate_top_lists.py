@@ -74,6 +74,7 @@ FACTOR_FIELDS: Dict[str, str] = {
     "price_target_upside": "price_target_upside_score",
     "quality_piotroski":   "quality_piotroski_score",
     "transcript_tone":     "transcript_tone_score",
+    "revenue_revision":    "revenue_revision_score",
     # EU/Asia fundamental value + quality signals (v2.3)
     "fcf_yield":           "fcf_yield_score",
     "amihud_shock":        "amihud_shock_score",
@@ -211,11 +212,13 @@ def _schema_gate(
 
     for row in results:
         missing: List[str] = []
+        _src_diag: dict = row.get("source_diagnostics") or {}
         for factor, field in FACTOR_FIELDS.items():
             val = row.get(field)
             # None or exactly 0.0 both indicate an absent/dead feed
             if val is None or float(val) == 0.0:
-                missing.append(factor)
+                reason = _src_diag.get(factor)
+                missing.append(f"{factor}:{reason}" if reason else factor)
 
         esg_flag_raw = row.get("esg_flag")
         if isinstance(esg_flag_raw, bool):

@@ -49,6 +49,36 @@ def score_analyst_revision(
     return 0.5 + (clipped / 0.60) * damp
 
 
+# ── Revenue estimate revision (US/INTL P2) ───────────────────────────────────
+
+def score_revenue_revision(
+    current_est: Optional[float],
+    prior_est: Optional[float],
+    n_analysts: int,
+) -> Optional[float]:
+    """Revenue estimate revision momentum [Zacks, 2003].
+
+    Parallel signal to score_analyst_revision() but tracks revenue consensus
+    revisions rather than EPS — orthogonal source of conviction when analysts
+    raise/cut revenue even as EPS guidance is unchanged (e.g., margin-expansion
+    or mix-shift stories).
+
+    score = 0.5 + (clip(rev_pct, −0.30, +0.30) / 0.60) · min(1, n/10)
+
+    None when current_est / prior_est unavailable, prior_est ≈ 0 (degenerate
+    base), or n_analysts < 3 (coverage gate). Absence ≠ bearish — weight
+    redistributes downstream via _ticker_effective_weights.
+    """
+    if current_est is None or prior_est is None or n_analysts < 3:
+        return None
+    if abs(float(prior_est)) < _BASE_EPS:
+        return None
+    rev_pct = (float(current_est) - float(prior_est)) / abs(float(prior_est))
+    clipped = max(-0.30, min(0.30, rev_pct))
+    damp = min(1.0, n_analysts / 10.0)
+    return 0.5 + (clipped / 0.60) * damp
+
+
 # ── Revision velocity (ASIA P2) ───────────────────────────────────────────────
 
 def score_revision_velocity(estimates: list[dict]) -> Optional[float]:

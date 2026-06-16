@@ -119,6 +119,37 @@ def _field(embed, name_fragment):
     return None
 
 
+# ── 0. Data-freshness anchor (data_as_of vs cook timestamp) ───────────────────
+
+class TestDataFreshnessAnchor:
+    """`DATA Xh` and the STALE banner must reflect the age of the underlying
+    market data (`data_as_of`, the oldest input leg), NOT the cook timestamp
+    (`generated_at`), which is stamped milliseconds before send and so always
+    reads ~0.0h. Anchored to real wall-clock because `_age_hours` uses
+    datetime.now() (see _data_age_hours) — not the fixture _NOW."""
+
+    def test_data_as_of_drives_staleness_over_fresh_generated_at(self):
+        # The exact production bug: a fresh cook stamp masked stale data.
+        now = datetime.now(timezone.utc)
+        e = _embed(_build(
+            vix=17.3,
+            data_as_of=(now - timedelta(hours=30)).isoformat(),
+            generated_at=now.isoformat(),  # fresh cook stamp must be ignored
+        ))
+        assert e["color"] == 0xFF0000
+        assert "STALE" in e["description"].upper()
+
+    def test_fresh_data_as_of_overrides_old_generated_at(self):
+        now = datetime.now(timezone.utc)
+        e = _embed(_build(
+            vix=17.3,
+            data_as_of=(now - timedelta(hours=0.2)).isoformat(),
+            generated_at=(now - timedelta(hours=48)).isoformat(),  # old, ignored
+        ))
+        assert e["color"] == 0x00FF00
+        assert "STALE" not in e["description"].upper()
+
+
 # ── 1. Theme selection ─────────────────────────────────────────────────────────
 
 class TestThemes:
@@ -811,3 +842,47 @@ class TestOnDemand:
         e = _embed(_build_on_demand())
         text = _all_text(e)
         assert text.count("```") % 2 == 0
+
+    # ── Sprint 4: source-diagnostic display ─────────────────────────────────
+
+    def test_disclosure_splits_no_coverage_from_api_error(self):
+        entry_extra = {
+            "validation_metadata": {
+                "is_complete": True,
+                "missing_sources": [
+                    "news_sentiment:no_coverage",
+                    "analyst_revision:no_coverage",
+                    "fcf_yield:api_error",
+                ],
+            }
+        }
+        f = _field(_embed(_build_on_demand(entry_extra=entry_extra)), "DISCLOSURE")
+        assert "No coverage:" in f["value"]
+        assert "news_sentiment" in f["value"]
+        assert "analyst_revision" in f["value"]
+        assert "API errors:" in f["value"]
+        assert "fcf_yield" in f["value"]
+        assert "Missing sources:" not in f["value"]
+
+    def test_disclosure_only_no_coverage_omits_api_errors_line(self):
+        entry_extra = {
+            "validation_metadata": {
+                "is_complete": True,
+                "missing_sources": ["news_sentiment:no_coverage"],
+            }
+        }
+        f = _field(_embed(_build_on_demand(entry_extra=entry_extra)), "DISCLOSURE")
+        assert "No coverage:" in f["value"]
+        assert "API errors:" not in f["value"]
+
+    def test_disclosure_legacy_plain_missing_sources_still_renders(self):
+        # Plain names (no colon) from daily pipeline → old label preserved
+        entry_extra = {
+            "validation_metadata": {
+                "is_complete": True,
+                "missing_sources": ["congress", "transcript_tone"],
+            }
+        }
+        f = _field(_embed(_build_on_demand(entry_extra=entry_extra)), "DISCLOSURE")
+        assert "Missing sources:" in f["value"]
+        assert "congress" in f["value"]

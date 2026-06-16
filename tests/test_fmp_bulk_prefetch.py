@@ -157,3 +157,61 @@ class TestPiotroskiFromBulkSnapshot:
 
         score, raw = score_quality_piotroski({"symbol": "X", "unknownField": 1.0})
         assert (score, raw) == (0.0, 0)
+
+
+class TestPrefetchStatusVisibility:
+    """A fetch failure must NOT be reported as success. Serving a prior cache is
+    allowed but must be marked "stale" (loud ERROR + status marker) so downstream
+    freshness never silently treats old data as fresh."""
+
+    def _boom(self, *a, **k):
+        raise RuntimeError("simulated FMP outage")
+
+    def test_fetch_failure_with_cache_is_stale_and_logged(self, tmp_path, monkeypatch, caplog):
+        import json
+        from datetime import datetime, timezone, timedelta
+        from src.ingestion import fmp_bulk_prefetch as bp
+
+        ep = "upgrades-downgrades-consensus-bulk"
+        old = (datetime.now(timezone.utc) - timedelta(hours=50)).isoformat()
+        (tmp_path / f"{ep}.json").write_text(
+            json.dumps({"_cached_at": old, "_ttl_hours": 1,
+                        "_record_count": 1, "data": [{"symbol": "AAPL"}]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(bp, "_fetch_endpoint", self._boom)
+        with caplog.at_level("ERROR"):
+            results = bp.prefetch([ep], tmp_path, ttl_hours=0, api_key="x", rps=50)
+
+        assert results[ep] == "stale"  # not True / not "fresh"
+        assert any("STALE CACHE" in r.message for r in caplog.records)
+        marker = json.loads((tmp_path / "bulk_prefetch_status.json").read_text(encoding="utf-8"))
+        assert marker["endpoints"][ep]["status"] == "stale"
+        assert marker["endpoints"][ep]["cached_at"] == old
+
+    def test_fetch_failure_without_cache_is_failed(self, tmp_path, monkeypatch):
+        import json
+        from src.ingestion import fmp_bulk_prefetch as bp
+
+        ep = "ratios-ttm-bulk"
+        monkeypatch.setattr(bp, "_fetch_endpoint", self._boom)
+        results = bp.prefetch([ep], tmp_path, ttl_hours=0, api_key="x", rps=50)
+
+        assert results[ep] == "failed"
+        marker = json.loads((tmp_path / "bulk_prefetch_status.json").read_text(encoding="utf-8"))
+        assert marker["endpoints"][ep]["status"] == "failed"
+
+    def test_within_ttl_cache_is_fresh(self, tmp_path):
+        import json
+        from datetime import datetime, timezone
+        from src.ingestion import fmp_bulk_prefetch as bp
+
+        ep = "upgrades-downgrades-consensus-bulk"
+        (tmp_path / f"{ep}.json").write_text(
+            json.dumps({"_cached_at": datetime.now(timezone.utc).isoformat(),
+                        "_ttl_hours": 23, "_record_count": 1,
+                        "data": [{"symbol": "AAPL"}]}),
+            encoding="utf-8",
+        )
+        results = bp.prefetch([ep], tmp_path, ttl_hours=23, api_key="x", rps=50)
+        assert results[ep] == "fresh"  # served from valid cache, no fetch attempted

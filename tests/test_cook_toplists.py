@@ -316,6 +316,36 @@ def test_cook_ticker_count_is_combined(cook_mod, tmp_path, us_payload, intl_payl
     assert result["ticker_count"] == 163
 
 
+def test_cook_data_as_of_reflects_oldest_leg(cook_mod, tmp_path, intl_payload, registry):
+    """data_as_of must be the OLDEST input leg's real timestamp — here the US
+    leg's embedded generated_at — so a leg that didn't re-run surfaces its true
+    age instead of the (always-fresh) cook timestamp. generated_at stays separate."""
+    old = "2026-06-01T00:00:00+00:00"
+    us = {
+        "top_buys_usa": [{
+            "ticker": "MSFT", "final_score": 0.87, "badge": "HIGH BUY",
+            "market": "USA",
+            "factors": {
+                "insider_conviction": 0.80, "insider_breadth": 0.75,
+                "congress": 0.60, "news_sentiment": 0.70, "news_buzz": 0.50,
+                "momentum_long": 0.90, "volume_attention": 0.80,
+                "analyst_consensus": 0.70, "quality_piotroski": 0.80,
+            },
+        }],
+        "vix": 17.3, "vix_regime": "Normal", "kill_switch": False,
+        "ticker_count": 160, "generated_at": old,
+    }
+    us_path = tmp_path / "top_lists_us.json"
+    us_path.write_text(json.dumps(us), encoding="utf-8")
+    out = tmp_path / "combined.json"
+    cook_mod.cook(us_path, intl_payload, registry, out)
+    result = json.loads(out.read_text())
+    assert "data_as_of" in result
+    # intl_payload was just written (fresh mtime); US embedded stamp is older.
+    assert result["data_as_of"] == old
+    assert result["generated_at"] != old  # cook time is separate, fresh
+
+
 def test_cook_us_entries_preserved_unchanged(cook_mod, tmp_path, us_payload, intl_payload, registry):
     out = tmp_path / "combined.json"
     cook_mod.cook(us_payload, intl_payload, registry, out)

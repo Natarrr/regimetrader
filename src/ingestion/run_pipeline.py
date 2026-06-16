@@ -790,60 +790,37 @@ def score_news_buzz_combined(ticker: str) -> tuple[float, str]:
     return 0.0, "none"
 
 
-def score_transcript_tone(ticker: str, client=None) -> tuple[float, str]:
+def score_transcript_tone(ticker: str, client=None) -> tuple[float | None, str]:
     """Score earnings transcript guidance tone via FMP transcript text.
 
-    Args:
-        ticker: Ticker symbol.
-        client: Optional shared FMPClient instance. If None, creates a new one.
-                Pass the shared pipeline client so health_report() captures
-                all endpoint calls and failures in fmp_health.json.
+    Fetches the latest earnings call transcript for ticker, then delegates
+    tone classification to src.scoring.news_signals.score_transcript_tone
+    (the pure text scorer — independently testable without FMP I/O).
 
-    Returns (score, source) where source is 'fmp_transcript:<tone>' or 'none'.
+    Returns (score, source):
+        score  — 0.80 raised / 0.55 reaffirm / 0.20 lowered / None no signal
+        source — 'fmp_transcript:<tone>' or 'none'
+
+    None (not 0.0) signals "no transcript available" so _ticker_effective_weights
+    redistributes the weight to live factors rather than penalising the ticker.
     """
+    from src.scoring.news_signals import score_transcript_tone as _score_text
     try:
         _client = client if client is not None else _FMPClient()
         txt = _client.get_earnings_transcript(ticker, max_chars=3000)
-        if not txt:
-            return 0.0, "none"
-        text = str(txt).lower()
-
-        raise_phrases = [
-            "raising guidance", "raised guidance", "increase our guidance",
-            "raising our full-year", "above the high end", "raising our outlook",
-            "above our guidance", "raising revenue guidance",
-        ]
-        lower_phrases = [
-            "lowering guidance", "lowered guidance", "reduce our guidance",
-            "below our guidance", "revising guidance lower", "lowering our outlook",
-            "below the low end", "headwinds",
-        ]
-        maintain_phrases = [
-            "reaffirming guidance", "reaffirm", "maintaining guidance", "on track to",
-            "comfortable with our guidance", "reiterate", "confident in our",
-        ]
-
-        cnt_raise = sum(text.count(p) for p in raise_phrases)
-        cnt_lower = sum(text.count(p) for p in lower_phrases)
-        cnt_maint = sum(text.count(p) for p in maintain_phrases)
-
-        log.debug("score_transcript_tone %s: raise=%d lower=%d maintain=%d",
-                  ticker, cnt_raise, cnt_lower, cnt_maint)
-
-        total = cnt_raise + cnt_lower + cnt_maint
-        if total == 0:
-            return 0.0, "none"
-
-        # Majority wins; tie -> maintain
-        if cnt_raise > cnt_lower and cnt_raise > cnt_maint:
-            return 0.80, "fmp_transcript:raised"
-        if cnt_lower > cnt_raise and cnt_lower > cnt_maint:
-            return 0.20, "fmp_transcript:lowered"
-        # ties and maintain majority
-        return 0.55, "fmp_transcript:reaffirm"
+        score = _score_text(txt)
+        if score is None:
+            return None, "none"
+        tone = (
+            "raised"   if score >= 0.75 else
+            "lowered"  if score <= 0.25 else
+            "reaffirm"
+        )
+        log.debug("score_transcript_tone %s: score=%.2f tone=%s", ticker, score, tone)
+        return score, f"fmp_transcript:{tone}"
     except Exception as exc:
         log.debug("score_transcript_tone %s failed: %s", ticker, exc)
-        return 0.0, "none"
+        return None, "none"
 
 
 def fetch_fmp_insider_all(
@@ -1534,6 +1511,19 @@ def run(
             except Exception as _ar_exc:
                 log.debug("analyst_revision failed %s: %s", ticker, _ar_exc)
 
+            # ── Revenue estimate revision (Zacks 2003) ────────────────────
+            revenue_revision_score: Optional[float] = None
+            try:
+                from src.scoring.consensus_signals import score_revenue_revision as _srr  # noqa: PLC0415
+                _rrev_data = _fmp_client.get_revenue_estimates(ticker, limit=6)
+                if _rrev_data and len(_rrev_data) >= 2:
+                    _curr_rev = _rrev_data[0].get("estimatedRevenueAvg")
+                    _prior_rev = _rrev_data[1].get("estimatedRevenueAvg")
+                    _rrn = int(_rrev_data[0].get("numberAnalystEstimatedRevenue") or 0)
+                    revenue_revision_score = _srr(_curr_rev, _prior_rev, _rrn)
+            except Exception as _rr_exc:
+                log.debug("revenue_revision failed %s: %s", ticker, _rr_exc)
+
             # ── Price target upside ───────────────────────────────────────
             # None = absent analyst coverage (no price target filed).
             # _ticker_effective_weights() treats None as absent signal and
@@ -1600,6 +1590,7 @@ def run(
                 "analyst_consensus_score":   analyst_consensus_score,
                 "analyst_revision_score":    analyst_revision_score,
                 "analyst_revision_n":        _rev_n,
+                "revenue_revision_score":    revenue_revision_score,
                 "price_target_upside_score": price_target_upside_score,
                 "quality_piotroski_score":   quality_piotroski_score,
                 "quality_piotroski_raw":     quality_piotroski_raw,
@@ -1695,6 +1686,7 @@ def run(
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
                 "analyst_revision_score":   0.0,
+                "revenue_revision_score":   0.0,
                 "quality_piotroski_score":  0.0,
                 "quality_piotroski_raw":    None,
                 "congress_score":           0.0,
@@ -1732,6 +1724,7 @@ def run(
                 "news_buzz_score":          0.0,
                 "analyst_consensus_score":  0.0,
                 "analyst_revision_score":   0.0,
+                "revenue_revision_score":   0.0,
                 "quality_piotroski_score":  0.0,
                 "quality_piotroski_raw":    None,
                 "congress_score":           0.0,

@@ -143,6 +143,14 @@ def build_bot(*, repo: str, token: str, ref: str,
     async def on_ready() -> None:
         print(f"[BOT] Logged in as {bot.user} — listening for ?score "
               f"(dispatching to {repo}@{ref})")
+        print(f"[BOT] message_content intent active: {bot.intents.message_content}")
+
+    @bot.event
+    async def on_message(message) -> None:
+        if message.author == bot.user:
+            return
+        print(f"[BOT] MSG from {message.author}: {repr(message.content)}")
+        await bot.process_commands(message)
 
     @bot.command(name="score")
     async def score(ctx, raw_ticker: str | None = None) -> None:
@@ -180,6 +188,16 @@ def build_bot(*, repo: str, token: str, ref: str,
 
 
 def main() -> int:
+    # Load .env from repo root if present (local dev convenience)
+    try:
+        from dotenv import load_dotenv
+        _env = Path(__file__).resolve().parents[1] / ".env"
+        if _env.exists():
+            load_dotenv(_env)
+            print(f"[BOT] Loaded env from {_env}")
+    except ImportError:
+        pass
+
     bot_token = os.environ.get("DISCORD_BOT_TOKEN", "")
     gh_token = os.environ.get("GITHUB_TOKEN", "")
     missing = [name for name, val in (

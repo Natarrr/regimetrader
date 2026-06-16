@@ -74,19 +74,19 @@ class TestWeightsConsistency:
         )
 
     def test_weights_unified(self):
-        """v2.2-global: run_pipeline and generate_top_lists both use config/weights.py.
-        Both must use WEIGHTS_US (9-factor) — the dual 12-factor/9-factor schema is resolved.
+        """v2.4-global: run_pipeline and generate_top_lists both use config/weights.py.
+        Both must use WEIGHTS_US (10-factor after transcript_tone activated in v2.4).
         """
         rp_weights  = _load_run_pipeline_weights()
         gtl_weights = _load_generate_top_lists_weights()
 
-        # Both schemas are now 9-factor (WEIGHTS_US from config/weights.py)
-        assert len(rp_weights) == 9, (
-            f"run_pipeline.WEIGHTS expected 9 factors (WEIGHTS_US), got {len(rp_weights)}: "
+        # Both schemas are now 11-factor (WEIGHTS_US from config/weights.py, v2.5 adds revenue_revision)
+        assert len(rp_weights) == 11, (
+            f"run_pipeline.WEIGHTS expected 11 factors (WEIGHTS_US v2.5), got {len(rp_weights)}: "
             f"{list(rp_weights.keys())}"
         )
-        assert len(gtl_weights) == 9, (
-            f"generate_top_lists.WEIGHTS expected 9 factors, got {len(gtl_weights)}: "
+        assert len(gtl_weights) == 11, (
+            f"generate_top_lists.WEIGHTS expected 11 factors, got {len(gtl_weights)}: "
             f"{list(gtl_weights.keys())}"
         )
 
@@ -151,13 +151,13 @@ class TestWeightsValues:
             f"Full WEIGHTS: {weights}"
         )
 
-    def test_congress_weight_is_04_percent(self):
-        """congress weight = 0.04 in WEIGHTS_US (v2.3 sprint: reduced from 0.22 to fund analyst_consensus + quality_piotroski)."""
+    def test_congress_weight_is_01_percent(self):
+        """congress weight = 0.01 in WEIGHTS_US (v2.4 sprint: reduced 0.04→0.01 to fund transcript_tone)."""
         weights = _load_run_pipeline_weights()
         if "congress" not in weights:
             pytest.skip("congress not in WEIGHTS")
-        assert abs(weights["congress"] - 0.04) < 1e-6, (
-            f"congress weight={weights['congress']} — expected 0.04 per v2.3 sprint WEIGHTS_US spec."
+        assert abs(weights["congress"] - 0.01) < 1e-6, (
+            f"congress weight={weights['congress']} — expected 0.01 per v2.4 sprint WEIGHTS_US spec."
         )
 
     def test_volume_attention_is_tilt_only(self):
@@ -171,12 +171,12 @@ class TestWeightsValues:
         )
 
     def test_config_congress_weight_is_intentional(self):
-        """config/weights.py congress=0.04 per v2.3 sprint (WEIGHTS_US).
-        Reduced from 0.22 to fund analyst_consensus=0.10 and quality_piotroski=0.08.
+        """config/weights.py congress=0.01 per v2.4 sprint (WEIGHTS_US).
+        Reduced 0.04→0.01 to fund transcript_tone=0.05 [Huang et al. 2018].
         Change only by updating the canonical source in src/config/weights.py.
         """
         from src.config.weights import WEIGHTS as CONFIG_WEIGHTS
-        assert CONFIG_WEIGHTS["congress"] == 0.04, (
-            "US congress weight must be 0.04 per v2.3 sprint spec (WEIGHTS_US). "
+        assert CONFIG_WEIGHTS["congress"] == 0.01, (
+            "US congress weight must be 0.01 per v2.4 sprint spec (WEIGHTS_US). "
             "Change only by updating the canonical source in src/config/weights.py."
         )

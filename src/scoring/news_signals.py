@@ -98,6 +98,55 @@ def score_news_sentiment(
     return round(score, 4)
 
 
+def score_transcript_tone(text: str | None) -> float | None:
+    """Earnings call guidance tone scorer in [0, 1], or None when no signal.
+
+    Classifies management guidance language into three tones:
+      raised guidance   → 0.80 (bullish — explicit upward revision)
+      reaffirmed        → 0.55 (neutral-positive — no change, confident tone)
+      lowered guidance  → 0.20 (bearish — explicit downward revision)
+      no guidance found → None (SIGNED: absent ≠ bearish; weight redistributes)
+
+    The caller (run_pipeline.score_transcript_tone) handles FMP fetch and
+    wraps the result in (float|None, source_str) for pipeline compatibility.
+
+    Reference: [Huang et al., 2018 — "The Predictive Power of Conference
+    Call Sentiment", Journal of Financial Economics]
+    """
+    if not text:
+        return None
+
+    t = text.lower()
+
+    raise_phrases = [
+        "raising guidance", "raised guidance", "increase our guidance",
+        "raising our full-year", "above the high end", "raising our outlook",
+        "above our guidance", "raising revenue guidance",
+    ]
+    lower_phrases = [
+        "lowering guidance", "lowered guidance", "reduce our guidance",
+        "below our guidance", "revising guidance lower", "lowering our outlook",
+        "below the low end", "headwinds",
+    ]
+    maintain_phrases = [
+        "reaffirming guidance", "reaffirm", "maintaining guidance", "on track to",
+        "comfortable with our guidance", "reiterate", "confident in our",
+    ]
+
+    cnt_raise = sum(t.count(p) for p in raise_phrases)
+    cnt_lower = sum(t.count(p) for p in lower_phrases)
+    cnt_maint = sum(t.count(p) for p in maintain_phrases)
+
+    if cnt_raise + cnt_lower + cnt_maint == 0:
+        return None
+
+    if cnt_raise > cnt_lower and cnt_raise > cnt_maint:
+        return 0.80
+    if cnt_lower > cnt_raise and cnt_lower > cnt_maint:
+        return 0.20
+    return 0.55
+
+
 def score_news_buzz(articles: list[dict]) -> float:
     """Pure attention/buzz signal in [0, 1].
 

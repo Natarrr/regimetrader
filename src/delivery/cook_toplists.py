@@ -228,6 +228,21 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
     }
 
 
+def _leg_as_of(path: Path, embedded) -> datetime:
+    """Truthful 'data as-of' timestamp for an input leg.
+
+    Prefers the leg's own embedded ``generated_at`` (the real compute time
+    stamped by the producer) and falls back to the file's mtime — so a leg
+    that did NOT re-run surfaces its true age rather than the cook timestamp.
+    """
+    if embedded:
+        try:
+            return datetime.fromisoformat(str(embedded).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+
+
 def cook(
     us_input: Path,
     intl_input: Path,
@@ -393,6 +408,16 @@ def cook(
                 ],
             }
 
+    # ── Data-freshness anchor ─────────────────────────────────────────────────
+    # `generated_at` (below) records cook time; it is NOT the age of the market
+    # data. `data_as_of` is the OLDEST input leg's real timestamp, so a leg that
+    # failed to re-run (e.g. stale top_lists_intl.json) trips the DATA STALE
+    # banner in send_discord instead of silently reading "0.0h".
+    data_as_of = min(
+        _leg_as_of(us_input, us_data.get("generated_at")),
+        _leg_as_of(intl_input, None),  # INTL artifact is a bare list — mtime only
+    ).isoformat()
+
     # ── Write combined output ─────────────────────────────────────────────────
     combined = {
         "top_buys_usa":    top_buys_usa,
@@ -415,6 +440,7 @@ def cook(
         # registered intl ticker that was scored — independent of the sector
         # cap and the CAPITULATION watchlist move.
         "ticker_count":    us_ticker_count + intl_scored_count,
+        "data_as_of":      data_as_of,
         "generated_at":    datetime.now(timezone.utc).isoformat(),
     }
 
@@ -495,6 +521,7 @@ def cook_on_demand(
         # by construction, no peer group involved.
         scoring_mode = "absolute"
         source_run_id = None
+        on_demand_as_of = _leg_as_of(intl_path, None)
     else:
         us_path = Path(us_input)
         if not us_path.exists():
@@ -517,6 +544,7 @@ def cook_on_demand(
         pipeline = "US"
         scoring_mode = us_data.get("scoring_mode", "absolute")
         source_run_id = us_data.get("source_run_id")
+        on_demand_as_of = _leg_as_of(us_path, us_data.get("generated_at"))
         if "weight_coverage" not in entry:
             # Display-only coverage: share of canonical US weight whose factor
             # survived the schema gate (missing_sources counts None AND 0.0).
@@ -541,6 +569,7 @@ def cook_on_demand(
         "kill_switch":   kill_switch,
         "ticker_count":  1,
         "source_run_id": source_run_id,
+        "data_as_of":    on_demand_as_of.isoformat(),
         "generated_at":  datetime.now(timezone.utc).isoformat(),
     }
 
