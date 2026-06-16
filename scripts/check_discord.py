@@ -1,6 +1,8 @@
 # Path: scripts/check_discord.py
 """One-shot diagnostic: connect, wait 30s for any message, report what we see."""
-import asyncio, os, sys
+import asyncio
+import os
+import sys
 from pathlib import Path
 
 try:
@@ -13,7 +15,7 @@ token = os.environ.get("DISCORD_BOT_TOKEN", "")
 if not token:
     sys.exit("ERROR: DISCORD_BOT_TOKEN not set")
 
-import discord
+import discord  # noqa: E402 (deliberately after the token early-exit above)
 
 intents = discord.Intents.default()
 intents.message_content = True

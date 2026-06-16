@@ -111,7 +111,6 @@ class FMPFetcher(BaseMarketFetcher):
             orthogonalize_insider_scores,
         )
         from src.scoring.analyst import _score_record as ac_score_record  # noqa: PLC0415
-        from src.scoring.consensus_signals import score_revenue_revision  # noqa: PLC0415
 
         client = FMPClient(api_key=self._api_key)
         entries: list[TickerEntry] = []
@@ -455,6 +454,7 @@ class FMPFetcher(BaseMarketFetcher):
             _diag["analyst_revision"] = "api_error"
 
         # ── 5b. Revenue estimate revision (Zacks 2003) ───────────────────────
+        from src.scoring.consensus_signals import score_revenue_revision  # noqa: PLC0415
         revenue_revision_score: Optional[float] = None
         try:
             _rev_data = client.get_revenue_estimates(ticker, limit=6)
