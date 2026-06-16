@@ -119,6 +119,37 @@ def _field(embed, name_fragment):
     return None
 
 
+# ── 0. Data-freshness anchor (data_as_of vs cook timestamp) ───────────────────
+
+class TestDataFreshnessAnchor:
+    """`DATA Xh` and the STALE banner must reflect the age of the underlying
+    market data (`data_as_of`, the oldest input leg), NOT the cook timestamp
+    (`generated_at`), which is stamped milliseconds before send and so always
+    reads ~0.0h. Anchored to real wall-clock because `_age_hours` uses
+    datetime.now() (see _data_age_hours) — not the fixture _NOW."""
+
+    def test_data_as_of_drives_staleness_over_fresh_generated_at(self):
+        # The exact production bug: a fresh cook stamp masked stale data.
+        now = datetime.now(timezone.utc)
+        e = _embed(_build(
+            vix=17.3,
+            data_as_of=(now - timedelta(hours=30)).isoformat(),
+            generated_at=now.isoformat(),  # fresh cook stamp must be ignored
+        ))
+        assert e["color"] == 0xFF0000
+        assert "STALE" in e["description"].upper()
+
+    def test_fresh_data_as_of_overrides_old_generated_at(self):
+        now = datetime.now(timezone.utc)
+        e = _embed(_build(
+            vix=17.3,
+            data_as_of=(now - timedelta(hours=0.2)).isoformat(),
+            generated_at=(now - timedelta(hours=48)).isoformat(),  # old, ignored
+        ))
+        assert e["color"] == 0x00FF00
+        assert "STALE" not in e["description"].upper()
+
+
 # ── 1. Theme selection ─────────────────────────────────────────────────────────
 
 class TestThemes:

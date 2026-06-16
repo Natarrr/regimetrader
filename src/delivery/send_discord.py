@@ -560,7 +560,13 @@ class DiscordPayloadBuilder:
 
     @property
     def _age_hours(self) -> Optional[float]:
-        return _data_age_hours(self.data.get("generated_at", ""))
+        # Age of the underlying market DATA, not the cook timestamp.
+        # `generated_at` is stamped milliseconds before send, so it always
+        # reads ~0.0h and can never detect staleness; `data_as_of` (oldest
+        # input leg, set by cook_toplists) is the truthful anchor. Fall back
+        # to `generated_at` only for legacy artifacts lacking `data_as_of`.
+        stamp = self.data.get("data_as_of") or self.data.get("generated_at", "")
+        return _data_age_hours(stamp)
 
     @property
     def _is_stale(self) -> bool:
@@ -1150,6 +1156,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--dry-run", action="store_true",
         help="Print payload JSON without sending",
     )
+    parser.add_argument(
+        "--max-data-age-hours", type=float, default=float(_STALE_HOURS),
+        help="If the brief's underlying data is older than this, still send "
+             "(the DATA STALE banner is in the embed) but exit non-zero so a "
+             f"local scheduler can flag the run (default: {_STALE_HOURS}).",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -1236,15 +1248,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         payload = builder.build_on_demand()
     else:
         payload = builder.build()
+
+    # Stale-data guard: the brief is delivered regardless (the DATA STALE
+    # banner is already in the embed), but a too-old run returns a distinct
+    # non-zero exit so the local scheduler flags it instead of trusting
+    # silently-old data. Exit code 3 — distinct from send (1) / config (2).
+    age = builder._age_hours
+    stale_exit = age is not None and age > args.max_data_age_hours
+    if stale_exit:
+        log.error(
+            "Data is %.1fh old (> --max-data-age-hours %.1f): sending brief "
+            "with STALE banner and exiting non-zero.",
+            age, args.max_data_age_hours,
+        )
+
     if args.dry_run:
         _print_payload(payload)
-        return 0
+        return 3 if stale_exit else 0
 
     if not send_to_discord(webhook, payload):
         log.error("All Discord send attempts failed")
         return 1
     log.info("Daily brief sent successfully")
-    return 0
+    return 3 if stale_exit else 0
 
 
 if __name__ == "__main__":

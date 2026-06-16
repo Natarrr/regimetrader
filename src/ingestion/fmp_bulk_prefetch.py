@@ -105,6 +105,15 @@ def _is_cache_valid(cache_dir: Path, endpoint: str, ttl_hours: float) -> bool:
         return False
 
 
+def _cached_at_str(cache_dir: Path, endpoint: str) -> str | None:
+    """Return the stored ``_cached_at`` ISO string for a cached endpoint, or None."""
+    try:
+        data = json.loads(_cache_path(cache_dir, endpoint).read_text(encoding="utf-8"))
+        return data.get("_cached_at") or None
+    except Exception:
+        return None
+
+
 def _coerce_csv_value(raw: str | None) -> Any:
     """Coerce a CSV string cell to int/float/None so downstream scorers
     (int()/float() conversions in analyst.py, momentum_signals.py) behave
@@ -228,12 +237,22 @@ def prefetch(
     ttl_hours: float,
     api_key: str,
     rps: float,
-) -> dict[str, bool]:
+) -> dict[str, str]:
     """Fetch all requested endpoints, writing to cache.
-    Returns dict of {endpoint: success}.
+
+    Returns ``{endpoint: status}`` where status is one of:
+      "fresh"  — served from a within-TTL cache or a successful live fetch.
+      "stale"  — fetch FAILED but a prior cache existed and was served. The
+                 data is OLD; this is surfaced loudly (ERROR log + status
+                 marker) so it is never silently treated as fresh.
+      "failed" — fetch failed and no cache exists at all.
+
+    Also writes ``{cache_dir}/bulk_prefetch_status.json`` (endpoint → status +
+    cache age) so the operator/pipeline can see which feeds were served stale.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
-    results: dict[str, bool] = {}
+    results: dict[str, str] = {}
+    detail: dict[str, dict[str, Any]] = {}
 
     session = requests.Session()
     _retry = Retry(
@@ -250,13 +269,18 @@ def prefetch(
 
     for endpoint in endpoints:
         if _is_cache_valid(cache_dir, endpoint, ttl_hours):
-            results[endpoint] = True
+            results[endpoint] = "fresh"
+            detail[endpoint] = {
+                "status": "fresh",
+                "cached_at": _cached_at_str(cache_dir, endpoint),
+            }
             continue
 
         try:
             records = _fetch_endpoint(endpoint, api_key, rps, session)
+            cached_at = datetime.now(timezone.utc).isoformat()
             payload = {
-                "_cached_at": datetime.now(timezone.utc).isoformat(),
+                "_cached_at": cached_at,
                 "_ttl_hours": ttl_hours,
                 "_record_count": len(records),
                 "data": records,
@@ -266,29 +290,52 @@ def prefetch(
                 payload, separators=(",", ":")), encoding="utf-8")
             logger.info("Cached %s → %s (%d records)",
                         endpoint, p, len(records))
-            results[endpoint] = True
+            results[endpoint] = "fresh"
+            detail[endpoint] = {"status": "fresh", "cached_at": cached_at}
 
         except Exception as exc:
             logger.error("FAILED %s: %s", endpoint, exc)
-            # Fallback: use stale cache if it exists rather than hard-failing.
-            # 429 "updated once every few hours" — stale data is still valid.
+            # Fallback: serve a prior cache rather than hard-failing, but mark it
+            # "stale" and log LOUDLY — downstream scores using this feed are NOT
+            # fresh and must not be reported as such (see send_discord DATA age).
             stale = _cache_path(cache_dir, endpoint)
             if stale.exists():
                 try:
                     payload = json.loads(stale.read_text(encoding="utf-8"))
+                    cached_at = payload.get(
+                        "_cached_at", "2000-01-01T00:00:00+00:00")
                     age_h = (
                         datetime.now(timezone.utc)
-                        - datetime.fromisoformat(payload.get("_cached_at", "2000-01-01T00:00:00+00:00"))
+                        - datetime.fromisoformat(cached_at)
                     ).total_seconds() / 3600
-                    logger.warning(
-                        "Using stale cache for %s (age=%.1fh) — fetch failed: %s",
+                    logger.error(
+                        "STALE CACHE served for %s (age=%.1fh); fetch failed: "
+                        "%s. Scores using this feed are NOT fresh.",
                         endpoint, age_h, exc,
                     )
-                    results[endpoint] = True
+                    results[endpoint] = "stale"
+                    detail[endpoint] = {
+                        "status": "stale",
+                        "cached_at": cached_at,
+                        "age_hours": round(age_h, 1),
+                    }
                     continue
                 except Exception:
                     pass
-            results[endpoint] = False
+            results[endpoint] = "failed"
+            detail[endpoint] = {"status": "failed", "cached_at": None}
+
+    try:
+        (cache_dir / "bulk_prefetch_status.json").write_text(
+            json.dumps(
+                {"_written_at": datetime.now(timezone.utc).isoformat(),
+                 "endpoints": detail},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("could not write bulk_prefetch_status.json: %s", exc)
 
     return results
 
@@ -483,20 +530,23 @@ def main() -> None:
         rps=rps,
     )
 
-    failures = [ep for ep, ok in results.items() if not ok]
-    if failures:
-        # Only hard-fail if a failed endpoint has NO cache file at all.
-        # Stale-cache fallbacks already set results[ep]=True, so reaching here
-        # means the endpoint failed AND no cache exists.
-        missing = [ep for ep in failures if not _cache_path(Path(args.cache_dir), ep).exists()]
-        if missing:
-            logger.error("Failed endpoints with no cache fallback: %s", missing)
-            sys.exit(1)
-        logger.warning("Failed endpoints covered by stale cache: %s", failures)
+    failed = [ep for ep, st in results.items() if st == "failed"]
+    stale = [ep for ep, st in results.items() if st == "stale"]
+    ok_count = sum(1 for st in results.values() if st in ("fresh", "stale"))
+
+    if failed:
+        # "failed" already means fetch failed AND no cache fallback exists.
+        logger.error("Failed endpoints with no cache fallback: %s", failed)
+        sys.exit(1)
+    if stale:
+        logger.error(
+            "Endpoints served from STALE cache (fetch failed, old data): %s",
+            stale,
+        )
 
     logger.info(
-        "Bulk pre-fetch complete: %d/%d endpoints OK",
-        sum(results.values()), len(results),
+        "Bulk pre-fetch complete: %d/%d endpoints OK (%d stale)",
+        ok_count, len(results), len(stale),
     )
 
 
