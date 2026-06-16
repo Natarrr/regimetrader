@@ -311,6 +311,45 @@ def check_per_factor_distribution(log_dir: "Path") -> bool:
     return ok
 
 
+def check_fmp_telemetry(
+    metrics: dict,
+    *,
+    max_error_rate: float = 0.05,
+    min_cache_hit_rate: float = 0.50,
+    min_cache_lookups: int = 50,
+) -> List[str]:
+    """Advisory soft signals from the WS4 FMP telemetry rollup.
+
+    Returns human-readable warning strings (empty when healthy or when no
+    telemetry block is present). These are advisory ONLY — they never fail the
+    canary; a genuinely dead route is already a hard gate via fmp_health.json.
+
+    - error_rate is evaluated only once there are real calls.
+    - cache_hit_rate is evaluated only once there is meaningful cache traffic
+      (``cache_lookups >= min_cache_lookups``), so a cold-cache or tiny
+      on-demand run does not trip a false "0% hit rate" warning.
+    """
+    warnings: List[str] = []
+    calls = int(metrics.get("calls_per_run", 0) or 0)
+    if calls <= 0:
+        return warnings  # older artifact / no telemetry — nothing to say
+
+    err = float(metrics.get("error_rate", 0.0) or 0.0)
+    if err > max_error_rate:
+        warnings.append(
+            f"error_rate {err:.1%} > {max_error_rate:.0%} threshold over {calls} calls"
+        )
+
+    lookups = int(metrics.get("cache_lookups", 0) or 0)
+    hit = float(metrics.get("cache_hit_rate", 0.0) or 0.0)
+    if lookups >= min_cache_lookups and hit < min_cache_hit_rate:
+        warnings.append(
+            f"cache_hit_rate {hit:.1%} < {min_cache_hit_rate:.0%} over {lookups} "
+            f"lookups — more live calls than expected (stale snapshots?)"
+        )
+    return warnings
+
+
 def _format_alert_body(metrics: dict, reasons: List[str]) -> str:
     lines = ["🚨 EDGAR canary failed:"]
     lines.extend(f"  • {r}" for r in reasons)
@@ -393,6 +432,10 @@ def main(argv: list[str] | None = None) -> int:
             "— insider/news/congress feeds may all be returning 0.0"
         )
         ok = False
+
+    # ── FMP telemetry soft signals (WS4) — advisory, never fail the canary ────
+    for _w in check_fmp_telemetry(metrics):
+        log.warning("FMP telemetry: %s", _w)
 
     decision = update_after_evaluation(ok)
 

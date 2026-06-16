@@ -168,7 +168,9 @@ class TestPriceTargetUpside:
         0.75 = 25% upside to target
         0.25 = 25% downside to target
         1.00 = 50%+ upside (clipped)
-        0.00 = 50%+ downside (clipped) OR dead signal (None/zero input)
+        0.00 = 50%+ downside (clipped) — a REAL observation
+        None = unavailable (missing/zero/NaN input). SIGNED contract: absence
+               must never read as a bearish 0.0 (CLAUDE.md §2).
     """
 
     def test_at_target_scores_neutral(self):
@@ -197,19 +199,20 @@ class TestPriceTargetUpside:
     def test_exact_50pct_downside_scores_0(self):
         assert score_price_target_upside(50.0, 100.0) == 0.0000
 
-    def test_none_target_returns_dead_signal(self):
-        assert score_price_target_upside(None, 100.0) == 0.0
+    def test_none_target_returns_unavailable(self):
+        """SIGNED contract: missing target is unavailable (None), not bearish 0.0."""
+        assert score_price_target_upside(None, 100.0) is None
 
-    def test_none_current_returns_dead_signal(self):
-        assert score_price_target_upside(100.0, None) == 0.0
+    def test_none_current_returns_unavailable(self):
+        assert score_price_target_upside(100.0, None) is None
 
-    def test_zero_current_price_returns_dead_signal(self):
-        """Zero current price → division guard → 0.0."""
-        assert score_price_target_upside(100.0, 0.0) == 0.0
+    def test_zero_current_price_returns_unavailable(self):
+        """Zero current price → division guard → unavailable (None)."""
+        assert score_price_target_upside(100.0, 0.0) is None
 
-    def test_zero_target_returns_dead_signal(self):
-        """Zero target is a data error → 0.0."""
-        assert score_price_target_upside(0.0, 100.0) == 0.0
+    def test_zero_target_returns_unavailable(self):
+        """Zero target is a data error → unavailable (None), not bearish 0.0."""
+        assert score_price_target_upside(0.0, 100.0) is None
 
     def test_returns_float_rounded_to_4dp(self):
         result = score_price_target_upside(110.0, 100.0)
@@ -220,10 +223,9 @@ class TestPriceTargetUpside:
         """5% upside → (0.05 + 0.50) / 1.00 = 0.55."""
         assert score_price_target_upside(105.0, 100.0) == 0.5500
 
-    def test_nan_returns_dead_signal(self):
-        import math
-        assert score_price_target_upside(float('nan'), 100.0) == 0.0
-        assert score_price_target_upside(100.0, float('nan')) == 0.0
+    def test_nan_returns_unavailable(self):
+        assert score_price_target_upside(float('nan'), 100.0) is None
+        assert score_price_target_upside(100.0, float('nan')) is None
 
 
 class TestQualityPiotroski:

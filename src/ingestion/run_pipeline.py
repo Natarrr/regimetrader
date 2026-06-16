@@ -891,6 +891,82 @@ def fetch_fmp_insider_all(
     return results
 
 
+def fetch_fmp_breadth_all(
+    tickers: List[str],
+    *,
+    lookback_days: int = 90,
+    max_workers: int = 10,
+    client: Optional[Any] = None,
+) -> Tuple[Dict[str, Dict], Dict[str, Any]]:
+    """Pre-fetch FMP insider breadth (P/S transactions) for all tickers.
+
+    Returns ``(breadth_cache, breadth_health)`` where::
+
+        breadth_cache  = {ticker: {"P": [...], "S": [...]}}
+        breadth_health = {"structural_failures": sorted[str],
+                          "tickers_degraded":    int}
+
+    A structural failure (``FMPEndpointError``, including a circuit-breaker
+    short-circuit) degrades that ticker's breadth to empty P/S but is recorded in
+    ``breadth_health`` so the run surfaces it in intel_source_status.json instead
+    of returning silently-empty breadth across the whole universe. Generic fetch
+    errors (timeouts) degrade quietly — they are sparse, not structural.
+
+    Returns ``({}, empty_health)`` when FMP_API_KEY is unset or tickers is empty.
+    """
+    empty_health: Dict[str, Any] = {"structural_failures": [], "tickers_degraded": 0}
+    if client is None:
+        client = _FMPClient()
+    if not client._api_key:
+        return {}, empty_health
+    if not tickers:
+        return {}, empty_health
+
+    structural_failures: set[str] = set()
+    _lock = threading.Lock()
+
+    def _fetch_one(ticker: str) -> Tuple[str, Dict, bool]:
+        try:
+            btx = client.get_insider_transactions(ticker, lookback_days=lookback_days)
+            return ticker, btx, False
+        except FMPEndpointError as exc:
+            # Structural (or breaker short-circuit) — empty this ticker but record
+            # the dead endpoint so the degradation is visible, not silent.
+            with _lock:
+                structural_failures.add(exc.path)
+            log.error("FMP breadth structural failure %s: %s", ticker, exc)
+            return ticker, {"P": [], "S": []}, True
+        except Exception as exc:
+            log.debug("FMP breadth fetch failed %s: %s", ticker, exc)
+            return ticker, {"P": [], "S": []}, False
+
+    cache: Dict[str, Dict] = {}
+    degraded = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for ticker, btx, was_structural in pool.map(_fetch_one, tickers):
+            cache[ticker] = btx
+            if was_structural:
+                degraded += 1
+
+    nonzero = sum(1 for v in cache.values() if v.get("P") or v.get("S"))
+    log.info(
+        "FMP breadth pre-fetch: %d/%d tickers with P or S transactions",
+        nonzero, len(tickers),
+    )
+    if structural_failures:
+        log.error(
+            "FMP breadth STRUCTURAL degradation: %d/%d tickers emptied because "
+            "endpoint(s) %s failed (HTTP 4xx / circuit-breaker). insider_breadth "
+            "is compromised this run — investigate before trusting scores.",
+            degraded, len(tickers), ", ".join(sorted(structural_failures)),
+        )
+
+    return cache, {
+        "structural_failures": sorted(structural_failures),
+        "tickers_degraded":    degraded,
+    }
+
+
 # ── Per-ticker scorer ──────────────────────────────────────────────────────────
 
 def score_edgar(form4_count: int) -> float:
@@ -1350,25 +1426,7 @@ def run(
     # Pre-fetch breadth transactions (P/S per distinct insider) for score_insider_breadth.
     # Runs only when key is set; falls back to EDGAR-derived p_transactions otherwise.
     log.info("Pre-fetching FMP insider breadth (P/S transactions) for %d tickers…", len(tickers))
-    fmp_breadth_cache: Dict[str, Dict] = {}
-    if _fmp_client._api_key:
-        def _fetch_breadth(ticker: str) -> Tuple[str, Dict]:
-            try:
-                return ticker, _fmp_client.get_insider_transactions(ticker, lookback_days=90)
-            except FMPEndpointError as exc:
-                log.error("FMP breadth structural failure %s: %s", ticker, exc)
-                return ticker, {"P": [], "S": []}
-            except Exception as exc:
-                log.debug("FMP breadth fetch failed %s: %s", ticker, exc)
-                return ticker, {"P": [], "S": []}
-
-        with ThreadPoolExecutor(max_workers=10) as _bp:
-            for _ticker, _btx in _bp.map(_fetch_breadth, tickers):
-                fmp_breadth_cache[_ticker] = _btx
-        _breadth_nonzero = sum(1 for v in fmp_breadth_cache.values()
-                               if v.get("P") or v.get("S"))
-        log.info("FMP breadth pre-fetch: %d/%d tickers with P or S transactions",
-                 _breadth_nonzero, len(tickers))
+    fmp_breadth_cache, _breadth_health = fetch_fmp_breadth_all(tickers, client=_fmp_client)
 
     # ── EDGAR + yfinance: parallel per-ticker ─────────────────────────────────
     results = []
@@ -2019,6 +2077,8 @@ def run(
             "error_count":          errors,
             "quarantine_count":     quarantine_count,
         },
+        "_fmp_breadth":  _breadth_health,  # WS3: structural breadth degradation visibility
+        "_fmp_endpoints": _fmp_client.telemetry_snapshot(),  # WS4: per-endpoint telemetry
         "source_meta":   source_meta,
         "weights":       WEIGHTS,
         "results":       results,   # all rows (clean + quarantined with _validation_failed flag)

@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -143,11 +144,17 @@ def _make_session() -> requests.Session:
         "status_forcelist": {429, 500, 502, 503, 504},
         "raise_on_status": False,
     }
+    # backoff_jitter (urllib3 ≥ 2.0) decorrelates retry timing across the
+    # US + INTL runners so a shared 429 wave does not resync into a thundering
+    # herd. Degrade gracefully on older urllib3 (no jitter / method_whitelist).
     try:
-        retry = Retry(**retry_kwargs, allowed_methods={"GET"})
+        retry = Retry(**retry_kwargs, allowed_methods={"GET"}, backoff_jitter=1.0)
     except TypeError:
-        # type: ignore[call-arg]
-        retry = Retry(**retry_kwargs, method_whitelist={"GET"})
+        try:
+            retry = Retry(**retry_kwargs, allowed_methods={"GET"})
+        except TypeError:
+            # type: ignore[call-arg]
+            retry = Retry(**retry_kwargs, method_whitelist={"GET"})
     adapter = HTTPAdapter(
         max_retries=retry, pool_connections=20, pool_maxsize=20)
     session.mount("https://", adapter)
@@ -175,6 +182,10 @@ class FMPClient:
     # Prevents per-ticker spam; can be reset in tests via FMPClient._fmp_congress_probe_done = False.
     _fmp_congress_probe_done: bool = False
 
+    # Dynamic circuit-breaker threshold: consecutive HTTP 404s on one endpoint
+    # before it is quarantined for the rest of the run (see _get / _record_404).
+    _BREAKER_THRESHOLD: int = 3
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -190,6 +201,19 @@ class FMPClient:
         # Observability: count structural failures per endpoint.
         self.endpoint_failures: Dict[str, int] = defaultdict(int)
         self.endpoint_calls: Dict[str, int] = defaultdict(int)
+        # Dynamic circuit breaker — instance-level state shared across the
+        # scoring thread pool (one client per run). An endpoint that 404s
+        # repeatedly is dead for the whole run (route pulled from the plan),
+        # not sparse for one ticker; we stop hammering it after a short streak.
+        self._breaker_lock = threading.Lock()
+        self._runtime_dead: set[str] = set()
+        self._consecutive_404: Dict[str, int] = defaultdict(int)
+        # Telemetry (WS4): per-endpoint latency + per-bucket cache hit/miss.
+        # Pure counters — no trading math (the client stays an API wrapper).
+        self.endpoint_latency_ms_sum: Dict[str, float] = defaultdict(float)
+        self.endpoint_latency_ms_max: Dict[str, float] = defaultdict(float)
+        self.cache_hits: Dict[str, int] = defaultdict(int)
+        self.cache_misses: Dict[str, int] = defaultdict(int)
 
     # ── Cache ──────────────────────────────────────────────────────────────────
 
@@ -204,11 +228,15 @@ class FMPClient:
         ttl = _TTL.get(bucket, 6 * 3600)
         try:
             if not p.exists():
+                self.cache_misses[bucket] += 1
                 return None
             if time.time() - p.stat().st_mtime > ttl:
+                self.cache_misses[bucket] += 1   # expired — refetch
                 return None
+            self.cache_hits[bucket] += 1
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception:
+            self.cache_misses[bucket] += 1
             return None
 
     def _cache_write(self, bucket: str, key: str, value: Any) -> None:
@@ -235,6 +263,13 @@ class FMPClient:
             log.debug("_get: skipping quarantined endpoint %r", path)
             return None
 
+        # Dynamic circuit breaker: this endpoint already tripped (3+ consecutive
+        # 404s) earlier this run. Fail structurally without another round-trip —
+        # callers' existing `except FMPEndpointError` branches fire identically
+        # to a live 404, minus the wasted call and rate-gate wait.
+        if path in self._runtime_dead:
+            raise FMPEndpointError(path, 404)
+
         # Intra-process rate gate — class-level lock shared across all threads.
         with FMPClient._rate_lock:
             elapsed = time.monotonic() - FMPClient._rate_last_call
@@ -250,12 +285,15 @@ class FMPClient:
 
         _MAX_429_RETRIES = 4
         resp = None
+        _last_dt_ms = 0.0
         for _attempt in range(_MAX_429_RETRIES):
+            _t0 = time.monotonic()
             try:
                 resp = self._session.get(url, params=p, timeout=_TIMEOUT)
             except Exception as exc:
                 log.warning("FMP GET %s network error: %s", path, exc)
                 return None
+            _last_dt_ms = (time.monotonic() - _t0) * 1000.0
 
             if resp.status_code != 429:
                 break   # success or structural error — exit retry loop
@@ -268,7 +306,12 @@ class FMPClient:
             if not _ra:
                 _ra = float(resp.headers.get("Retry-After", 0) or 0)
             if not _ra:
-                _ra = float(2 ** _attempt)   # 1s, 2s, 4s, 8s
+                # Equal jitter (AWS "Exponential Backoff And Jitter"): half a
+                # fixed exponential term + half random, so concurrent threads and
+                # the separate US/INTL runners de-sync instead of retrying in
+                # lockstep. Server-supplied Retry-After (above) still wins.
+                _base = float(2 ** _attempt)        # 1s, 2s, 4s, 8s
+                _ra = _base / 2.0 + random.uniform(0.0, _base / 2.0)
             log.warning(
                 "FMP 429 on %s (attempt %d/%d) — backing off %.1fs",
                 path, _attempt + 1, _MAX_429_RETRIES, _ra,
@@ -278,8 +321,18 @@ class FMPClient:
             log.error("FMP GET %s: exhausted %d retries on 429", path, _MAX_429_RETRIES)
             return None
 
+        # Latency telemetry: wall-clock of the resolving GET (excludes rate-gate
+        # wait and 429 backoff). One sample per logical call → avg = sum / calls.
+        self.endpoint_latency_ms_sum[path] += _last_dt_ms
+        if _last_dt_ms > self.endpoint_latency_ms_max[path]:
+            self.endpoint_latency_ms_max[path] = _last_dt_ms
+
         if resp.status_code in (401, 403, 404):
             self.endpoint_failures[path] += 1
+            # 404 is endpoint-dead (breaker target); 401/403 is global auth and
+            # is left to the preflight probe (sys.exit) — never breaker-managed.
+            if resp.status_code == 404:
+                self._record_404(path)
             log.error(
                 "FMP STRUCTURAL FAILURE %s -> HTTP %s. "
                 "Endpoint may be deprecated or not in plan. "
@@ -291,11 +344,45 @@ class FMPClient:
         if resp.status_code != 200:
             log.warning("FMP GET %s -> HTTP %s", path, resp.status_code)
             return None
+        # 200 — endpoint is alive; clear any prior 404 streak (recovered blip).
+        if self._consecutive_404.get(path):
+            with self._breaker_lock:
+                self._consecutive_404.pop(path, None)
         try:
             return resp.json()
         except Exception as exc:
             log.warning("FMP GET %s JSON decode failed: %s", path, exc)
             return None
+
+    # ── Circuit breaker ─────────────────────────────────────────────────────────
+
+    def _record_404(self, path: str) -> None:
+        """Count a structural 404; quarantine the endpoint at the threshold.
+
+        Logs the trip exactly once. The endpoint stays quarantined for the rest
+        of the run — a route pulled from the plan does not come back mid-run.
+        """
+        with self._breaker_lock:
+            self._consecutive_404[path] += 1
+            count = self._consecutive_404[path]
+            tripped = (
+                count >= self._BREAKER_THRESHOLD and path not in self._runtime_dead
+            )
+            if tripped:
+                self._runtime_dead.add(path)
+        if tripped:
+            log.error(
+                "FMP CIRCUIT BREAKER TRIPPED for %s after %d consecutive HTTP 404s "
+                "— short-circuiting further calls this run. Factors sourced from "
+                "this endpoint are unavailable until the next run.",
+                path, count,
+            )
+
+    def reset_circuit_breaker(self) -> None:
+        """Clear dynamic-breaker state (new-run reset / test hook)."""
+        with self._breaker_lock:
+            self._runtime_dead.clear()
+            self._consecutive_404.clear()
 
     # ── Historical prices (replaces all yfinance.download calls) ──────────────
 
@@ -1250,4 +1337,45 @@ class FMPClient:
             "failures": dict(self.endpoint_failures),
             "has_structural_failure": any(self.endpoint_failures.values()),
             "quarantined_endpoints": sorted(_DEAD_ENDPOINTS),
+            # Endpoints the dynamic circuit breaker killed this run (3+ consecutive
+            # 404s) — distinct from the static plan-level quarantine above.
+            "runtime_quarantined": sorted(self._runtime_dead),
+        }
+
+    def telemetry_snapshot(self) -> Dict[str, Any]:
+        """Per-endpoint call/failure/latency + global cache stats for monitoring.
+
+        Pure counters — no trading math (keeps the client an API wrapper). Latency
+        is wall-clock around the resolving HTTP GET only (excludes the rate-gate
+        wait and 429 backoff). Cache hit/miss is bucket-grained (one bucket backs
+        several endpoints), so it is reported as a single global pair under
+        ``totals`` rather than per endpoint.
+
+        Shape::
+
+            {
+              "endpoints": {path: {calls, failures, latency_ms_avg, latency_ms_max}},
+              "totals":    {calls, failures, cache_hits, cache_misses,
+                            runtime_quarantined},
+            }
+        """
+        endpoints: Dict[str, Dict[str, Any]] = {}
+        for path, calls in self.endpoint_calls.items():
+            n = int(calls)
+            lat_sum = float(self.endpoint_latency_ms_sum.get(path, 0.0))
+            endpoints[path] = {
+                "calls":          n,
+                "failures":       int(self.endpoint_failures.get(path, 0)),
+                "latency_ms_avg": round(lat_sum / n, 2) if n else 0.0,
+                "latency_ms_max": round(float(self.endpoint_latency_ms_max.get(path, 0.0)), 2),
+            }
+        return {
+            "endpoints": endpoints,
+            "totals": {
+                "calls":        sum(int(c) for c in self.endpoint_calls.values()),
+                "failures":     sum(int(f) for f in self.endpoint_failures.values()),
+                "cache_hits":   sum(int(h) for h in self.cache_hits.values()),
+                "cache_misses": sum(int(m) for m in self.cache_misses.values()),
+                "runtime_quarantined": sorted(self._runtime_dead),
+            },
         }

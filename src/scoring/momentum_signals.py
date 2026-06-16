@@ -85,8 +85,8 @@ def score_volume_attention(volume_spike: float) -> float:
 def score_price_target_upside(
     target_price: float | None,
     current_price: float | None,
-) -> float:
-    """Analyst consensus price target upside, in [0, 1].
+) -> float | None:
+    """Analyst consensus price target upside, in [0, 1], or None when absent.
 
     Captures the forward-looking dimension that backward-looking price momentum
     (Jegadeesh-Titman 1993, 12-1m returns) cannot: where sell-side analysts
@@ -104,11 +104,15 @@ def score_price_target_upside(
         0.75 = 25% upside
         0.50 = at target (no upside/downside)
         0.25 = 25% downside
-        0.00 = 50%+ downside OR dead signal
+        0.00 = 50%+ downside to target
 
-    Returns 0.0 (dead signal) when either argument is None, zero, or
-    non-numeric. Consistent with score_momentum_long and score_volume_attention:
-    a missing/zero input is penalised rather than granted a neutral pass.
+    SIGNED factor (`price_target_upside` ∈ SIGNED_FACTORS, src/config/factor_matrix.py).
+    Per CLAUDE.md §2, data absence must never read as bearish: a missing/zero/
+    non-numeric input therefore returns None ("unavailable"), NOT 0.0 — a 0.0
+    here is a real observation of 50%+ downside, and coercing absence to 0.0
+    would silently mark every uncovered ticker maximally bearish. The pipeline
+    (run_pipeline._ticker_effective_weights) redistributes the weight pro-rata
+    when this factor is None; the v3 neutralizer treats None as unavailable.
 
     Source: FMPClient.get_price_target_consensus() → stable/price-target-consensus.
     """
@@ -116,11 +120,11 @@ def score_price_target_upside(
         t = float(target_price)
         c = float(current_price)
     except (TypeError, ValueError):
-        return 0.0
+        return None
     if not t or not c:
-        return 0.0
+        return None
     if math.isnan(t) or math.isnan(c):
-        return 0.0
+        return None
     upside  = (t - c) / c
     clipped = max(-0.50, min(0.50, upside))
     return round((clipped + 0.50) / 1.00, 4)

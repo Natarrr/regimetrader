@@ -25,9 +25,10 @@ def _write_status(log_dir: Path, meta: dict) -> Path:
     return p
 
 
-def test_export_metrics_writes_six_canonical_keys(tmp_path: Path) -> None:
-    """Markowitz: the canary contract is a six-field signature; any extra or
-    missing key invalidates downstream gates."""
+def test_export_metrics_preserves_six_canonical_keys(tmp_path: Path) -> None:
+    """Markowitz: the canary contract is a six-field signature that must always
+    be present and unchanged. WS4 adds advisory FMP rollup keys ON TOP of these
+    six (never replacing them), so the canonical set must remain a subset."""
     _write_status(tmp_path, {
         "last_run":             "2026-05-06T00:00:00+00:00",
         "run_duration_seconds": 12.34,
@@ -37,14 +38,19 @@ def test_export_metrics_writes_six_canonical_keys(tmp_path: Path) -> None:
         "error_count":          0,
     })
     metrics = me.export_metrics(tmp_path)
-    assert set(metrics) == {
+    assert {
         "last_run", "run_duration_seconds",
         "ticker_count", "edgar_count", "fmp_count", "error_count",
-    }
+    }.issubset(set(metrics))
     assert metrics["ticker_count"] == 10
     assert metrics["edgar_count"]  == 7
     assert metrics["fmp_count"]    == 3
     assert metrics["run_duration_seconds"] == 12.34
+    # WS4 additive keys present and zeroed when no _fmp_endpoints block exists.
+    assert metrics["calls_per_run"] == 0
+    assert metrics["error_rate"] == 0.0
+    assert metrics["cache_hit_rate"] == 0.0
+    assert metrics["cost_estimate_per_run"] == 0.0
     assert (tmp_path / "metrics.json").exists()
 
 

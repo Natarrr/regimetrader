@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,37 @@ from typing import Any, Dict
 from src.utils.io import atomic_write_json
 
 log = logging.getLogger("monitoring.metrics_exporter")
+
+# Amortized per-call cost (USD). FMP Ultimate is a flat $139/mo plan, so the true
+# marginal per-call cost is 0; set FMP_COST_PER_CALL_USD to a derived amortized
+# rate (e.g. 139 / expected_monthly_calls) to surface cost_estimate_per_run.
+_DEFAULT_COST_PER_CALL_USD = 0.0
+
+
+def _fmp_endpoint_metrics(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Roll the ``_fmp_endpoints`` telemetry block into additive metrics keys.
+
+    Returns calls_per_run / error_rate / cache_hit_rate / cost_estimate_per_run.
+    An absent block yields all-zeros so older artifacts stay forward-compatible
+    and the six legacy canary keys are never disturbed.
+    """
+    totals = ((raw.get("_fmp_endpoints") or {}).get("totals")) or {}
+    calls    = int(totals.get("calls")        or 0)
+    failures = int(totals.get("failures")     or 0)
+    hits     = int(totals.get("cache_hits")   or 0)
+    misses   = int(totals.get("cache_misses") or 0)
+    try:
+        per_call = float(os.getenv("FMP_COST_PER_CALL_USD", _DEFAULT_COST_PER_CALL_USD))
+    except ValueError:
+        per_call = _DEFAULT_COST_PER_CALL_USD
+    cache_total = hits + misses
+    return {
+        "calls_per_run":         calls,
+        "error_rate":            round(failures / calls, 6) if calls else 0.0,
+        "cache_hit_rate":        round(hits / cache_total, 6) if cache_total else 0.0,
+        "cache_lookups":         cache_total,   # guards the soft cache-rate gate
+        "cost_estimate_per_run": round(calls * per_call, 6),
+    }
 
 
 def export_metrics(
@@ -78,6 +110,8 @@ def export_metrics(
         "fmp_count":            int(meta.get("fmp_count")    or 0),
         "error_count":          int(meta.get("error_count")  or 0),
     }
+    # WS4: additive FMP per-endpoint rollup — never disturbs the six legacy keys.
+    metrics.update(_fmp_endpoint_metrics(raw))
 
     out_path = log_dir / "metrics.json"
     atomic_write_json(out_path, metrics)
