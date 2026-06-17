@@ -19,6 +19,7 @@ from src.scoring.alt_signals import (
     congress_surge_multiplier,
     score_dividend_sustain,
     score_insider_alpha,
+    score_insider_npr_spike,
     score_inst_concentration,
     score_inst_flow_13f,
 )
@@ -164,3 +165,37 @@ class TestDividendSustain:
             dividend_yield=None, payout_ratio=None,
             fcf_ttm=None, dividends_paid_ttm=None,
         ) is None
+
+
+class TestInsiderNprSpike:
+    def test_none_on_empty(self):
+        assert score_insider_npr_spike(None) is None
+        assert score_insider_npr_spike([]) is None
+
+    def test_none_when_latest_quarter_has_no_transactions(self):
+        assert score_insider_npr_spike(
+            [{"year": 2026, "quarter": 1,
+              "acquiredTransactions": 0, "disposedTransactions": 0}]
+        ) is None
+
+    def test_npr_and_spike_vs_baseline(self):
+        # Latest quarter: 9 buys / 1 sell → NPR 0.9. Trailing two quarters avg
+        # NPR = (0.5 + 0.5)/2 = 0.5 → spike = +0.4 (unusual cluster buying).
+        stats = [
+            {"year": 2026, "quarter": 2, "acquiredTransactions": 9, "disposedTransactions": 1},
+            {"year": 2026, "quarter": 1, "acquiredTransactions": 5, "disposedTransactions": 5},
+            {"year": 2025, "quarter": 4, "acquiredTransactions": 3, "disposedTransactions": 3},
+        ]
+        out = score_insider_npr_spike(stats)
+        assert out["npr"] == pytest.approx(0.9)
+        assert out["spike"] == pytest.approx(0.4)
+        assert out["acquired"] == 9 and out["disposed"] == 1
+
+    def test_single_quarter_spike_is_zero(self):
+        # No prior quarters → baseline falls back to the latest NPR → spike 0.0
+        # (insufficient history must never fabricate a spike).
+        out = score_insider_npr_spike(
+            [{"year": 2026, "quarter": 2,
+              "acquiredTransactions": 8, "disposedTransactions": 2}])
+        assert out["npr"] == pytest.approx(0.8)
+        assert out["spike"] == pytest.approx(0.0)

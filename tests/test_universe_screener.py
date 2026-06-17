@@ -18,6 +18,7 @@ from src.ingestion.universe_screener import (
     select_satellite,
     _screen_smid_candidates,
     _resolve_smid_satellite,
+    _leverage_rank,
 )
 
 
@@ -80,7 +81,8 @@ class _FakeScreenerClient:
         self._rows = rows_by_exchange
 
     def get_company_screener(self, exchange, market_cap_more_than=None,
-                             volume_more_than=None, limit=100):
+                             market_cap_lower_than=None, volume_more_than=None,
+                             is_actively_trading=None, limit=100):
         return self._rows.get(exchange, [])
 
 
@@ -117,3 +119,55 @@ class TestSmidSatellite:
         rows = _resolve_smid_satellite(
             self._client(), "US", existing=set(), log_dir=None)
         assert any(r["cap_tier"] == "small" for r in rows)
+
+    def test_fieldless_rows_survive_missing_price_volume(self):
+        # Rows without price/volume must NOT be dropped by the ADV gate —
+        # absent data is never used to reject (server share-floor already applied).
+        cands = _screen_smid_candidates(self._client(), "US")
+        assert {"SMALL1", "MID1", "SMALL2"} <= set(cands)
+        assert all(cands[s]["adv_usd"] is None for s in cands)
+
+
+class TestSmidLiquidityGate:
+    def test_adv_gate_drops_illiquid_dollar_volume(self):
+        # $2 stock × 100k shares = $200k/day → below the $3M ADV floor → dropped.
+        # $50 stock × 1M shares = $50M/day → liquid → kept.
+        client = _FakeScreenerClient({
+            "NASDAQ": [
+                {"symbol": "THIN", "sector": "Tech", "marketCap": 800_000_000,
+                 "price": 2.0, "volume": 100_000},
+                {"symbol": "LIQUID", "sector": "Tech", "marketCap": 800_000_000,
+                 "price": 50.0, "volume": 1_000_000},
+            ],
+            "NYSE": [],
+        })
+        cands = _screen_smid_candidates(client, "US")
+        assert "THIN" not in cands          # market-impact trap dropped
+        assert "LIQUID" in cands
+        assert cands["LIQUID"]["adv_usd"] == pytest.approx(50_000_000)
+
+
+class TestLeverageRank:
+    def test_soft_beta_tilts_toward_higher_beta_at_equal_adv(self):
+        group = [
+            ("LOWB",  {"adv_usd": 10_000_000, "beta": 0.8, "cap_tier": "small"}),
+            ("HIGHB", {"adv_usd": 10_000_000, "beta": 2.0, "cap_tier": "small"}),
+        ]
+        ordered = [s for s, _ in _leverage_rank(group, alpha=0.15)]
+        assert ordered[0] == "HIGHB"   # higher beta wins at equal liquidity
+
+    def test_adv_dominates_ranking(self):
+        group = [
+            ("BIG",   {"adv_usd": 100_000_000, "beta": 0.8, "cap_tier": "small"}),
+            ("SMALL", {"adv_usd": 1_000_000,   "beta": 2.0, "cap_tier": "small"}),
+        ]
+        ordered = [s for s, _ in _leverage_rank(group, alpha=0.15)]
+        assert ordered[0] == "BIG"     # soft beta cannot overturn a 100× ADV gap
+
+    def test_missing_fields_are_neutral_stable(self):
+        group = [
+            ("A", {"adv_usd": None, "beta": None, "cap_tier": "small"}),
+            ("B", {"adv_usd": None, "beta": None, "cap_tier": "small"}),
+        ]
+        ordered = [s for s, _ in _leverage_rank(group)]
+        assert ordered == ["A", "B"]   # neutral key → stable insertion order

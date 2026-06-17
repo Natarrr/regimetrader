@@ -76,6 +76,8 @@ FACTOR_FIELDS: Dict[str, str] = {
     "quality_piotroski":   "quality_piotroski_score",
     "transcript_tone":     "transcript_tone_score",
     "revenue_revision":    "revenue_revision_score",
+    # Whale accumulation — 13F QoQ position delta (v2.5; SIGNED, US-weighted)
+    "inst_flow_13f":       "inst_flow_13f_score",
     # EU/Asia fundamental value + quality signals (v2.3)
     "fcf_yield":           "fcf_yield_score",
     "amihud_shock":        "amihud_shock_score",
@@ -101,6 +103,10 @@ _SCHEMA_MISSING_THRESHOLD = 10  # >10 zero factors → is_complete = False
 # = up to 6 legitimate zeros. Threshold raised from 4 → 6 so the gate fires only
 # when the always-populated factors (momentum_long, insider_conviction, volume_attention)
 # are also dead — which indicates a genuine price/EDGAR feed failure.
+# v2.5: inst_flow_13f added but the threshold is UNCHANGED — for US large/mid-caps
+# 13F is normally populated (not a structural zero), and where it is absent
+# (sparse small-caps) the "incomplete" flag is benign metadata: those tickers are
+# still scored and ranked, never excluded, so no threshold relief is needed.
 
 # Circuit breaker: if fewer than this fraction of the universe pass the schema
 # gate, PipelineIntegrityError is raised and top_lists_us.json is NOT written.
@@ -146,6 +152,8 @@ _DISPLAY_META_KEYS = (
     "target_price",
     "current_price",
     "atr_14",
+    "inst_13f_evidence",   # v2.5 — 🐋 whale-accumulation badge evidence
+    "insider_npr",         # v2.5 — acquired-vs-disposed spike (badge/[NICHE ALPHA])
 )
 
 # Absolute market-cap thresholds (standard institutional definitions)

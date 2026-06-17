@@ -130,6 +130,50 @@ def score_inst_flow_13f(summary: Optional[dict]) -> Optional[float]:
     return max(0.0, min(1.0, 0.5 + t1 + t2 + t3))
 
 
+# ── Insider acquired-vs-disposed spike (US overlay, not weighted) ─────────────
+
+def score_insider_npr_spike(
+    stats: Optional[list], baseline_quarters: int = 4,
+) -> Optional[dict]:
+    """Acquired-vs-disposed Net Purchase Ratio spike from insider statistics.
+
+    NPR = acquiredTransactions / (acquiredTransactions + disposedTransactions)
+    per quarter [Lakonishok & Lee 2001 — buys are far more informative than
+    sells]. ``spike`` compares the latest quarter's NPR to the trailing
+    ``baseline_quarters`` mean; a large positive spike flags unusual insider
+    cluster buying — the 🐋 whale-accumulation trigger.
+
+    This is a DISPLAY/BADGE overlay, not a weighted scoring factor (it overlaps
+    the Form-4 insider_conviction/breadth factors; adding it to WEIGHTS would
+    breach the orthogonality monitor, CLAUDE.md §3). Returns
+    {npr, spike, acquired, disposed} for the latest quarter, or None when no
+    statistics exist (absence is silent, never bearish).
+    """
+    if not stats:
+        return None
+    latest = stats[0]
+    acq = int(latest.get("acquiredTransactions") or 0)
+    dis = int(latest.get("disposedTransactions") or 0)
+    if acq + dis <= 0:
+        return None
+    npr = acq / (acq + dis)
+
+    base_nprs = []
+    for q in stats[1:1 + baseline_quarters]:
+        a = int(q.get("acquiredTransactions") or 0)
+        d = int(q.get("disposedTransactions") or 0)
+        if a + d > 0:
+            base_nprs.append(a / (a + d))
+    baseline = sum(base_nprs) / len(base_nprs) if base_nprs else npr
+
+    return {
+        "npr":      round(npr, 4),
+        "spike":    round(npr - baseline, 4),
+        "acquired": acq,
+        "disposed": dis,
+    }
+
+
 # ── 13F ownership concentration (EU/ASIA synthetic alternative, P3) ───────────
 
 def score_inst_concentration(summary: Optional[dict]) -> Optional[float]:

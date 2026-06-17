@@ -38,6 +38,7 @@ def _make_results(n: int, overrides: dict | None = None) -> list:
         "quality_piotroski_score":   0.50,
         "transcript_tone_score":     0.50,
         "revenue_revision_score":    0.50,
+        "inst_flow_13f_score":       0.50,
         "fcf_yield_score":           0.50,
         "amihud_shock_score":        0.50,
         "pb_value_up_score":         0.50,
@@ -171,7 +172,7 @@ class TestEffectiveWeights:
             "news_sentiment": 0.4, "news_buzz": 0.5, "momentum_long": 0.6,
             "volume_attention": 0.3, "analyst_consensus": 0.5, "analyst_revision": 0.4,
             "price_target_upside": 0.6, "quality_piotroski": 0.5, "transcript_tone": 0.4,
-            "revenue_revision": 0.4,
+            "revenue_revision": 0.4, "inst_flow_13f": 0.5,
         }]
 
     def test_no_dead_factors_returns_original(self):

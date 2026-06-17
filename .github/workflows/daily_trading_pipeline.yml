@@ -114,6 +114,12 @@ jobs:
       contents: read
     env:
       PYTHONPATH: ${{ github.workspace }}
+      # Phase 2 — dynamic small/mid-cap rotation. UNIVERSE_DYNAMIC adds the
+      # volume-velocity satellite; UNIVERSE_SMID_SATELLITE feeds the SMID leverage
+      # desk ($300M–$10B, ADV-gated + soft-beta ranked). Both default ON, but a
+      # repo variable can flip either OFF for a code-free kill-switch / A-B run.
+      UNIVERSE_DYNAMIC: ${{ vars.UNIVERSE_DYNAMIC || '1' }}
+      UNIVERSE_SMID_SATELLITE: ${{ vars.UNIVERSE_SMID_SATELLITE || '1' }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────

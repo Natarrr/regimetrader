@@ -220,7 +220,8 @@ class TestGenerateTopLists:
             "final_score below individual factor — weighting broken"
 
     def test_factors_dict_has_expected_keys(self, tmp_path):
-        # FACTOR_FIELDS covers 17 factors (12 original + 4 INTL fundamental signals + revenue_revision).
+        # FACTOR_FIELDS covers 18 factors (12 US-weighted incl. inst_flow_13f +
+        # 4 INTL fundamental signals + analyst_revision/price_target_upside).
         rows = [_raw_row(f"T{i}") for i in range(5)]
         out = self._generate(rows, tmp_path)
         expected_keys = {
@@ -228,6 +229,7 @@ class TestGenerateTopLists:
             "news_sentiment", "news_buzz", "momentum_long", "volume_attention",
             "analyst_consensus", "analyst_revision", "price_target_upside",
             "quality_piotroski", "transcript_tone", "revenue_revision",
+            "inst_flow_13f",
             "fcf_yield", "amihud_shock", "pb_value_up", "roic_quality",
         }
         for entry in out["top_buys"]:

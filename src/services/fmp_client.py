@@ -393,7 +393,9 @@ class FMPClient:
         *,
         exchange: Optional[str] = None,
         market_cap_more_than: Optional[float] = None,
+        market_cap_lower_than: Optional[float] = None,
         volume_more_than: Optional[float] = None,
+        is_actively_trading: Optional[bool] = None,
         limit: int = 100,
         include_etf: bool = False,
     ) -> List[Dict]:
@@ -403,6 +405,11 @@ class FMPClient:
         the raw screener rows; liquidity/cap filtering and ranking belong to
         src/ingestion/universe_screener.py. ETFs and funds are excluded by
         default so the universe holds operating companies only.
+
+        ``market_cap_lower_than`` applies a server-side cap ceiling (isolating the
+        small/mid band without fetching mega-caps); ``is_actively_trading`` drops
+        halted/delisted shells (a small/mid-cap liquidity-trap guard). Beta is not
+        screened here — it rides along in each row for downstream soft-rank use.
 
         Returns [] when the API key is absent or the route yields no rows.
         """
@@ -417,10 +424,15 @@ class FMPClient:
             params["exchange"] = exchange
         if market_cap_more_than is not None:
             params["marketCapMoreThan"] = int(market_cap_more_than)
+        if market_cap_lower_than is not None:
+            params["marketCapLowerThan"] = int(market_cap_lower_than)
         if volume_more_than is not None:
             params["volumeMoreThan"] = int(volume_more_than)
+        if is_actively_trading is not None:
+            params["isActivelyTrading"] = str(is_actively_trading).lower()
 
-        cache_key = (f"{exchange}_{market_cap_more_than}_{volume_more_than}"
+        cache_key = (f"{exchange}_{market_cap_more_than}_{market_cap_lower_than}"
+                     f"_{volume_more_than}_{is_actively_trading}"
                      f"_{limit}_{include_etf}")
         cached = self._cache_read("screener", cache_key)
         if cached is not None:
@@ -662,6 +674,42 @@ class FMPClient:
             elif aod == "D":
                 out["S"].append(entry)
         return out
+
+    def get_insider_statistics(self, ticker: str) -> List[Dict]:
+        """Quarterly insider buy/sell aggregates (stable/insider-trading/statistics).
+
+        Returns the raw quarterly records newest-first (year desc, quarter desc),
+        each carrying acquiredTransactions / disposedTransactions /
+        acquiredDisposedRatio. Drives the acquired-vs-disposed spike overlay
+        (Net Purchase Ratio [Lakonishok & Lee 2001]) — a display/badge signal,
+        NOT a weighted scoring factor. Cached under a distinct key so it never
+        collides with the (insider, ticker) get_insider_purchases entry.
+        Returns [] when the key is absent or the route yields no rows.
+        """
+        if not self._api_key:
+            return []
+        cache_key = f"stats_{ticker}"
+        cached = self._cache_read("insider", cache_key)
+        if cached is not None:
+            return cached
+        symbols_to_try = [ticker]
+        if "." in ticker:
+            symbols_to_try.append(ticker.split(".")[0])
+        data: List[Dict] = []
+        for sym in symbols_to_try:
+            data = self._get("insider-trading/statistics",
+                             {"symbol": sym}, bucket="insider") or []
+            if data:
+                break
+        result = data if isinstance(data, list) else []
+        # newest-first → the spike scorer reads the latest quarter at index 0
+        result.sort(
+            key=lambda r: (int(r.get("year") or 0), int(r.get("quarter") or 0)),
+            reverse=True,
+        )
+        if result:
+            self._cache_write("insider", cache_key, result)
+        return result
 
     # ── News (stable/news/stock) ───────────────────────────────────────────────
 

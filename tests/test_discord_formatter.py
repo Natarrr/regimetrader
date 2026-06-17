@@ -991,3 +991,61 @@ class TestOnDemand:
         f = _field(_embed(_build_on_demand(entry_extra=entry_extra)), "DISCLOSURE")
         assert "Missing sources:" in f["value"]
         assert "congress" in f["value"]
+
+
+class TestWhaleAndNicheAlpha:
+    """v2.5 — 🐋 whale-accumulation badge, [NICHE ALPHA] strip, exit-anchor target."""
+
+    def test_whale_signal_on_high_13f_flow(self):
+        from src.delivery.send_discord import _whale_signal
+        assert _whale_signal({"factors": {"inst_flow_13f": 0.85}}) is True
+
+    def test_whale_signal_on_insider_npr_spike(self):
+        from src.delivery.send_discord import _whale_signal
+        assert _whale_signal({"factors": {}, "insider_npr": {"spike": 0.35}}) is True
+
+    def test_no_whale_signal_when_flow_moderate(self):
+        from src.delivery.send_discord import _whale_signal
+        assert _whale_signal({"factors": {"inst_flow_13f": 0.55}}) is False
+
+    def test_badge_only_for_small_mid_cap(self):
+        from src.delivery.send_discord import _whale_badge
+        strong = {"factors": {"inst_flow_13f": 0.9}}
+        assert _whale_badge({**strong, "cap_tier": "small"}) != ""
+        assert _whale_badge({**strong, "cap_tier": "mid"}) != ""
+        # A large-cap with the same flow must NOT get the niche badge.
+        assert _whale_badge({**strong, "cap_tier": "large"}) == ""
+
+    def test_niche_strip_renders_13f_and_npr(self):
+        from src.delivery.send_discord import _niche_alpha_strip
+        out = _niche_alpha_strip({
+            "factors": {"inst_flow_13f": 0.82},
+            "inst_13f_evidence": {"investors_holding_change": 12},
+            "insider_npr": {"npr": 0.9, "spike": 0.4, "acquired": 9, "disposed": 1},
+        })
+        assert out.startswith("[NICHE ALPHA]")
+        assert "🐋 13F 0.82" in out and "(+12 holders)" in out
+        assert "9B/1S" in out and "▲" in out
+
+    def test_target_token_exit_anchor(self):
+        from src.delivery.send_discord import _target_token
+        assert _target_token({"target_price": 120.0, "current_price": 100.0}) == \
+            "🎯 tgt $120 (+20.0%)"
+        assert _target_token({"target_price": 0.0, "current_price": 100.0}) == ""
+
+    def test_badge_niche_and_target_render_in_embed(self):
+        """Integration: a small-cap whale at rank 1 surfaces the 🐋 badge + the
+        [NICHE ALPHA] line; a rank-2 pick still shows its 🎯 exit target."""
+        usa = [
+            _entry("LEVR", 0.82, cap_tier="small",
+                   factors={"inst_flow_13f": 0.90},
+                   insider_npr={"npr": 0.9, "spike": 0.4, "acquired": 9, "disposed": 1},
+                   inst_13f_evidence={"investors_holding_change": 12},
+                   target_price=120.0, current_price=100.0),
+            _entry("MSFT", 0.78, cap_tier="large",
+                   target_price=400.0, current_price=350.0),
+        ]
+        text = _all_text(_embed(_build(top_buys_usa=usa)))
+        assert "🐋 WHALE ACCUMULATION" in text     # rank-1 small-cap badge
+        assert "[NICHE ALPHA]" in text             # 13F + insider velocity line
+        assert "🎯 tgt $400" in text               # rank-2 per-row exit target

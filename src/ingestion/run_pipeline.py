@@ -1454,6 +1454,10 @@ def run(
             score_momentum_long,
             score_volume_attention,
         )
+        from src.scoring.alt_signals import (  # noqa: PLC0415
+            score_inst_flow_13f,
+            score_insider_npr_spike,
+        )
 
         ticker = row["ticker"]
         edgar_ok    = False
@@ -1606,6 +1610,25 @@ def run(
             _raw_target_price  = _pt_data.get("targetConsensus") if _pt_data else None
             _raw_current_price = _quote_data.get("price") if _quote_data else None
 
+            # ── Whale accumulation vector (13F QoQ position delta) ─────────
+            # SIGNED factor: score_inst_flow_13f returns None when 13F coverage
+            # is absent (weight redistributed pro-rata downstream — never bearish).
+            # The raw summary rides along for the 🐋 WHALE badge / [NICHE ALPHA]
+            # display (generate_top_lists / send_discord).
+            _inst_13f_summary  = _fmp_client.get_institutional_ownership(ticker)
+            inst_flow_13f_score = score_inst_flow_13f(_inst_13f_summary)
+
+            # ── Insider acquired-vs-disposed spike (NPR overlay; NOT weighted) ──
+            # Display/badge enrichment only. A dead statistics route must not
+            # break the run (the circuit breaker is per-endpoint), so guard like
+            # transcript_tone — log and fall back to None (no badge), never bearish.
+            try:
+                insider_npr = score_insider_npr_spike(
+                    _fmp_client.get_insider_statistics(ticker))
+            except Exception as _npr_exc:
+                log.debug("insider NPR spike %s failed (non-fatal): %s", ticker, _npr_exc)
+                insider_npr = None
+
             # ── Transcript tone ───────────────────────────────────────────
             transcript_tone_score, transcript_tone_source = score_transcript_tone(
                 ticker, client=_fmp_client
@@ -1664,6 +1687,17 @@ def run(
                 "price_target_upside_score": price_target_upside_score,
                 "quality_piotroski_score":   quality_piotroski_score,
                 "quality_piotroski_raw":     quality_piotroski_raw,
+                # ── Whale accumulation (13F QoQ) — SIGNED factor + raw evidence ──
+                "inst_flow_13f_score":       inst_flow_13f_score,
+                "inst_13f_evidence": {
+                    "investors_holding":        _inst_13f_summary.get("investorsHolding"),
+                    "investors_holding_change": _inst_13f_summary.get("investorsHoldingChange"),
+                    "ownership_pct_change":     _inst_13f_summary.get("ownershipPercentChange"),
+                    "increased_positions":      _inst_13f_summary.get("increasedPositions"),
+                    "reduced_positions":        _inst_13f_summary.get("reducedPositions"),
+                } if _inst_13f_summary else {},
+                # Insider acquired-vs-disposed spike (NPR overlay — badge/display)
+                "insider_npr":               insider_npr,
                 # ── Congress ─────────────────────────────────────────────
                 "congress_score":            c_score,
                 "transcript_tone_score":     transcript_tone_score,
@@ -1762,6 +1796,9 @@ def run(
                 "congress_score":           0.0,
                 "recent_upgrade_downgrade": {},
                 "price_target_upside_score": 0.0,
+                "inst_flow_13f_score":      None,   # SIGNED — absent, not bearish
+                "inst_13f_evidence":        {},
+                "insider_npr":              None,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
                 "form4_purchase_count":    0,
@@ -1800,6 +1837,9 @@ def run(
                 "congress_score":           0.0,
                 "recent_upgrade_downgrade": {},
                 "price_target_upside_score": 0.0,
+                "inst_flow_13f_score":      None,   # SIGNED — absent, not bearish
+                "inst_13f_evidence":        {},
+                "insider_npr":              None,
                 "ceo_buy":                 ceo_buy,
                 "form4_count":             form4_count,
                 "form4_purchase_count":    0,

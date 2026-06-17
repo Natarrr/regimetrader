@@ -37,18 +37,29 @@ WEIGHTS_VERSION = "v2.2-global"
 #   transcript_tone 0.05 weight: [Huang et al., 2018] documents ~3-5% alpha
 #   from earnings call guidance language in 30-90d horizon — independent of
 #   insider and news signals.
+# Sprint v2.5 (Phase 3 — whale rotation): inst_flow_13f activated (0.04),
+# funded entirely from news_buzz (0.05 → 0.01). Justification:
+#   inst_flow_13f 0.04 — quarter-over-quarter 13F institutional position delta
+#     [Lakonishok, Shleifer & Vishny 1992; copycat alpha survives the 45-day
+#     filing lag, WhaleWisdom 2021]. SIGNED factor (centered 0.5; None when 13F
+#     coverage is absent → weight redistributed pro-rata, never read as bearish).
+#     Weight kept deliberately modest: 13F is a low-breadth (≈4 obs/yr), lagged
+#     signal, so IR = IC·√BR caps its justified allocation (Grinold & Kahn 2000).
+#   news_buzz 0.05 → 0.01 — lowest-IC attention factor (Barber & Odean 2008);
+#     the natural donor, leaving a 0.01 residual to retain the signal's ordering.
 WEIGHTS_US: dict[str, float] = {
     "insider_conviction": 0.30,
     "insider_breadth":    0.12,   # reduced 0.15 → 0.12 (donor for revenue_revision)
     "congress":           0.01,   # reduced 0.04 → 0.01 (donor for transcript_tone)
     "news_sentiment":     0.10,
-    "news_buzz":          0.05,
+    "news_buzz":          0.01,   # reduced 0.05 → 0.01 (donor for inst_flow_13f)
     "momentum_long":      0.15,
     "volume_attention":   0.01,   # reduced 0.03 → 0.01 (donor for transcript_tone)
     "analyst_consensus":  0.10,
     "quality_piotroski":  0.08,
     "transcript_tone":    0.05,   # Huang et al. 2018; None when no transcript
     "revenue_revision":   0.03,   # NEW — Zacks 2003; None when n_analysts < 3
+    "inst_flow_13f":      0.04,   # NEW — 13F QoQ position delta; SIGNED, None when absent
 }
 assert abs(sum(WEIGHTS_US.values()) - 1.0) < 1e-6, (
     f"WEIGHTS_US sums to {sum(WEIGHTS_US.values()):.8f}, not 1.0"
