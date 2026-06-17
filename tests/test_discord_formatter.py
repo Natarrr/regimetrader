@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 ESC = "\x1b"
 
-_NOW = datetime(2026, 6, 11, 16, 30, tzinfo=timezone.utc)
+_NOW = datetime.now(timezone.utc)
 
 
 # ── Fixture builders (cooked top_lists.json schema) ───────────────────────────
@@ -540,9 +540,12 @@ class TestLoadYesterdayScores:
     def test_reads_newest_non_today_file_only(self, tmp_path):
         from src.delivery.send_discord import _load_yesterday_scores
         root = tmp_path / "archive"
-        self._write(root, "2026-06-09", {"OLD": 0.1})
-        self._write(root, "2026-06-10", {"NVDA": 0.8282})
-        self._write(root, "2026-06-11", {"TODAY": 0.9})
+        d_today = _NOW.strftime("%Y-%m-%d")
+        d_yest  = (_NOW - timedelta(days=1)).strftime("%Y-%m-%d")
+        d_old   = (_NOW - timedelta(days=2)).strftime("%Y-%m-%d")
+        self._write(root, d_old,   {"OLD": 0.1})
+        self._write(root, d_yest,  {"NVDA": 0.8282})
+        self._write(root, d_today, {"TODAY": 0.9})
         scores, age_h = _load_yesterday_scores(root, now=_NOW)
         assert scores == {"NVDA": 0.8282}
         assert age_h is not None and 24 <= age_h <= 48
@@ -550,7 +553,8 @@ class TestLoadYesterdayScores:
     def test_old_snapshot_reports_stale_age(self, tmp_path):
         from src.delivery.send_discord import _load_yesterday_scores
         root = tmp_path / "archive"
-        self._write(root, "2026-06-08", {"NVDA": 0.8})
+        d_old = (_NOW - timedelta(days=3)).strftime("%Y-%m-%d")
+        self._write(root, d_old, {"NVDA": 0.8})
         scores, age_h = _load_yesterday_scores(root, now=_NOW)
         assert scores == {"NVDA": 0.8}
         assert age_h > 48
@@ -564,16 +568,18 @@ class TestLoadYesterdayScores:
     def test_corrupt_newest_falls_through_to_older(self, tmp_path):
         from src.delivery.send_discord import _load_yesterday_scores
         root = tmp_path / "archive"
-        self._write(root, "2026-06-09", {"NVDA": 0.7})
-        (root / "2026-06-10_top_lists.json").write_text(
-            "{corrupt", encoding="utf-8")
+        d_yest = (_NOW - timedelta(days=1)).strftime("%Y-%m-%d")
+        d_old  = (_NOW - timedelta(days=2)).strftime("%Y-%m-%d")
+        self._write(root, d_old, {"NVDA": 0.7})
+        (root / f"{d_yest}_top_lists.json").write_text("{corrupt", encoding="utf-8")
         scores, _age = _load_yesterday_scores(root, now=_NOW)
         assert scores == {"NVDA": 0.7}
 
     def test_today_only_returns_empty(self, tmp_path):
         from src.delivery.send_discord import _load_yesterday_scores
         root = tmp_path / "archive"
-        self._write(root, "2026-06-11", {"TODAY": 0.9})
+        d_today = _NOW.strftime("%Y-%m-%d")
+        self._write(root, d_today, {"TODAY": 0.9})
         scores, age_h = _load_yesterday_scores(root, now=_NOW)
         assert scores == {}
         assert age_h is None
