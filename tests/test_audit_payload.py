@@ -10,6 +10,7 @@ from src.delivery.audit_payload import (
     GeographicLeakageError,
     StructuralIntegrityError,
     VIXCoherenceError,
+    VIXOverlayError,
 )
 
 
@@ -276,7 +277,6 @@ def test_intl_score_above_1_still_raises():
 
 def test_international_score_overflow_error_not_exported():
     """InternationalScoreOverflowError must no longer exist in audit_payload."""
-    import importlib
     import src.delivery.audit_payload as ap_module
     assert not hasattr(ap_module, "InternationalScoreOverflowError"), (
         "InternationalScoreOverflowError was removed in v2.2-global"
@@ -300,6 +300,54 @@ def test_smid_bucket_badge_audited():
     payload = _make_payload()
     payload["top_buys_smid"] = [_entry(ticker="AAOI", score=0.85, badge="WATCHLIST")]
     with pytest.raises(BadgeMismatchError):
+        audit(payload)
+
+
+# ---------------------------------------------------------------------------
+# I. VIX macro-overlay applied (kill-switch dampening)
+# ---------------------------------------------------------------------------
+
+def test_vix_overlay_normal_regime_is_noop():
+    """Under NORMAL (multiplier 1.0) any in-range score passes — overlay no-op."""
+    payload = _make_payload(vix=17.0, top_buys=[_entry(score=0.95, badge="HIGH BUY")])
+    assert audit(payload) is True
+
+
+def test_vix_overlay_panic_score_above_ceiling_raises():
+    """VIX≥30 dampens ×0.50 — an un-dampened 0.70 score is a kill-switch bypass."""
+    payload = _make_payload(vix=35.0, top_buys=[_entry(score=0.70, badge="TACTICAL BUY")])
+    with pytest.raises(VIXOverlayError):
+        audit(payload)
+
+
+def test_vix_overlay_panic_score_within_ceiling_passes():
+    """A correctly dampened score (≤0.50 under Panic) passes."""
+    payload = _make_payload(vix=35.0, top_buys=[_entry(score=0.45, badge="WATCHLIST")])
+    assert audit(payload) is True
+
+
+def test_vix_overlay_bear_ceiling_enforced():
+    """VIX≥20 dampens ×0.80 — a 0.90 score exceeds the bear ceiling."""
+    payload = _make_payload(vix=25.0, top_buys=[_entry(score=0.90, badge="HIGH BUY")])
+    with pytest.raises(VIXOverlayError):
+        audit(payload)
+
+
+def test_vix_overlay_crash_ceiling_enforced():
+    """VIX≥40 dampens ×0.20 — anything above 0.20 is an un-applied overlay."""
+    payload = _make_payload(vix=42.0)
+    payload["watchlist"] = [_entry(ticker="JNJ", score=0.30, badge="WATCHLIST")]
+    with pytest.raises(VIXOverlayError):
+        audit(payload)
+
+
+def test_vix_overlay_applies_to_intl_buckets():
+    """INTL entries are dampened by cook_toplists — the ceiling applies there too."""
+    payload = _make_payload(vix=35.0)
+    payload["eu_mid_small"] = [
+        _entry(ticker="SAP.DE", score=0.65, badge="TACTICAL BUY", market="EUROPE")
+    ]
+    with pytest.raises(VIXOverlayError):
         audit(payload)
 
 

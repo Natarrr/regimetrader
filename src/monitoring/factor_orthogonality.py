@@ -4,7 +4,7 @@ Fix #8: López de Prado (AFML ch. 8) — "feature engineering is not done after 
 validation, it requires permanent monitoring of the assumed structure."
 
 After each pipeline run, compute the cross-sectional Spearman correlation matrix
-of the 7 scored factors on the US universe. If any pair exceeds CORRELATION_WARN_THRESHOLD,
+of the live US-scored factors. If any pair exceeds CORRELATION_WARN_THRESHOLD,
 emit WARNING. If any pair exceeds CORRELATION_ERROR_THRESHOLD, emit ERROR (factors are
 essentially redundant and should be re-engineered).
 
@@ -22,10 +22,10 @@ full transparency. The full correlation_matrix is always exposed for manual insp
 Design choices:
 - Spearman (not Pearson): factor scores are bounded [0,1] with skewed distributions
   post-shrinkage; Spearman is rank-based and robust to this.
-- US-only by default: EU/Asia have structurally absent factors (None values for 5/7
-  factors), which would produce misleading pairwise NaN handling and shrink the
-  observation count. The orthogonality structure that matters most is on the rich
-  US scoring where all 7 factors fire.
+- US-only by default: EU/Asia have structurally absent factors (None values for
+  most US-thesis factors), which would produce misleading pairwise NaN handling and
+  shrink the observation count. The orthogonality structure that matters most is on
+  the rich US scoring where the full live factor set fires.
 - use_neutralized=True: orthogonality must hold *after* cross-sectional neutralization —
   that is the residual information fed to portfolio construction. Raw scores may
   legitimately co-move during market regimes; neutralized scores should not.
@@ -40,6 +40,13 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+# Full live US factor set (WEIGHTS_US, v2.2-global). The original list covered
+# only 7 of the 11 factors that actually fire for US tickers, so the diagnostic
+# was blind to redundancy among the consensus/quality signals added in v2.4
+# (analyst_consensus, quality_piotroski, transcript_tone, revenue_revision).
+# INTL-only fundamentals (fcf_yield, amihud_shock, pb_value_up, roic_quality)
+# and analyst_revision/price_target_upside score 0.0 for US by design and would
+# only be sparsity-excluded here, so they are intentionally omitted.
 FACTORS_TO_MONITOR = [
     "insider_conviction_score",
     "insider_breadth_score",
@@ -48,6 +55,10 @@ FACTORS_TO_MONITOR = [
     "news_buzz_score",
     "momentum_long_score",
     "volume_attention_score",
+    "analyst_consensus_score",
+    "quality_piotroski_score",
+    "transcript_tone_score",
+    "revenue_revision_score",
 ]
 
 CORRELATION_WARN_THRESHOLD: float = 0.50   # Spearman |ρ| — warn
