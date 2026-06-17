@@ -1820,6 +1820,20 @@ def run(
         "Piotroski sources: bulk=%d, per-ticker=%d (universe=%d)",
         _pio_counters["bulk"], _pio_counters["fmp_per_ticker"], len(tickers),
     )
+    # Bulk-coverage gate: ratios-ttm-bulk and the consensus bulk index load from
+    # the same snapshot, so a low Piotroski-bulk share is a leading indicator
+    # that .cache/bulk_snapshots/ is stale/empty and per-ticker fallbacks are
+    # silently inflating the FMP call budget. WARN only — never alters output.
+    _pio_total = _pio_counters["bulk"] + _pio_counters["fmp_per_ticker"]
+    _bulk_coverage = (_pio_counters["bulk"] / _pio_total) if _pio_total else 1.0
+    if _bulk_coverage < 0.75:
+        log.warning(
+            "BULK COVERAGE LOW: ratios-ttm-bulk supplied only %.0f%% of scored "
+            "tickers (%d/%d) — snapshot likely stale/empty and per-ticker "
+            "fallback is inflating FMP calls. Re-run "
+            "src/ingestion/fmp_bulk_prefetch.py and verify .cache/bulk_snapshots/.",
+            _bulk_coverage * 100, _pio_counters["bulk"], _pio_total,
+        )
 
     # PATCH 08: Report any structural FMP failures found during _score_ticker().
     if _structural_failures_in_scoring:

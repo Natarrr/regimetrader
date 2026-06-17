@@ -42,6 +42,11 @@ class VIXCoherenceError(PipelineAuditError):
     """VIX value is implausible (negative or absurdly large)."""
 
 
+class VIXOverlayError(PipelineAuditError):
+    """An emitted final_score exceeds the active regime multiplier — the VIX
+    macro-overlay (kill-switch dampening) was not applied before emission."""
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -370,6 +375,34 @@ def audit(top_lists_path="logs/top_lists.json") -> bool:
                 raise StructuralIntegrityError(
                     f"Ticker {ticker!r} does not match allowed format "
                     f"(e.g. 'MSFT', 'SAP.DE')"
+                )
+
+    # ------------------------------------------------------------------
+    # I. VIX macro-overlay applied — every emitted final_score must be
+    #    consistent with the active regime multiplier. vix_multiplier() is
+    #    applied exactly once upstream (US: generate_top_lists._apply_vix_overlay;
+    #    INTL: cook_toplists._normalize_intl_entry), so with raw scores in
+    #    [0, 1] no dampened score can exceed the multiplier. A score above it
+    #    means the overlay was skipped — a kill-switch bypass that must never
+    #    reach Discord. NORMAL (multiplier == 1.0) makes this a no-op, so it
+    #    only bites under BEAR/Panic/Crash. Runs after check F validated VIX.
+    # ------------------------------------------------------------------
+    try:
+        from src.risk.regime import vix_multiplier as _vix_mult
+        _overlay_ceiling = _vix_mult(float(vix))
+    except Exception:
+        _overlay_ceiling = 1.0  # regime module unavailable — defer to check A's [0,1] gate
+
+    if _overlay_ceiling < 1.0:
+        _OVERLAY_TOLERANCE = 1e-4  # cook rounds composite to 4 dp before dampening
+        for entry in _iter_all_entries(data):
+            score = float(entry.get("final_score", 0.0))
+            if score > _overlay_ceiling + _OVERLAY_TOLERANCE:
+                raise VIXOverlayError(
+                    f"Ticker {entry.get('ticker', '?')!r}: final_score={score:.4f} "
+                    f"exceeds the VIX-overlay ceiling {_overlay_ceiling:.2f} for "
+                    f"VIX={float(vix):.1f} — the regime multiplier was not applied "
+                    f"(kill-switch bypass)."
                 )
 
     return True

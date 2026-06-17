@@ -10,14 +10,11 @@ numpy>=1.26.0
 scipy>=1.12.0
 pandas>=2.2.0
 scikit-learn>=1.4.0
-hmmlearn>=0.3.0
 statsmodels>=0.14.0
 ta>=0.11.0
-arch>=6.3.0
 
 # ── Market data ───────────────────────────────────────────────────────────────
 yfinance>=0.2.38
-pandas-datareader>=0.10.0
 
 # ── Data validation / IO ──────────────────────────────────────────────────────
 pydantic>=2.5.0
@@ -35,9 +32,6 @@ python-dotenv>=1.0.0
 
 # ── Intelligence cache ────────────────────────────────────────────────────────
 diskcache>=5.6.0
-
-# ── Claude API ────────────────────────────────────────────────────────────────
-anthropic>=0.28.0,<2.0.0
 
 # Excluded from CI (stubbed in tests or pipeline-only):
 #   alpaca-py       — broker SDK, faked with SimpleNamespace/MagicMock

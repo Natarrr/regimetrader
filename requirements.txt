@@ -1,5 +1,4 @@
-# ── HMM / Machine Learning ────────────────────────────────────────────────────
-hmmlearn>=0.3.0
+# ── Machine Learning ──────────────────────────────────────────────────────────
 scikit-learn>=1.4.0
 numpy>=1.26.0
 scipy>=1.12.0
@@ -10,7 +9,6 @@ alpaca-py>=0.20.0
 
 # ── Data Processing ───────────────────────────────────────────────────────────
 pandas>=2.2.0
-pandas-datareader>=0.10.0    # FRED macro data (GlobalMacroEngine, MLDCFEngine)
 ta>=0.11.0
 statsmodels>=0.14.0          # ADF stationarity test, EWMA covariance
 
@@ -29,10 +27,6 @@ pyarrow>=14.0.0              # Parquet serialization for cache
 # ── Logging ───────────────────────────────────────────────────────────────────
 loguru>=0.7.2
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
-streamlit>=1.35.0
-plotly>=5.20.0
-
 # ── Intelligence Cache ────────────────────────────────────────────────────────
 diskcache>=5.6.0
 redis>=5.0.0                 # Optional: hot-tier cache (Redis)
@@ -44,11 +38,7 @@ sentence-transformers>=2.6.0 # Fallback embeddings (no API key needed)
 # ── Backtesting ───────────────────────────────────────────────────────────────
 # vectorbt>=0.26.0           # Uncomment for GPU-accelerated backtesting
 
-# ── Claude / Anthropic SDK ────────────────────────────────────────────────────
-anthropic>=0.28.0,<2.0.0     # Claude API (intelligence engine + RAG rationale)
-
 # ── The Laureate Engine — Backend ─────────────────────────────────────────────
-arch>=6.3.0                  # GJR-GARCH (Engle 2003 Nobel) — Module B
 fastapi>=0.111.0             # REST API server
 uvicorn[standard]>=0.30.0    # ASGI server for FastAPI
 httpx>=0.27.0                # Async HTTP client for inter-service calls

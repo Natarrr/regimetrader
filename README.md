@@ -64,13 +64,9 @@ src/                    Core package (single namespace)
   services/             FMP API client
   utils/                io, formatting helpers
 backend/market_intel/   generate_top_lists.py scoring orchestrator + validator
-backend/quant_models/   Economic indicator models
+backend/data/           market_service (SPY/QQQ snapshot for Discord embeds)
 monitoring/             Ops monitoring: metrics export, threshold checks, alerts
-analysis/               Claude API client + earnings analyzer
 scripts/                CLI utilities (check_imports, backtest_signals, …)
-pages/                  Streamlit dashboard pages
-feature_engineering/    Feature computation (used by dashboard + delivery)
-hmm_engine/             HMM regime classifier
 tests/                  Test suite (pytest)
 config/                 Ticker lists (universe.csv, canary_top10.csv)
 .github/workflows/      CI/CD (ci, canary, daily_trading_pipeline, edgar_3x, …)
