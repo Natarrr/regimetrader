@@ -1280,7 +1280,13 @@ def run(
                     sourced from bulk snapshots instead of per-ticker FMP calls.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
-    ticker_rows = load_tickers(tickers_file)
+    # Hybrid dynamic universe (core CSV + screened satellite) when UNIVERSE_DYNAMIC
+    # is set; otherwise byte-identical legacy behavior (plain CSV load).
+    if os.getenv("UNIVERSE_DYNAMIC", "").lower() in ("1", "true", "yes"):
+        from src.ingestion.universe_screener import resolve_universe  # noqa: PLC0415
+        ticker_rows = resolve_universe(tickers_file, region, log_dir=log_dir)
+    else:
+        ticker_rows = load_tickers(tickers_file)
 
     # Guard: region-conditional universe validation (US default unchanged).
     _validate_universe_region(ticker_rows, region)

@@ -75,6 +75,11 @@ logs/*
 *.log
 *.log.*
 !logs/archive/**
+# IC backtest snapshot store — persisted across CI runs so the live IC path
+# (src.research.historical_loader.load_historical_snapshots) can accumulate the
+# 60+ daily snapshots it requires. Runtime churn audit stays ignored.
+!logs/historical/
+!logs/historical/**
 
 # ── Trading runtime files ─────────────────────────────────────────────────────
 # (manual deletion required to resume after HALT_ALL)

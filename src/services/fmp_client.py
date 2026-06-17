@@ -100,6 +100,7 @@ _TTL: Dict[str, int] = {
     "f13":          24 * 3600,
     "transcript":   24 * 3600,
     "profile":      24 * 3600,
+    "screener":     12 * 3600,   # universe composition moves slowly intra-day
 }
 
 
@@ -386,6 +387,49 @@ class FMPClient:
             self._consecutive_404.clear()
 
     # ── Historical prices (replaces all yfinance.download calls) ──────────────
+
+    def get_company_screener(
+        self,
+        *,
+        exchange: Optional[str] = None,
+        market_cap_more_than: Optional[float] = None,
+        volume_more_than: Optional[float] = None,
+        limit: int = 100,
+        include_etf: bool = False,
+    ) -> List[Dict]:
+        """Dynamic universe candidates from stable/company-screener.
+
+        Thin wrapper (CLAUDE.md §2 — client carries zero trading math): returns
+        the raw screener rows; liquidity/cap filtering and ranking belong to
+        src/ingestion/universe_screener.py. ETFs and funds are excluded by
+        default so the universe holds operating companies only.
+
+        Returns [] when the API key is absent or the route yields no rows.
+        """
+        if not self._api_key:
+            return []
+        params: Dict[str, Any] = {
+            "limit": limit,
+            "isEtf": str(include_etf).lower(),
+            "isFund": "false",
+        }
+        if exchange:
+            params["exchange"] = exchange
+        if market_cap_more_than is not None:
+            params["marketCapMoreThan"] = int(market_cap_more_than)
+        if volume_more_than is not None:
+            params["volumeMoreThan"] = int(volume_more_than)
+
+        cache_key = (f"{exchange}_{market_cap_more_than}_{volume_more_than}"
+                     f"_{limit}_{include_etf}")
+        cached = self._cache_read("screener", cache_key)
+        if cached is not None:
+            return cached
+        data = self._get("company-screener", params, bucket="screener") or []
+        result = data if isinstance(data, list) else []
+        if result:
+            self._cache_write("screener", cache_key, result)
+        return result
 
     def get_historical_prices(self, ticker: str, limit: int = 280) -> List[Dict]:
         """Daily OHLCV from stable/historical-price-eod/full.
