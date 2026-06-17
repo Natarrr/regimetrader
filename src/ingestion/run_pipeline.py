@@ -1615,7 +1615,22 @@ def run(
             # is absent (weight redistributed pro-rata downstream — never bearish).
             # The raw summary rides along for the 🐋 WHALE badge / [NICHE ALPHA]
             # display (generate_top_lists / send_discord).
-            _inst_13f_summary  = _fmp_client.get_institutional_ownership(ticker)
+            # A structural 13F-route failure must NOT zero the whole ticker: that
+            # would discard the insider/momentum/analyst signals already scored
+            # above for a 0.04 display-grade factor. Mirror the NPR guard below and
+            # the outer PATCH-08 handler — record the broken endpoint (fmp_health
+            # still sees it) and degrade the SIGNED factor to None (never bearish).
+            try:
+                _inst_13f_summary = _fmp_client.get_institutional_ownership(ticker)
+            except FMPEndpointError as _13f_exc:
+                log.warning(
+                    "13F flow %s structural fail (endpoint=%s status=%d) — degraded "
+                    "to unavailable; ticker's other factors unaffected.",
+                    ticker, _13f_exc.path, _13f_exc.status,
+                )
+                with _structural_failures_lock:
+                    _structural_failures_in_scoring.add(_13f_exc.path)
+                _inst_13f_summary = {}
             inst_flow_13f_score = score_inst_flow_13f(_inst_13f_summary)
 
             # ── Insider acquired-vs-disposed spike (NPR overlay; NOT weighted) ──

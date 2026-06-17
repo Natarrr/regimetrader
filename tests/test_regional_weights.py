@@ -73,6 +73,23 @@ def test_weights_global_redistribution_correct():
     assert WEIGHTS_GLOBAL["price_target_upside"] == pytest.approx(0.03)
 
 
+def test_inst_flow_13f_is_us_only():
+    """13F whale factor is structurally US-only (FMP 13F coverage is US-centric)
+    and is funded in WEIGHTS_US from news_buzz (0.05→0.01). It must NOT leak into
+    the international matrices: adding it there is a data-availability problem, not
+    a weight problem — score_inst_flow_13f returns None for ~all intl names, and
+    EU news_buzz is already 0.00, leaving no slack to fund a 0.04 allocation.
+    Codifies audit correction C3; a future intl backport must trip this test and
+    fund the factor explicitly rather than silently trimming a zeroed donor."""
+    from src.config.weights import WEIGHTS_EU, WEIGHTS_ASIA
+    assert WEIGHTS_US["inst_flow_13f"] == pytest.approx(0.04)
+    assert "inst_flow_13f" not in WEIGHTS_GLOBAL
+    assert "inst_flow_13f" not in WEIGHTS_EU
+    assert "inst_flow_13f" not in WEIGHTS_ASIA
+    # The donor the naive fix would reach for is already exhausted in EU.
+    assert WEIGHTS_EU["news_buzz"] == 0.0
+
+
 # ── Region classifier ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("ticker,expected", [

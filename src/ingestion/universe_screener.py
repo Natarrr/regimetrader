@@ -162,7 +162,8 @@ def _volume_panel(
 def _append_churn(
     log_dir: Optional[Path], events: Sequence[Dict[str, Any]],
 ) -> None:
-    """Append-only churn audit (convention: logs/kill_switch_audit.ndjson)."""
+    """Append-only churn audit → logs/universe_churn.ndjson (ndjson audit-log
+    convention, mirroring logs/kill_switch_audit.ndjson)."""
     if not log_dir or not events:
         return
     path = Path(log_dir) / "universe_churn.ndjson"
