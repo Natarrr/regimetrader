@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 ESC = "\x1b"
 
-_NOW = datetime(2026, 6, 11, 16, 30, tzinfo=timezone.utc)
+_NOW = datetime.now(timezone.utc)
 
 
 # ── Fixture builders (cooked top_lists.json schema) ───────────────────────────

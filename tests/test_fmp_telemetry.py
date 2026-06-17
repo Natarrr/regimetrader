@@ -12,6 +12,7 @@ from src.services.fmp_client import FMPClient, FMPEndpointError
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FMP_API_KEY", "test-key")
     monkeypatch.setenv("FMP_MAX_RPS", "100000")
+    FMPClient._rate_last_call = 0.0  # reset class-level state so fake_monotonic starts clean
     return FMPClient(api_key="test-key", cache_root=tmp_path / "fmp")
 
 
