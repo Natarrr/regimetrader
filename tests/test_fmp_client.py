@@ -169,6 +169,30 @@ class TestFMPClientInsider:
             client.get_insider_purchases("NVDA")
             assert mock_get.call_count == 1
 
+    def test_insider_statistics_sorted_newest_first(self, client):
+        """get_insider_statistics returns quarters newest-first (latest at index 0)."""
+        rows = [
+            {"symbol": "NVDA", "year": 2025, "quarter": 4,
+             "acquiredTransactions": 3, "disposedTransactions": 3},
+            {"symbol": "NVDA", "year": 2026, "quarter": 2,
+             "acquiredTransactions": 9, "disposedTransactions": 1},
+            {"symbol": "NVDA", "year": 2026, "quarter": 1,
+             "acquiredTransactions": 5, "disposedTransactions": 5},
+        ]
+        with patch.object(client._session, "get", return_value=_ok_resp(rows)):
+            out = client.get_insider_statistics("NVDA")
+        assert [(r["year"], r["quarter"]) for r in out] == [(2026, 2), (2026, 1), (2025, 4)]
+
+    def test_insider_statistics_empty_on_no_data(self, client):
+        with patch.object(client._session, "get", return_value=_empty_resp()):
+            assert client.get_insider_statistics("NVDA") == []
+
+    def test_insider_statistics_no_key_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        from src.services.fmp_client import FMPClient
+        c = FMPClient(cache_root=tmp_path)
+        assert c.get_insider_statistics("NVDA") == []
+
     def test_uses_limit_500_in_request(self, client):
         """Mega-caps need limit=500 to cover 180-day lookback without truncation."""
         with patch.object(client._session, "get", return_value=_empty_resp()) as mock_get:

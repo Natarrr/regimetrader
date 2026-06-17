@@ -74,19 +74,19 @@ class TestWeightsConsistency:
         )
 
     def test_weights_unified(self):
-        """v2.4-global: run_pipeline and generate_top_lists both use config/weights.py.
-        Both must use WEIGHTS_US (10-factor after transcript_tone activated in v2.4).
+        """v2.5-global: run_pipeline and generate_top_lists both use config/weights.py.
+        Both must use WEIGHTS_US (12-factor after inst_flow_13f activated in v2.5).
         """
         rp_weights  = _load_run_pipeline_weights()
         gtl_weights = _load_generate_top_lists_weights()
 
-        # Both schemas are now 11-factor (WEIGHTS_US from config/weights.py, v2.5 adds revenue_revision)
-        assert len(rp_weights) == 11, (
-            f"run_pipeline.WEIGHTS expected 11 factors (WEIGHTS_US v2.5), got {len(rp_weights)}: "
+        # Both schemas are now 12-factor (WEIGHTS_US from config/weights.py; v2.5 adds inst_flow_13f)
+        assert len(rp_weights) == 12, (
+            f"run_pipeline.WEIGHTS expected 12 factors (WEIGHTS_US v2.5), got {len(rp_weights)}: "
             f"{list(rp_weights.keys())}"
         )
-        assert len(gtl_weights) == 11, (
-            f"generate_top_lists.WEIGHTS expected 11 factors, got {len(gtl_weights)}: "
+        assert len(gtl_weights) == 12, (
+            f"generate_top_lists.WEIGHTS expected 12 factors, got {len(gtl_weights)}: "
             f"{list(gtl_weights.keys())}"
         )
 

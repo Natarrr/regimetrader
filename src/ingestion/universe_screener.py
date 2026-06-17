@@ -48,8 +48,17 @@ _MIN_MARKET_CAP = 2_000_000_000   # $2B floor — same as build_universes.py
 # UNIVERSE_DYNAMIC).
 _SMID_SCREEN_MIN_CAP = 300_000_000      # $300M — sleeve floor
 _SMID_SCREEN_MAX_CAP = 10_000_000_000   # $10B  — sleeve ceiling
-_SMID_SCREEN_MIN_VOLUME = 200_000       # liquidity floor — drop illiquid micro-caps
+_SMID_SCREEN_MIN_VOLUME = 200_000       # share-volume floor — drop illiquid micro-caps
 _SMID_MID_THRESHOLD = 2_000_000_000     # < $2B → "small", else "mid"
+
+# ADV dollar-volume gate (price × volume) — the real liquidity guard against
+# market-impact traps [Amihud 2002]; a share count alone misprices a $2 stock vs
+# a $200 stock. Applied only when the screener row carries price+volume; rows
+# lacking the fields fall back to the server-side share-volume floor (never
+# dropped on absent data). Soft-beta α tilts candidate ranking toward higher-
+# leverage (directional-velocity) names without a hard, noisy beta exclusion.
+_SMID_MIN_DOLLAR_VOL = float(os.getenv("SMID_MIN_DOLLAR_VOL", "3000000"))  # $3M/day
+_SMID_BETA_ALPHA = float(os.getenv("SMID_BETA_ALPHA", "0.15"))            # soft tilt
 
 
 # ── Pure vectorized selection (the quant heart; fully unit-tested) ────────────
@@ -166,17 +175,22 @@ def _append_churn(
 def _screen_smid_candidates(
     client: Any, region: str,
 ) -> Dict[str, Dict[str, Any]]:
-    """{ticker: {sector, cap_tier, market_cap}} in the SMID band ($300M–$10B).
+    """{ticker: {sector, cap_tier, market_cap, adv_usd, beta}} in the SMID band.
 
-    Screens ``market_cap_more_than=$300M`` with a volume floor (the screener has
-    no upper-cap parameter) and band-filters client-side to ≤ $10B, tagging
-    small (< $2B) vs mid."""
+    Screens the $300M–$10B band server-side (``market_cap_lower_than`` ceiling +
+    ``is_actively_trading`` shell guard) with a share-volume floor, then applies
+    an ADV dollar-volume gate (price × volume ≥ ``_SMID_MIN_DOLLAR_VOL``) to drop
+    market-impact traps [Amihud 2002]. ``adv_usd`` and ``beta`` ride along for the
+    downstream soft-beta leverage rank. Rows lacking price/volume are kept on the
+    server-side share floor — absent data is never used to reject."""
     out: Dict[str, Dict[str, Any]] = {}
     for exchange in _REGION_EXCHANGES.get(region, _REGION_EXCHANGES["US"]):
         for row in client.get_company_screener(
                 exchange=exchange,
                 market_cap_more_than=_SMID_SCREEN_MIN_CAP,
+                market_cap_lower_than=_SMID_SCREEN_MAX_CAP,
                 volume_more_than=_SMID_SCREEN_MIN_VOLUME,
+                is_actively_trading=True,
                 limit=100):
             sym = (row.get("symbol") or "").strip().upper()
             if not sym or sym in out:
@@ -184,12 +198,48 @@ def _screen_smid_candidates(
             mcap = float(row.get("marketCap") or 0.0)
             if not (_SMID_SCREEN_MIN_CAP <= mcap <= _SMID_SCREEN_MAX_CAP):
                 continue
+            price = float(row.get("price") or 0.0)
+            volume = float(row.get("volume") or 0.0)
+            adv_usd = price * volume if price > 0 and volume > 0 else None
+            if adv_usd is not None and adv_usd < _SMID_MIN_DOLLAR_VOL:
+                continue   # illiquid → market-impact trap; drop
             out[sym] = {
                 "sector": row.get("sector") or "Unknown",
                 "cap_tier": "small" if mcap < _SMID_MID_THRESHOLD else "mid",
                 "market_cap": mcap,
+                "adv_usd": adv_usd,
+                "beta": float(row["beta"]) if row.get("beta") is not None else None,
             }
     return out
+
+
+def _leverage_rank(
+    group: List[tuple], alpha: float = _SMID_BETA_ALPHA,
+) -> List[tuple]:
+    """Order ``(sym, meta)`` by ADV liquidity with a soft-beta leverage tilt.
+
+    key = adv_usd · (1 + α·clip(z(beta), −2, 2)). ADV dollar-volume is the
+    liquidity anchor; beta is a *soft* boost toward higher-leverage (directional-
+    velocity) names — never a hard exclusion, because beta is a noisy estimate.
+    Rows with no ADV/beta keep a neutral key, so a field-less screener row (or a
+    test fixture) sorts in stable insertion order rather than being penalised."""
+    if not group:
+        return []
+    betas = np.array(
+        [m.get("beta") if m.get("beta") is not None else np.nan for _, m in group],
+        dtype=float)
+    finite = betas[np.isfinite(betas)]
+    if finite.size >= 2 and finite.std() > 0:
+        z = np.where(np.isfinite(betas), (betas - finite.mean()) / finite.std(), 0.0)
+        boost = 1.0 + alpha * np.clip(z, -2.0, 2.0)
+    else:
+        boost = np.ones(len(group))
+    keyed = [
+        (sym, meta, (float(meta["adv_usd"]) if meta.get("adv_usd") else 0.0) * b)
+        for (sym, meta), b in zip(group, boost)
+    ]
+    keyed.sort(key=lambda x: -x[2])   # stable → ties keep insertion order
+    return [(sym, meta) for sym, meta, _ in keyed]
 
 
 def _resolve_smid_satellite(
@@ -199,15 +249,16 @@ def _resolve_smid_satellite(
     """Dedicated small/mid tranche for the SMID leverage sleeve.
 
     Balances small and mid candidates so true small caps are represented (a
-    plain size sort would fill the quota with the $2B–$10B end). Tagged
+    plain size sort would fill the quota with the $2B–$10B end), ranking within
+    each tier by ADV liquidity + soft-beta leverage (``_leverage_rank``). Tagged
     origin='smid_satellite'; cook re-ranks survivors by leverage_score, so this
-    only needs to supply a sane, liquid candidate pool."""
+    only needs to supply a sane, liquid, leverage-tilted candidate pool."""
     k = int(os.getenv("UNIVERSE_SMID_K", "30"))
     candidates = _screen_smid_candidates(client, region)
-    smalls = [(s, m) for s, m in candidates.items()
-              if s not in existing and m["cap_tier"] == "small"]
-    mids = [(s, m) for s, m in candidates.items()
-            if s not in existing and m["cap_tier"] == "mid"]
+    smalls = _leverage_rank([(s, m) for s, m in candidates.items()
+                             if s not in existing and m["cap_tier"] == "small"])
+    mids = _leverage_rank([(s, m) for s, m in candidates.items()
+                           if s not in existing and m["cap_tier"] == "mid"])
     half = max(1, k // 2)
     chosen = smalls[:half] + mids[:max(0, k - len(smalls[:half]))]
 
@@ -221,9 +272,14 @@ def _resolve_smid_satellite(
             "cap_tier": meta.get("cap_tier", "small"),
             "origin": "smid_satellite",
         })
+        adv = meta.get("adv_usd")
+        adv_txt = f"adv=${adv / 1e6:.1f}M" if adv else "adv=n/a"
+        beta = meta.get("beta")
+        beta_txt = f"beta={beta:.2f}" if beta is not None else "beta=n/a"
         events.append({
             "date": today, "ticker": sym, "action": "added",
             "reason": f"smid_satellite mcap=${meta.get('market_cap', 0.0) / 1e9:.2f}B "
+                      f"{adv_txt} {beta_txt} "
                       f"(small/mid leverage-sleeve candidate, absent from core)",
         })
     _append_churn(log_dir, events)

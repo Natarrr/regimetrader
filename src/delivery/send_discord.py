@@ -156,6 +156,7 @@ _OD_FACTOR_LABELS: Dict[str, str] = {
     "amihud_shock":       "Amihud Liquid",
     "pb_value_up":        "P/B Value",
     "roic_quality":       "ROIC Quality",
+    "inst_flow_13f":      "13F Whale Flow",
 }
 
 # ── Cognitive factor block (emoji heat in markdown — NEVER inside a fence) ─────
@@ -170,8 +171,16 @@ _FACTOR_SHORT_LABEL: Dict[str, str] = {
     "analyst_revision": "EPSrev", "revenue_revision": "RevRev",
     "price_target_upside": "PTUp", "transcript_tone": "Tone",
     "quality_piotroski": "Quality", "fcf_yield": "FCF", "amihud_shock": "Amihud",
-    "pb_value_up": "P/B", "roic_quality": "ROIC",
+    "pb_value_up": "P/B", "roic_quality": "ROIC", "inst_flow_13f": "13F",
 }
+# [NICHE ALPHA] — low-weight alt-data velocity signals (institutional 13F /
+# insider acquired-vs-disposed) surfaced with a 🐋 glyph instead of a heat dot.
+_NICHE_ALPHA_FACTORS = frozenset({"inst_flow_13f"})
+# Whale-accumulation badge triggers (display only; thresholds on the normalized
+# factor + the raw NPR spike). inst_flow_13f is cross-sectionally normalized, so
+# ≥ .80 means top-decile institutional inflow this quarter.
+_WHALE_FLOW_MIN = 0.80
+_WHALE_NPR_SPIKE_MIN = 0.30
 # Display-only signal-decay half-lives (days) keyed by dominant catalyst. Mirrors
 # the scoring constants (PEAD t½ [Bernard & Thomas, 1989]; insider/congress
 # recency decay) — surfaced so a trader sees the signal's expected shelf-life.
@@ -567,7 +576,9 @@ def _driver_strip(
     bits: List[str] = []
     for key, score, _contrib, _ in available[:top_n]:
         label = _FACTOR_SHORT_LABEL.get(key, key[:8])
-        bits.append(f"{_factor_heat(score, unavailable=False)} {label} {score:.2f}")
+        # Niche-alpha velocity signals get a 🐋 marker rather than a heat dot.
+        glyph = "🐋" if key in _NICHE_ALPHA_FACTORS else _factor_heat(score, unavailable=False)
+        bits.append(f"{glyph} {label} {score:.2f}")
     for key, _score, _contrib, _ in gaps[:2]:
         label = _FACTOR_SHORT_LABEL.get(key, key[:8])
         bits.append(f"⬜ {label} n/a")
@@ -599,14 +610,64 @@ def _decay_note(entry: Dict[str, Any]) -> str:
     return ""
 
 
+def _target_token(entry: Dict[str, Any]) -> str:
+    """🎯 analyst target price + upside — the exit anchor. Empty when either the
+    consensus target or the current price is absent (never fabricate a level)."""
+    tgt = _safe_float(entry.get("target_price"))
+    cur = _safe_float(entry.get("current_price"))
+    if tgt > 0 and cur > 0:
+        return f"🎯 tgt ${tgt:.0f} ({(tgt / cur - 1) * 100:+.1f}%)"
+    return ""
+
+
+def _whale_signal(entry: Dict[str, Any]) -> bool:
+    """True when alt-data flags extreme whale accumulation — top-decile 13F
+    institutional inflow OR an unusual insider acquired-vs-disposed spike."""
+    flow = _safe_float((entry.get("factors") or {}).get("inst_flow_13f"))
+    if flow >= _WHALE_FLOW_MIN:
+        return True
+    npr = entry.get("insider_npr") or {}
+    return _safe_float(npr.get("spike")) >= _WHALE_NPR_SPIKE_MIN
+
+
+def _whale_badge(entry: Dict[str, Any]) -> str:
+    """🐋 header badge — fires only for a niche small/mid-cap entering on extreme
+    alternative-data flow (the rotation signal the desk is built to surface)."""
+    cap = (entry.get("cap_tier") or "").lower()
+    if cap in ("small", "mid") and _whale_signal(entry):
+        return " · 🐋 WHALE ACCUMULATION"
+    return ""
+
+
+def _niche_alpha_strip(entry: Dict[str, Any]) -> str:
+    """[NICHE ALPHA] evidence line — the institutional 13F flow + insider
+    acquired/disposed velocity behind a whale trigger (CLAUDE.md §5 evidence-first)."""
+    bits: List[str] = []
+    flow = (entry.get("factors") or {}).get("inst_flow_13f")
+    if flow is not None:
+        ev = entry.get("inst_13f_evidence") or {}
+        dih = ev.get("investors_holding_change")
+        tail = f" ({int(dih):+d} holders)" if isinstance(dih, (int, float)) and dih else ""
+        bits.append(f"🐋 13F {_safe_float(flow):.2f}{tail}")
+    npr = entry.get("insider_npr") or {}
+    if npr:
+        spike = _safe_float(npr.get("spike"))
+        arrow = " ▲" if spike >= _WHALE_NPR_SPIKE_MIN else ""
+        bits.append(
+            f"insider {int(npr.get('acquired', 0))}B/{int(npr.get('disposed', 0))}S "
+            f"NPR {_safe_float(npr.get('npr')):.2f}{arrow}")
+    if not bits:
+        return ""
+    return "[NICHE ALPHA] " + " · ".join(bits)
+
+
 def _lifecycle_line(entry: Dict[str, Any]) -> str:
     """Zone-3 execution + life-cycle: target upside, relative volume, crowding,
     signal decay. Each token is omitted when its source field is absent."""
     bits: List[str] = []
-    tgt = _safe_float(entry.get("target_price"))
-    cur = _safe_float(entry.get("current_price"))
-    if tgt > 0 and cur > 0:
-        bits.append(f"🎯 tgt ${tgt:.0f} ({(tgt / cur - 1) * 100:+.1f}%)")
+    tgt = _target_token(entry)
+    if tgt:
+        bits.append(tgt)
     relvol = _safe_float(entry.get("volume_spike"))
     if relvol > 0:
         bits.append(f"relVol {relvol:.1f}×")
@@ -900,8 +961,9 @@ class DiscordPayloadBuilder:
 
         overlay_tag = _overlay_tag(entry, self.overlay_multiplier)
         overlay_str = f" · {overlay_tag}" if overlay_tag else ""
+        whale = _whale_badge(entry)
         head = (f"{medal} **{ticker}**{name} — {badge} · `{score:.4f}` · "
-                f"p{pct}{self._delta_tag(ticker, score)}{overlay_str}")
+                f"p{pct}{self._delta_tag(ticker, score)}{overlay_str}{whale}")
         lines = [head]
         # Zone 2 — cognitive factor attribution (emoji heat, markdown only).
         if show_drivers:
@@ -911,11 +973,22 @@ class DiscordPayloadBuilder:
             if strip:
                 lines.append(f"└ {strip}")
         lines.append(f"└ {_compute_catalyst(entry)}{cov_warn}")
-        # Zone 3 — execution + life-cycle, top pick only (budget-bounded).
+        # [NICHE ALPHA] evidence — surfaced only when the whale badge fired,
+        # keeping the low-weight alt-data line off every routine large-cap pick.
+        if whale:
+            niche = _niche_alpha_strip(entry)
+            if niche:
+                lines.append(f"└ {niche}")
+        # Zone 3 — execution + life-cycle. Top pick gets the full line; every
+        # other pick still gets the 🎯 target (exit anchor) — "know when to sell".
         if show_lifecycle and rank == 1:
             life = _lifecycle_line(entry)
             if life:
                 lines.append(f"└ {life}")
+        elif show_lifecycle:
+            tgt = _target_token(entry)
+            if tgt:
+                lines.append(f"└ {tgt}")
         return lines
 
     def _desk_field(self, key: str, flag: str, label: str,
@@ -949,8 +1022,11 @@ class DiscordPayloadBuilder:
             rows.pop()
         if len(rows) <= 1:
             return None
+        # 🐋 marker (outside the ASCII fence) when a sleeve name shows extreme
+        # institutional/insider accumulation — the rotation signal at a glance.
+        whale_mark = " 🐋" if any(_whale_signal(e) for e in entries[:max_entries]) else ""
         return {
-            "name":   "🚀 2b · SMALL-CAP / MID-CAP LEVERAGE DESK",
+            "name":   f"🚀 2b · SMALL-CAP / MID-CAP LEVERAGE DESK{whale_mark}",
             "value":  "```\n" + "\n".join(rows) + "\n```",
             "inline": False,
         }
@@ -1118,11 +1194,12 @@ class DiscordPayloadBuilder:
             "name": "📖 LEGEND",
             "value": (
                 "🟩 strong ≥.66 · 🟨 mid · 🟥 weak <.40 · ⬜ data gap (not bearish) · "
+                "🐋 [NICHE ALPHA] institutional/insider velocity · "
                 "`raw→×` pre-overlay alpha × VIX dampening\n"
                 "*IC Insider Conviction · IB Insider Breadth · "
                 "CG Congress (US-only) · NS News Sentiment · NB News Buzz · "
                 "MO Momentum 12-1m · VA Volume Attention · "
-                "AC Analyst Consensus · QF Piotroski Quality · "
+                "AC Analyst Consensus · QF Piotroski Quality · 13F Whale Flow (QoQ) · "
                 "FCF Free Cash Flow Yield · AMH Amihud Liquidity · "
                 "PB Price-to-Book · ROI ROIC Quality (intl only)*"
             ),

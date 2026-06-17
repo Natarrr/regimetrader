@@ -32,19 +32,20 @@ def test_weights_us_congress_nonzero():
     assert WEIGHTS_US["congress"] > 0.0
 
 def test_weights_us_sprint_v24():
-    """US weights must reflect v2.4/v2.5 sprint allocation (transcript_tone + revenue_revision activated)."""
+    """US weights must reflect v2.4/v2.5 sprint allocation (transcript_tone, revenue_revision, inst_flow_13f activated)."""
     expected = {
         "insider_conviction": 0.30,
         "insider_breadth":    0.12,   # reduced 0.15→0.12 (donor for revenue_revision)
         "congress":           0.01,   # reduced 0.04→0.01 (donor for transcript_tone)
         "news_sentiment":     0.10,
-        "news_buzz":          0.05,
+        "news_buzz":          0.01,   # reduced 0.05→0.01 (donor for inst_flow_13f)
         "momentum_long":      0.15,
         "volume_attention":   0.01,   # reduced 0.03→0.01 (donor for transcript_tone)
         "analyst_consensus":  0.10,
         "quality_piotroski":  0.08,
         "transcript_tone":    0.05,   # Huang et al. 2018
-        "revenue_revision":   0.03,   # NEW — Zacks 2003
+        "revenue_revision":   0.03,   # Zacks 2003
+        "inst_flow_13f":      0.04,   # NEW v2.5 — 13F QoQ delta; SIGNED
     }
     assert WEIGHTS_US == expected
 
@@ -57,7 +58,7 @@ def test_weights_global_redistribution_correct():
     assert delta["congress"]           == pytest.approx(-0.01)
     assert delta["insider_conviction"] == pytest.approx(-0.02)   # MAR Art.19 parity
     assert delta["insider_breadth"]    == pytest.approx(+0.02)   # GLOBAL 0.14 vs US 0.12
-    assert delta["news_buzz"]          == pytest.approx(-0.03)   # GLOBAL 0.02 vs US 0.05
+    assert delta["news_buzz"]          == pytest.approx(+0.01)   # GLOBAL 0.02 vs US 0.01 (v2.5: US donor for inst_flow_13f)
     assert delta["volume_attention"]   == pytest.approx(+0.03)   # GLOBAL 0.04 vs US 0.01
     assert delta["analyst_consensus"]  == pytest.approx(0.00)    # same in both (0.10)
     assert delta["momentum_long"]      == pytest.approx(+0.02)   # Rouwenhorst EU premium

@@ -59,6 +59,7 @@ FACTORS_TO_MONITOR = [
     "quality_piotroski_score",
     "transcript_tone_score",
     "revenue_revision_score",
+    "inst_flow_13f_score",   # v2.5 — 13F whale flow; watch vs the insider factors
 ]
 
 CORRELATION_WARN_THRESHOLD: float = 0.50   # Spearman |ρ| — warn
