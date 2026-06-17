@@ -1214,27 +1214,12 @@ class FMPClient:
                 sym = row.get("symbol")
                 if sym:
                     out[sym] = row
+                    # Populate the per-ticker "quote" bucket so a downstream
+                    # get_quote(sym) is a cache hit within the 5m TTL — the
+                    # batch row IS the stable/quote schema, so this removes
+                    # redundant per-ticker quote round-trips at no data cost.
+                    self._cache_write("quote", sym, row)
         return out
-
-    def get_cot_report(self) -> List[Dict]:
-        """Full Commitment of Traders report (stable/commitment-of-traders-report).
-
-        PASS in Phase-0 smoke-test (536 rows). Returns one row per commodity
-        contract with commPositionsLongAll / commPositionsShortAll (commercial
-        hedger positions) and noncomm* (speculator positions).
-        No symbol filter — returns the full universe; caller filters by name/symbol.
-        Cached 12h (COT is weekly, published Fridays).
-        """
-        if not self._api_key:
-            return []
-        cached = self._cache_read("key_metrics", "_cot_full")
-        if cached is not None:
-            return cached
-        data = self._get("commitment-of-traders-report",
-                         {}, bucket="key_metrics") or []
-        result = data if isinstance(data, list) else []
-        self._cache_write("key_metrics", "_cot_full", result)
-        return result
 
     def get_cash_flow_statements(self, ticker: str, limit: int = 4) -> List[Dict]:
         """Quarterly cash flow statements (stable/cash-flow-statement). PASS in smoke-test.
@@ -1243,10 +1228,20 @@ class FMPClient:
         """
         if not self._api_key:
             return []
+        # Key by limit — satellite_factors / v3_shadow share limit=4, but the
+        # key stays explicit so a future caller with a different limit cannot
+        # collide on a truncated row set.
+        cache_key = f"{ticker}:cf:q{limit}"
+        cached = self._cache_read("key_metrics", cache_key)
+        if cached is not None:
+            return cached
         data = self._get("cash-flow-statement",
                          {"symbol": ticker, "period": "quarter", "limit": limit},
                          bucket="key_metrics") or []
-        return data if isinstance(data, list) else []
+        result = data if isinstance(data, list) else []
+        if result:  # never cache an empty/transient miss for the 24h TTL
+            self._cache_write("key_metrics", cache_key, result)
+        return result
 
     def get_income_statements(
         self, ticker: str, period: str = "quarter", limit: int = 8
@@ -1261,10 +1256,20 @@ class FMPClient:
         """
         if not self._api_key:
             return []
+        # Key by period AND limit: margin_expansion fetches both (quarter, 8)
+        # and (annual, 2) for the SAME ticker in one run — a ticker-only key
+        # would alias the two and corrupt the discrete-quarter validation.
+        cache_key = f"{ticker}:is:{period}:{limit}"
+        cached = self._cache_read("key_metrics", cache_key)
+        if cached is not None:
+            return cached
         data = self._get("income-statement",
                          {"symbol": ticker, "period": period, "limit": limit},
                          bucket="key_metrics") or []
-        return data if isinstance(data, list) else []
+        result = data if isinstance(data, list) else []
+        if result:  # never cache an empty/transient miss for the 24h TTL
+            self._cache_write("key_metrics", cache_key, result)
+        return result
 
     def get_analyst_estimates(
         self, ticker: str, period: str = "quarter", limit: int = 6
