@@ -16,6 +16,8 @@ from src.ingestion.universe_screener import (
     cross_sectional_rank,
     merge_universe,
     select_satellite,
+    _screen_smid_candidates,
+    _resolve_smid_satellite,
 )
 
 
@@ -68,3 +70,50 @@ class TestMergeUniverse:
         assert by_ticker["CORE1"]["origin"] == "core"
         assert by_ticker["CORE1"]["sector"] == "Tech"   # core row wins
         assert by_ticker["A"]["origin"] == "satellite"
+
+
+class _FakeScreenerClient:
+    """Minimal stand-in for FMPClient.get_company_screener."""
+
+    def __init__(self, rows_by_exchange):
+        self._api_key = "test-key"
+        self._rows = rows_by_exchange
+
+    def get_company_screener(self, exchange, market_cap_more_than=None,
+                             volume_more_than=None, limit=100):
+        return self._rows.get(exchange, [])
+
+
+class TestSmidSatellite:
+    def _client(self):
+        return _FakeScreenerClient({
+            "NASDAQ": [
+                {"symbol": "SMALL1", "sector": "Tech", "marketCap": 500_000_000},
+                {"symbol": "MID1",   "sector": "Energy", "marketCap": 5_000_000_000},
+                {"symbol": "TOOBIG", "sector": "Tech", "marketCap": 15_000_000_000},
+            ],
+            "NYSE": [
+                {"symbol": "SMALL2", "sector": "Health", "marketCap": 900_000_000},
+                {"symbol": "TOOSMALL", "sector": "Misc", "marketCap": 100_000_000},
+            ],
+        })
+
+    def test_band_filter_and_cap_tier_tagging(self):
+        cands = _screen_smid_candidates(self._client(), "US")
+        assert set(cands) == {"SMALL1", "MID1", "SMALL2"}   # $10B+ and <$300M dropped
+        assert cands["SMALL1"]["cap_tier"] == "small"
+        assert cands["MID1"]["cap_tier"] == "mid"
+
+    def test_satellite_rows_tagged_and_dedup(self):
+        rows = _resolve_smid_satellite(
+            self._client(), "US", existing={"MID1"}, log_dir=None)
+        tickers = {r["ticker"] for r in rows}
+        assert "MID1" not in tickers                 # already in the book
+        assert {"SMALL1", "SMALL2"} <= tickers       # small caps surfaced
+        assert all(r["origin"] == "smid_satellite" for r in rows)
+
+    def test_smalls_are_represented(self):
+        # Balanced selection must not let the mid end crowd out true small caps.
+        rows = _resolve_smid_satellite(
+            self._client(), "US", existing=set(), log_dir=None)
+        assert any(r["cap_tier"] == "small" for r in rows)

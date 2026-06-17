@@ -9,6 +9,9 @@ from src.risk.regime import (
     strategy_label,
     apply_capitulation_filter,
     vix_multiplier,
+    MarketRegime,
+    classify_market_regime,
+    market_regime_label,
 )
 
 
@@ -142,3 +145,63 @@ class TestCapitulationFilter:
         ]
         result = apply_capitulation_filter(entries, vix=35.0)
         assert any(e["ticker"] == "D" for e in result)
+
+
+class TestMarketRegime:
+    """Directional Bull/Euphoria/Bear nowcast — DISPLAY-ONLY, never re-scales alpha."""
+
+    def test_capitulation_overrides_momentum(self):
+        # Elevated VIX dominates even a strong tape.
+        assert classify_market_regime(31.0, 0.20, 0.25) == MarketRegime.CAPITULATION
+
+    def test_euphoria_needs_low_vix_and_both_indices(self):
+        assert classify_market_regime(12.0, 0.10, 0.12) == MarketRegime.EUPHORIA
+
+    def test_no_euphoria_when_qqq_lags(self):
+        # SPY frothy but QQQ not → not euphoria; low VIX + strong SPY → BULL.
+        assert classify_market_regime(12.0, 0.10, 0.01) == MarketRegime.BULL
+
+    def test_no_euphoria_when_vix_above_ceiling(self):
+        assert classify_market_regime(16.0, 0.10, 0.12) == MarketRegime.BULL
+
+    def test_bull_on_positive_spy(self):
+        assert classify_market_regime(15.0, 0.03) == MarketRegime.BULL
+
+    def test_bull_boundary_inclusive(self):
+        assert classify_market_regime(15.0, 0.02) == MarketRegime.BULL
+
+    def test_neutral_when_flat(self):
+        assert classify_market_regime(15.0, 0.01) == MarketRegime.NEUTRAL
+
+    def test_bear_on_negative_momentum(self):
+        assert classify_market_regime(15.0, -0.06) == MarketRegime.BEAR
+
+    def test_bear_boundary_inclusive(self):
+        assert classify_market_regime(15.0, -0.05) == MarketRegime.BEAR
+
+    def test_bear_on_elevated_vix(self):
+        # VIX in the BEAR band overrides a mildly positive tape.
+        assert classify_market_regime(22.0, 0.03) == MarketRegime.BEAR
+
+    def test_neutral_when_spy_momentum_missing(self):
+        # Low VIX + no trend data → no direction fabricated.
+        assert classify_market_regime(15.0, None) == MarketRegime.NEUTRAL
+
+    def test_capitulation_from_vix_alone_without_momentum(self):
+        # A vol fact: VIX ≥ 30 is CAPITULATION even with no momentum data.
+        assert classify_market_regime(34.0, None) == MarketRegime.CAPITULATION
+
+    def test_bear_from_vix_alone_without_momentum(self):
+        assert classify_market_regime(24.0, None) == MarketRegime.BEAR
+
+    def test_neutral_when_vix_missing(self):
+        assert classify_market_regime(float("nan"), 0.10) == MarketRegime.NEUTRAL
+
+    def test_qqq_optional_falls_back_to_spy(self):
+        # Without QQQ, a low-VIX strong-SPY tape still reads EUPHORIA via SPY fallback.
+        assert classify_market_regime(12.0, 0.10) == MarketRegime.EUPHORIA
+
+    def test_label_returns_emoji_and_blurb(self):
+        for mr in MarketRegime:
+            emoji, blurb = market_regime_label(mr)
+            assert emoji and isinstance(blurb, str) and blurb

@@ -1137,6 +1137,9 @@ def generate(
         "kill_switch":     kill_switch,
         "vix_multiplier":  round(_apply_vix_overlay(1.0, current_vix), 2) if current_vix else 1.0,
         "spy_momentum_regime":   spy_momentum_regime,
+        # Carried through for the Discord market-regime nowcast + telemetry line.
+        "spy_return_63d":        status.get("spy_return_63d"),
+        "bulk_coverage":         status.get("bulk_coverage"),
         "momentum_multiplier":   round(momentum_multiplier, 4),
         "top_buys":        top_buys,
         "top_buys_usa":    top_buys_usa,

@@ -1281,8 +1281,10 @@ def run(
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     # Hybrid dynamic universe (core CSV + screened satellite) when UNIVERSE_DYNAMIC
-    # is set; otherwise byte-identical legacy behavior (plain CSV load).
-    if os.getenv("UNIVERSE_DYNAMIC", "").lower() in ("1", "true", "yes"):
+    # OR UNIVERSE_SMID_SATELLITE is set; otherwise byte-identical legacy behavior
+    # (plain CSV load). resolve_universe internally honors each flag.
+    _flag = lambda name: os.getenv(name, "").lower() in ("1", "true", "yes")  # noqa: E731
+    if _flag("UNIVERSE_DYNAMIC") or _flag("UNIVERSE_SMID_SATELLITE"):
         from src.ingestion.universe_screener import resolve_universe  # noqa: PLC0415
         ticker_rows = resolve_universe(tickers_file, region, log_dir=log_dir)
     else:
@@ -1294,6 +1296,10 @@ def run(
     tickers     = [r["ticker"] for r in ticker_rows]
     cap_tier    = {r["ticker"]: r.get("cap_tier", "large") for r in ticker_rows}
     sector      = {r["ticker"]: r.get("sector", "Unknown") for r in ticker_rows}
+    # origin = core | satellite | smid_satellite — the small/mid sleeve is exempt
+    # from the soft _low_coverage top_by_market gate (it is ranked downstream by
+    # the coverage-robust leverage composite, not the full factor stack).
+    origin_by_ticker = {r["ticker"]: r.get("origin", "core") for r in ticker_rows}
 
     t0 = time.time()
     log.info("Pipeline start: %d tickers from %s", len(tickers), tickers_file)
@@ -2067,7 +2073,9 @@ def run(
     def _top_n(mkt: str, n: int = 20) -> list[dict]:
         eligible = [
             r for r in results
-            if r.get("market", "USA") == mkt and not r.get("_low_coverage", False)
+            if r.get("market", "USA") == mkt
+            and (not r.get("_low_coverage", False)
+                 or origin_by_ticker.get(r.get("ticker")) == "smid_satellite")
         ]
         return sorted(eligible, key=lambda r: r.get("final_score", 0.0), reverse=True)[:n]
 
@@ -2087,6 +2095,9 @@ def run(
         "run_id":              os.getenv("GITHUB_RUN_ID", "local"),
         "spy_momentum_regime": _spy_momentum_regime,  # PATCH 10: NORMAL/BEAR_MOMENTUM/etc.
         "spy_return_63d":      round(_spy_return_63d, 6) if _spy_return_63d is not None else None,
+        # FMP bulk-snapshot freshness telemetry (surfaced in the Discord brief;
+        # WARN-only upstream — see _bulk_coverage < 0.75 check above).
+        "bulk_coverage":       round(_bulk_coverage, 4),
         "_edgar_meta": {
             "last_run":             pipeline_run_ts,
             "run_duration_seconds": duration,

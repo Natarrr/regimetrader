@@ -62,8 +62,12 @@ from src.risk.regime import (  # noqa: E402
     RiskRegime,
     get_regime,
     score_multiplier,
+    vix_multiplier,
     strategy_label,
+    classify_market_regime,
+    market_regime_label,
 )
+from src.config.weights import WEIGHTS_US, WEIGHTS_GLOBAL  # noqa: E402
 
 log = logging.getLogger("discord.send_toplists")
 
@@ -152,6 +156,27 @@ _OD_FACTOR_LABELS: Dict[str, str] = {
     "amihud_shock":       "Amihud Liquid",
     "pb_value_up":        "P/B Value",
     "roic_quality":       "ROIC Quality",
+}
+
+# ── Cognitive factor block (emoji heat in markdown — NEVER inside a fence) ─────
+# Heat is keyed on the factor SCORE; ⬜ is reserved for data gaps (signed-None /
+# thin coverage) so absence never reads as a weak/bearish 🟥 (CLAUDE.md §2).
+_HEAT_STRONG = 0.66
+_HEAT_MID = 0.40
+_FACTOR_SHORT_LABEL: Dict[str, str] = {
+    "insider_conviction": "Insider", "insider_breadth": "InsBrd",
+    "congress": "Congress", "news_sentiment": "News", "news_buzz": "Buzz",
+    "momentum_long": "Mom", "volume_attention": "Vol", "analyst_consensus": "Analyst",
+    "analyst_revision": "EPSrev", "revenue_revision": "RevRev",
+    "price_target_upside": "PTUp", "transcript_tone": "Tone",
+    "quality_piotroski": "Quality", "fcf_yield": "FCF", "amihud_shock": "Amihud",
+    "pb_value_up": "P/B", "roic_quality": "ROIC",
+}
+# Display-only signal-decay half-lives (days) keyed by dominant catalyst. Mirrors
+# the scoring constants (PEAD t½ [Bernard & Thomas, 1989]; insider/congress
+# recency decay) — surfaced so a trader sees the signal's expected shelf-life.
+_DECAY_HALF_LIFE: Dict[str, int] = {
+    "PEAD": 20, "insider": 90, "congress": 90, "momentum": 252,
 }
 
 _REGION_KEYS: List[Tuple[str, str, str]] = [
@@ -382,8 +407,12 @@ def _smid_row(entry: Dict[str, Any]) -> str:
     return f"{ticker} {lev} {mom_s} {_smid_flags(entry).ljust(_SMID_FLAG_W)}"
 
 
-def _spy_qqq_snapshot() -> str:
-    """Return a one-line market snapshot for SPY + QQQ, or '' on failure."""
+def _market_pulse() -> Dict[str, Any]:
+    """Live SPY + QQQ snapshot incl. numeric 63-day returns (fractions), or {}.
+
+    The 63d return feeds the market-regime nowcast (_regime_banner); 1d/12m feed
+    the cosmetic price line. Network/data failure degrades to {} (logged, never
+    raised) — the brief renders without the snapshot."""
     try:
         from backend.data.market_service import MarketData  # noqa: PLC0415
 
@@ -393,34 +422,218 @@ def _spy_qqq_snapshot() -> str:
             closes = bars["Close"].dropna()
             if len(closes) < 2:
                 return {}
-            price = float(closes.iloc[-1])
-            pct_1d = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
-            pct_12m = (round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1)
-                       if len(closes) >= 252 else None)
-            return {"price": price, "pct_1d": pct_1d, "pct_12m": pct_12m}
-
-        def _fmt(v):
-            if v is None:
-                return "—"
-            return f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
+            return {
+                "price": float(closes.iloc[-1]),
+                "pct_1d": round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2),
+                "pct_12m": (round((closes.iloc[-1] / closes.iloc[-252] - 1) * 100, 1)
+                            if len(closes) >= 252 else None),
+                "ret_63d": (float(closes.iloc[-1] / closes.iloc[-64] - 1)
+                            if len(closes) >= 64 else None),
+            }
 
         spy = _snap(MarketData.get_historical_bars("SPY", years_back=2))
         if not spy:
-            return ""
+            return {}
         qqq: dict = {}
         try:
             qqq = _snap(MarketData.get_historical_bars("QQQ", years_back=2))
-        except Exception:
+        except Exception:  # QQQ is a confirmation leg — SPY alone is sufficient
             pass
-
-        spy_str = (f"SPY `${spy['price']:.0f}` {_fmt(spy.get('pct_1d'))} 1d · "
-                   f"{_fmt(spy.get('pct_12m'))} 12m")
-        qqq_str = (f"  ·  QQQ `${qqq['price']:.0f}` {_fmt(qqq.get('pct_1d'))} 1d · "
-                   f"{_fmt(qqq.get('pct_12m'))} 12m" if qqq else "")
-        return f"📈 {spy_str}{qqq_str}"
+        return {
+            "spy_price": spy.get("price"), "spy_1d": spy.get("pct_1d"),
+            "spy_12m": spy.get("pct_12m"), "spy_63d": spy.get("ret_63d"),
+            "qqq_price": qqq.get("price"), "qqq_1d": qqq.get("pct_1d"),
+            "qqq_12m": qqq.get("pct_12m"), "qqq_63d": qqq.get("ret_63d"),
+        }
     except Exception as exc:
-        log.debug("_spy_qqq_snapshot failed: %s", exc)
+        log.debug("_market_pulse failed: %s", exc)
+        return {}
+
+
+def _spy_qqq_snapshot(pulse: Optional[Dict[str, Any]] = None) -> str:
+    """One-line SPY + QQQ price snapshot, or '' when unavailable."""
+    p = pulse if pulse is not None else _market_pulse()
+    if not p.get("spy_price"):
         return ""
+
+    def _fmt(v):
+        return "—" if v is None else f"{'▲' if v >= 0 else '▼'}{abs(v):.1f}%"
+
+    spy_str = (f"SPY `${p['spy_price']:.0f}` {_fmt(p.get('spy_1d'))} 1d · "
+               f"{_fmt(p.get('spy_12m'))} 12m")
+    qqq_str = (f"  ·  QQQ `${p['qqq_price']:.0f}` {_fmt(p.get('qqq_1d'))} 1d · "
+               f"{_fmt(p.get('qqq_12m'))} 12m" if p.get("qqq_price") else "")
+    return f"📈 {spy_str}{qqq_str}"
+
+
+def _regime_banner(data: Dict[str, Any], pulse: Optional[Dict[str, Any]] = None) -> str:
+    """Zone-1 market-regime nowcast (Bull/Euphoria/Bear) from VIX + SPY/QQQ 63d.
+
+    DISPLAY-ONLY (classify_market_regime never re-scales alpha). Prefers the
+    plumbed `spy_return_63d`; the live QQQ leg confirms the froth signature."""
+    p = pulse if pulse is not None else _market_pulse()
+    vix_raw = data.get("vix")
+    vix = _safe_float(vix_raw, default=float("nan"))
+    spy63 = data.get("spy_return_63d")
+    if spy63 is None:
+        spy63 = p.get("spy_63d")
+    qqq63 = p.get("qqq_63d")
+    regime = classify_market_regime(
+        vix if vix_raw is not None else float("nan"), spy63, qqq63)
+    emoji, blurb = market_regime_label(regime)
+
+    def _pct(x):
+        return f"{x * 100:+.1f}%" if isinstance(x, (int, float)) else "—"
+
+    vix_str = f"`{vix:.1f}`" if not math.isnan(vix) else "`—`"
+    line1 = f"🧭 **MARKET REGIME — {regime.value}** {emoji} · {blurb}"
+    line2 = f"SPY {_pct(spy63)} / QQQ {_pct(qqq63)} (63d) · VIX {vix_str}"
+    return f"{line1}\n{line2}"
+
+
+def _telemetry_line(data: Dict[str, Any]) -> str:
+    """FMP bulk-coverage telemetry. '' when the field is absent (pre-plumb
+    artifacts); ⚠ banner when coverage < 75% (snapshot likely stale)."""
+    cov = data.get("bulk_coverage")
+    if cov is None:
+        return ""
+    frac = _safe_float(cov)
+    pct = frac * 100
+    if frac < 0.75:
+        return (f"🛰 **TELEMETRY ⚠ bulk-cov {pct:.0f}%** — snapshot may be stale; "
+                "scores degraded")
+    return f"🛰 Telemetry: bulk-cov {pct:.0f}% ✓"
+
+
+def _factor_heat(score: float, *, unavailable: bool) -> str:
+    """Monochrome heat dot. ⬜ = data gap (never bearish); 🟩/🟨/🟥 by strength."""
+    if unavailable:
+        return "⬜"
+    if score >= _HEAT_STRONG:
+        return "🟩"
+    if score >= _HEAT_MID:
+        return "🟨"
+    return "🟥"
+
+
+def _resolve_factor_weights(data: Dict[str, Any], entry: Dict[str, Any]) -> Dict[str, float]:
+    """Weights for attribution: the payload's own (renormalized) US weights when
+    present — so the display matches the engine actually used — else the static
+    WEIGHTS_US / WEIGHTS_GLOBAL by market."""
+    market = (entry.get("market") or "USA").upper()
+    if market in ("EUROPE", "ASIA", "EU"):
+        return WEIGHTS_GLOBAL
+    w = data.get("weights")
+    return w if isinstance(w, dict) and w else WEIGHTS_US
+
+
+def _missing_factor_set(entry: Dict[str, Any]) -> set:
+    """Factor names with absent sources (handles 'factor:reason' encoding)."""
+    raw = (entry.get("validation_metadata") or {}).get("missing_sources") or []
+    return {str(m).split(":", 1)[0] for m in raw}
+
+
+def _factor_contributions(
+    entry: Dict[str, Any], weights: Dict[str, float], missing: set,
+) -> List[Tuple[str, float, float, bool]]:
+    """[(factor_key, score, weight*score, unavailable)] over weighted factors.
+
+    weight*score is the pre-overlay attribution (Σ ≈ raw_score). A factor is
+    `unavailable` (data gap) when its source is missing or its value is None —
+    distinct from a genuine 0.0 dead signal."""
+    factors = entry.get("factors") or {}
+    out: List[Tuple[str, float, float, bool]] = []
+    for key, w in weights.items():
+        if not w or w <= 0:
+            continue
+        raw = factors.get(key)
+        unavailable = key in missing or raw is None
+        score = _safe_float(raw) if raw is not None else 0.0
+        out.append((key, score, w * score, unavailable))
+    return out
+
+
+def _driver_strip(
+    entry: Dict[str, Any], weights: Dict[str, float], missing: set, top_n: int = 4,
+) -> str:
+    """Emoji-heat attribution line: top-N drivers by contribution, plus up to two
+    signed-None data gaps surfaced explicitly (⬜ … n/a)."""
+    contribs = _factor_contributions(entry, weights, missing)
+    if not contribs:
+        return ""
+    available = sorted((c for c in contribs if not c[3]), key=lambda c: -c[2])
+    gaps = sorted((c for c in contribs if c[3]),
+                  key=lambda c: -weights.get(c[0], 0.0))
+    bits: List[str] = []
+    for key, score, _contrib, _ in available[:top_n]:
+        label = _FACTOR_SHORT_LABEL.get(key, key[:8])
+        bits.append(f"{_factor_heat(score, unavailable=False)} {label} {score:.2f}")
+    for key, _score, _contrib, _ in gaps[:2]:
+        label = _FACTOR_SHORT_LABEL.get(key, key[:8])
+        bits.append(f"⬜ {label} n/a")
+    return " · ".join(bits)
+
+
+def _overlay_tag(entry: Dict[str, Any], overlay_mult: float) -> str:
+    """`raw 0.91→×0.80` — pre-overlay alpha and the VIX dampening (US only;
+    INTL carries no raw_score → '')."""
+    raw = entry.get("raw_score")
+    if raw is None:
+        return ""
+    r = _safe_float(raw)
+    if r <= 0:
+        return ""
+    return f"raw {r:.2f}→×{overlay_mult:.2f}"
+
+
+def _decay_note(entry: Dict[str, Any]) -> str:
+    """Dominant-catalyst signal half-life (display-only)."""
+    eps_pct = entry.get("earnings_surprise_pct")
+    eps_days = int(entry.get("earnings_surprise_days") or 0)
+    if eps_pct is not None and _safe_float(eps_pct) > 0 and 0 < eps_days <= 90:
+        return f"⏳ PEAD t½≈{_DECAY_HALF_LIFE['PEAD']}d"
+    if _safe_float(entry.get("insider_usd")) > 0:
+        return f"⏳ insider t½≈{_DECAY_HALF_LIFE['insider']}d"
+    if int((entry.get("quiver_evidence") or {}).get("congress", {}).get("purchases", 0) or 0) > 0:
+        return f"⏳ congress t½≈{_DECAY_HALF_LIFE['congress']}d"
+    return ""
+
+
+def _lifecycle_line(entry: Dict[str, Any]) -> str:
+    """Zone-3 execution + life-cycle: target upside, relative volume, crowding,
+    signal decay. Each token is omitted when its source field is absent."""
+    bits: List[str] = []
+    tgt = _safe_float(entry.get("target_price"))
+    cur = _safe_float(entry.get("current_price"))
+    if tgt > 0 and cur > 0:
+        bits.append(f"🎯 tgt ${tgt:.0f} ({(tgt / cur - 1) * 100:+.1f}%)")
+    relvol = _safe_float(entry.get("volume_spike"))
+    if relvol > 0:
+        bits.append(f"relVol {relvol:.1f}×")
+    else:
+        va = _safe_float((entry.get("factors") or {}).get("volume_attention"))
+        if va > 0:
+            bits.append(f"vol-attn {va:.2f}")
+    if entry.get("_correlated_signal_flag"):
+        bits.append("⚠ crowded (double-signal)")
+    decay = _decay_note(entry)
+    if decay:
+        bits.append(decay)
+    return " · ".join(bits)
+
+
+def _best_per_sector(entries: List[Dict]) -> Dict[str, Tuple[str, float]]:
+    """{sector_label: (ticker, final_score)} — the single highest-scoring name
+    per sector across the given entries."""
+    best: Dict[str, Tuple[str, float]] = {}
+    for e in entries:
+        raw = (e.get("sector") or (e.get("factors") or {}).get("sector") or "").strip()
+        label = _SECTOR_SHORT.get(raw, _SECTOR_MISC)
+        score = _safe_float(e.get("final_score"))
+        cur = best.get(label)
+        if cur is None or score > cur[1]:
+            best[label] = (e.get("ticker", "?"), score)
+    return best
 
 
 def _sector_heatmap_structured(entries: List[Dict]) -> Dict[str, List[tuple]]:
@@ -555,6 +768,15 @@ class DiscordPayloadBuilder:
         return score_multiplier(self.regime)
 
     @property
+    def overlay_multiplier(self) -> float:
+        """VIX macro-overlay actually applied to scores upstream (raw→final).
+        4-tier (incl. Crash), unlike the 3-tier display `multiplier`."""
+        try:
+            return vix_multiplier(float(self.data["vix"]))
+        except (KeyError, TypeError, ValueError):
+            return 1.0
+
+    @property
     def is_panic(self) -> bool:
         return self.regime == RiskRegime.CAPITULATION
 
@@ -608,16 +830,28 @@ class DiscordPayloadBuilder:
     def _macro_description(self) -> str:
         regime = self.regime
         vix = float(self.data["vix"])
+        overlay = self.overlay_multiplier
+        pulse = _market_pulse()  # one fetch shared by banner + price snapshot
+        scaled = (1.0 - overlay) * 100
+        scaled_str = ("0%" if scaled <= 0.05
+                      else f"−{scaled:.0f}% (overlay ×{overlay:.2f})")
+        # Market-regime nowcast leads the readable brief — placed immediately
+        # AFTER the ANSI action bar so the description still opens with the
+        # ```ansi block (ESC-confinement / mobile-safety contract preserved).
         lines = [
+            _regime_banner(self.data, pulse),
             "### 📊 1 · MACRO RISK & REGIME",
             (f"• VIX `{vix:.1f}` — **{regime.value}** · "
              f"{strategy_label(regime)}"),
-            (f"• Risk multiplier `×{self.multiplier:.2f}` · "
-             "Action gates: TACTICAL ≥0.60 · HIGH BUY ≥0.80"),
+            (f"• Book alpha scaled {scaled_str} · "
+             "Gates: TACTICAL ≥0.60 · HIGH BUY ≥0.80"),
         ]
-        snapshot = _spy_qqq_snapshot()
+        snapshot = _spy_qqq_snapshot(pulse)
         if snapshot:
             lines.append(snapshot)
+        telemetry = _telemetry_line(self.data)
+        if telemetry:
+            lines.append(telemetry)
         if self._is_stale:
             lines.append(
                 f"⚠️ **DATA STALE — {self._age_hours:.0f}h old** · "
@@ -646,7 +880,9 @@ class DiscordPayloadBuilder:
         return f" {arrow}{diff:+.3f}"
 
     def _desk_lines(self, entry: Dict[str, Any], rank: int,
-                    population: List[float]) -> List[str]:
+                    population: List[float], *,
+                    show_drivers: bool = True,
+                    show_lifecycle: bool = True) -> List[str]:
         ticker = entry.get("ticker", "?")
         score = _safe_float(entry.get("final_score"))
         badge = entry.get("badge") or _badge_from_score(score)
@@ -662,20 +898,39 @@ class DiscordPayloadBuilder:
             if cov < 0.70:
                 cov_warn = f" ⚠COV:{cov:.0%}"
 
+        overlay_tag = _overlay_tag(entry, self.overlay_multiplier)
+        overlay_str = f" · {overlay_tag}" if overlay_tag else ""
         head = (f"{medal} **{ticker}**{name} — {badge} · `{score:.4f}` · "
-                f"p{pct}{self._delta_tag(ticker, score)}")
-        detail = f"└ {_compute_catalyst(entry)}{cov_warn}"
-        return [head, detail]
+                f"p{pct}{self._delta_tag(ticker, score)}{overlay_str}")
+        lines = [head]
+        # Zone 2 — cognitive factor attribution (emoji heat, markdown only).
+        if show_drivers:
+            strip = _driver_strip(
+                entry, _resolve_factor_weights(self.data, entry),
+                _missing_factor_set(entry))
+            if strip:
+                lines.append(f"└ {strip}")
+        lines.append(f"└ {_compute_catalyst(entry)}{cov_warn}")
+        # Zone 3 — execution + life-cycle, top pick only (budget-bounded).
+        if show_lifecycle and rank == 1:
+            life = _lifecycle_line(entry)
+            if life:
+                lines.append(f"└ {life}")
+        return lines
 
     def _desk_field(self, key: str, flag: str, label: str,
                     population: List[float],
-                    max_entries: int) -> Optional[Dict[str, Any]]:
+                    max_entries: int, *,
+                    show_drivers: bool = True,
+                    show_lifecycle: bool = True) -> Optional[Dict[str, Any]]:
         entries = self._region_entries(key)
         if not entries:
             return None
         lines: List[str] = []
         for rank, entry in enumerate(entries[:max_entries], 1):
-            lines.extend(self._desk_lines(entry, rank, population))
+            lines.extend(self._desk_lines(
+                entry, rank, population,
+                show_drivers=show_drivers, show_lifecycle=show_lifecycle))
         return {
             "name":   f"{flag} 2 · ALPHA DESK — {label}",
             "value":  _truncate("\n".join(lines)),
@@ -806,6 +1061,37 @@ class DiscordPayloadBuilder:
             "inline": False,
         }
 
+    # Region → pools to scan for sector coverage (top buys + sector-cap overflow
+    # + the EU/Asia mid/small sleeves) so every sector with exposure is covered.
+    _SECTOR_REGION_POOLS: List[Tuple[str, List[str]]] = [
+        ("🇺🇸", ["top_buys_usa", "usa_overflow"]),
+        ("🇪🇺", ["top_buys_europe", "eu_overflow", "eu_mid_small"]),
+        ("🌏", ["top_buys_asia", "asia_overflow", "asia_mid_small"]),
+    ]
+
+    def _sector_exposure_field(self) -> Optional[Dict[str, Any]]:
+        """One ticker per sector of exposure, within each region (US/EU/Asia).
+
+        Compact emoji-tagged tokens (markdown, not fenced); a region line is
+        omitted when its pools are empty (e.g. EU/Asia under thin sessions)."""
+        lines: List[str] = []
+        for flag, keys in self._SECTOR_REGION_POOLS:
+            entries = [e for k in keys for e in self._region_entries(k)]
+            best = _best_per_sector(entries)
+            if not best:
+                continue
+            toks = [f"{lbl.split()[0]}{tic} {sc:.2f}"
+                    for lbl, (tic, sc) in sorted(best.items(),
+                                                 key=lambda kv: -kv[1][1])]
+            lines.append(f"{flag} " + " · ".join(toks))
+        if not lines:
+            return None
+        return {
+            "name":   "🗺 5 · SECTOR EXPOSURE — best per sector / region",
+            "value":  _truncate("\n".join(lines)),
+            "inline": False,
+        }
+
     def _anchors_field(self, population: List[float]) -> Dict[str, Any]:
         watchlist = self._region_entries("watchlist")
         if not watchlist:
@@ -831,6 +1117,8 @@ class DiscordPayloadBuilder:
         return {
             "name": "📖 LEGEND",
             "value": (
+                "🟩 strong ≥.66 · 🟨 mid · 🟥 weak <.40 · ⬜ data gap (not bearish) · "
+                "`raw→×` pre-overlay alpha × VIX dampening\n"
                 "*IC Insider Conviction · IB Insider Breadth · "
                 "CG Congress (US-only) · NS News Sentiment · NB News Buzz · "
                 "MO Momentum 12-1m · VA Volume Attention · "
@@ -866,7 +1154,9 @@ class DiscordPayloadBuilder:
                       for f in embed.get("fields", []))
                 + len((embed.get("footer") or {}).get("text", "")))
 
-    def _render(self, matrix_rows: int, desk_n: int) -> Dict[str, Any]:
+    def _render(self, matrix_rows: int, desk_n: int, *,
+                show_drivers: bool = True,
+                show_lifecycle: bool = True) -> Dict[str, Any]:
         population = self._population()
         color = _COLOR_RED if (self.is_panic or self._is_stale) \
             else _REGIME_STYLE[self.regime][3]
@@ -880,15 +1170,21 @@ class DiscordPayloadBuilder:
                     fields.append(matrix)
         else:
             for key, flag, label in _REGION_KEYS:
-                field = self._desk_field(key, flag, label, population, desk_n)
+                field = self._desk_field(
+                    key, flag, label, population, desk_n,
+                    show_drivers=show_drivers, show_lifecycle=show_lifecycle)
                 if field:
                     fields.append(field)
             # SMID leverage desk — never rendered under CAPITULATION (this is
             # the non-panic branch; cook also empties the pool — defense in
-            # depth). min(·, desk_n) keeps the build() ladder monotone.
-            smid = self._smid_field(min(self.MAX_SMID_ENTRIES, desk_n))
+            # depth). Always the full sleeve depth (protected, not tied to the
+            # desk-degradation ladder) so the small/mid picks are guaranteed.
+            smid = self._smid_field(self.MAX_SMID_ENTRIES)
             if smid:
                 fields.append(smid)
+            sector = self._sector_exposure_field()
+            if sector:
+                fields.append(sector)
             if matrix_rows:
                 matrix = self._matrix_field(matrix_rows)
                 if matrix:
@@ -914,20 +1210,27 @@ class DiscordPayloadBuilder:
         }
 
     def build(self) -> Dict[str, Any]:
-        """Render the embed, degrading structurally until the 6000-char
-        message budget holds (matrix rows first, then desk depth — the macro
-        section and legend are never trimmed)."""
+        """Render the embed, degrading structurally until the 6000-char budget
+        holds. Degradation order protects the guaranteed composition: the
+        per-pick lifecycle line drops first, then the factor matrix, then the
+        driver strips — desk depth (3/region), the SMID sleeve, the sector
+        exposure block, the regime banner and the legend are never trimmed."""
+        # (matrix_rows, desk_n, show_drivers, show_lifecycle)
         attempts = [
-            (self.MAX_MATRIX_ROWS, self.MAX_DESK_ENTRIES),
-            (2, self.MAX_DESK_ENTRIES),
-            (1, self.MAX_DESK_ENTRIES),
-            (0, self.MAX_DESK_ENTRIES),
-            (0, 2),
-            (0, 1),
+            (self.MAX_MATRIX_ROWS, self.MAX_DESK_ENTRIES, True,  True),
+            (self.MAX_MATRIX_ROWS, self.MAX_DESK_ENTRIES, True,  False),
+            (2,                    self.MAX_DESK_ENTRIES, True,  False),
+            (1,                    self.MAX_DESK_ENTRIES, True,  False),
+            (0,                    self.MAX_DESK_ENTRIES, True,  False),
+            (0,                    self.MAX_DESK_ENTRIES, False, False),
+            (0,                    2,                     False, False),
+            (0,                    1,                     False, False),
         ]
-        embed = self._render(*attempts[0])
-        for matrix_rows, desk_n in attempts:
-            embed = self._render(matrix_rows, desk_n)
+        embed = self._render(*attempts[0][:2], show_drivers=attempts[0][2],
+                             show_lifecycle=attempts[0][3])
+        for matrix_rows, desk_n, drivers, lifecycle in attempts:
+            embed = self._render(matrix_rows, desk_n,
+                                 show_drivers=drivers, show_lifecycle=lifecycle)
             if self._embed_size(embed) <= _LIMIT_TOTAL:
                 break
         return {"embeds": [embed]}
