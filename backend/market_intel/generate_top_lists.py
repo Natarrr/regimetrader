@@ -31,6 +31,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1037,6 +1038,38 @@ def generate(
         [e for e in valid_entries if e["cap_tier"] == "small"],
         key=score_desc, reverse=True,
     )[:5]
+
+    # ── Selection churn: rotate out names that have monopolized the top slots ──
+    # Breaks the "always the same tickers" trap: a name leading for >= max_tenure
+    # consecutive runs sits out one run so the next contender rotates in. Tenure
+    # persists in logs/universe_state.json; every move is logged with a reason to
+    # logs/universe_churn.ndjson. UNIVERSE_CHURN flag, default off → selection
+    # above is byte-identical to legacy behavior.
+    if not single_ticker and os.getenv("UNIVERSE_CHURN", "").lower() in (
+            "1", "true", "yes"):
+        from src.scoring.churn import cooled_top_n, update_tenure  # noqa: PLC0415
+        _max_tenure = int(os.getenv("UNIVERSE_CHURN_MAX_TENURE", "3"))
+        _state_path = log_dir / "universe_state.json"
+        try:
+            _prev_state = json.loads(_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            _prev_state = {}
+        _usa_pool = [e for e in valid_entries if e.get("market", "USA") == "USA"]
+        top_buys_usa, _churn_events = cooled_top_n(
+            _usa_pool, _prev_state, _max_tenure, n=5)
+        top_buys = cooled_top_n(valid_entries, _prev_state, _max_tenure, n=5)[0]
+        _cooled = [ev["ticker"] for ev in _churn_events
+                   if ev["action"] == "cooldown"]
+        _new_state = update_tenure(
+            _prev_state, [e["ticker"] for e in top_buys_usa], _cooled)
+        save_json_atomic(_state_path, _new_state)
+        if _churn_events:
+            with (log_dir / "universe_churn.ndjson").open(
+                    "a", encoding="utf-8") as _fh:
+                for _ev in _churn_events:
+                    _fh.write(json.dumps(_ev) + "\n")
+            log.info("Universe churn: %d rotation events (max_tenure=%d)",
+                     len(_churn_events), _max_tenure)
 
     kill_switch = current_vix is not None and is_panic(current_vix)
     if kill_switch:

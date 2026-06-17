@@ -746,10 +746,15 @@ jobs:
           fi
           mkdir -p logs/archive
           cp logs/top_lists.json "$DEST"
+          # Persist the per-day factor snapshot too, so the IC backtest's live
+          # path (logs/historical/) survives ephemeral CI runners and matures
+          # toward the 60-snapshot floor load_historical_snapshots() requires.
+          HIST="logs/historical/${TODAY}/intel_source_status.json"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
           git add "$DEST"
+          [ -f "$HIST" ] && git add "$HIST"
           git commit -m "chore(archive): combined snapshot $TODAY"
           git push
 
