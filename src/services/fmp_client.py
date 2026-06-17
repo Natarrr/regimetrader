@@ -85,6 +85,7 @@ _DEFAULT_MAX_RPS = 50.0
 # which returns HTTP 200 (confirmed 2026-06-09). Do not conflate the two.
 _DEAD_ENDPOINTS: frozenset[str] = frozenset({
     "upgrades-downgrades",  # HTTP 404 — renamed to grades-consensus on stable/ (confirmed 2026-06-09)
+    "revenue-estimates",    # HTTP 404 on stable/ for all tickers (confirmed 2026-06-16); revenue_revision factor degrades to no_coverage
 })
 
 # Per-bucket cache TTL (seconds).

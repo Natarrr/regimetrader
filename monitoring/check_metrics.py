@@ -403,6 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             fmp_health = json.loads(fmp_health_path.read_text(encoding="utf-8"))
             quarantined = set(fmp_health.get("quarantined_endpoints", []))
+            quarantined |= set(fmp_health.get("runtime_quarantined", []))
             if quarantined:
                 log.info("FMP quarantined endpoints (expected, no alarm): %s", sorted(quarantined))
             if fmp_health.get("has_structural_failure"):
