@@ -124,12 +124,17 @@ def _build_smid_leverage_pool(entries: list, top_n: int = _SMID_TOP_N) -> list:
     """
     w = _SMID_LEVERAGE_WEIGHTS
     scored: list = []
+    seen: set = set()   # dedup — a name may appear in several source lists
     for entry in entries:
         if entry.get("pipeline") == "INTL":
+            continue
+        ticker = entry.get("ticker")
+        if ticker in seen:
             continue
         cap = entry.get("market_cap", 0) or 0
         if not (_SMID_CAP_MIN <= cap <= _SMID_CAP_MAX):
             continue
+        seen.add(ticker)
         factors = entry.get("factors") or {}
         base = (
             w["final_score"]         * float(entry.get("final_score") or 0.0)
@@ -339,9 +344,17 @@ def cook(
     top_buys_asia,   asia_overflow   = _apply_sector_count_cap(top_buys_asia,   sector_count_cap)
 
     # ── SMID leverage sleeve — candidates AFTER capitulation gate and sector
-    # cap; overflow is included so the sleeve is NOT sector-constrained.
-    # Under CAPITULATION both inputs are empty ⇒ pool is [] by construction.
-    top_buys_smid = _build_smid_leverage_pool(top_buys_usa + usa_overflow)
+    # cap; overflow is included so the sleeve is NOT sector-constrained. The
+    # dedicated US mid_caps/small_caps lists (from generate_top_lists, fed by the
+    # small/mid satellite) are added so the sleeve is no longer starved by the
+    # large-cap-dominated top buys — _build_smid_leverage_pool dedups by ticker
+    # and band-filters to $300M–$10B. Under CAPITULATION top_buys_usa/usa_overflow
+    # are already emptied and the cap-segmented lists are withheld ⇒ pool [].
+    smid_candidates = list(top_buys_usa) + list(usa_overflow)
+    if regime != RiskRegime.CAPITULATION:
+        smid_candidates += (list(us_data.get("mid_caps") or [])
+                            + list(us_data.get("small_caps") or []))
+    top_buys_smid = _build_smid_leverage_pool(smid_candidates)
 
     # ── 3-tier capital allocation ─────────────────────────────────────────────
     mvo_pools: dict = {}
@@ -436,6 +449,10 @@ def cook(
         "vix":             vix,
         "vix_regime":      vix_regime,
         "kill_switch":     kill_switch,
+        # Market-regime nowcast inputs + FMP bulk telemetry (Discord brief).
+        "spy_momentum_regime": us_data.get("spy_momentum_regime"),
+        "spy_return_63d":      us_data.get("spy_return_63d"),
+        "bulk_coverage":       us_data.get("bulk_coverage"),
         # Scored coverage (universe semantics): US universe count + every
         # registered intl ticker that was scored — independent of the sector
         # cap and the CAPITULATION watchlist move.

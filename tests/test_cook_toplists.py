@@ -866,6 +866,42 @@ class TestSmidLeveragePool:
         assert result["top_buys_usa"][0]["ticker"] == "MSFT"
         assert [e["ticker"] for e in result["top_buys_smid"]] == ["AAOI"]
 
+    def test_cook_smid_sourced_from_mid_small_lists(self, cook_mod, registry, tmp_path):
+        """The sleeve draws from the dedicated mid_caps/small_caps lists (fed by
+        the small/mid satellite), not only the large-cap-dominated top buys —
+        this is the fix for the empty small/mid desk."""
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys_usa": [self._us("MEGA", score=0.95, cap=3e12, sector="Tech")],
+            "mid_caps":     [self._us("MIDCO", score=0.70, cap=5e9, sector="Indust")],
+            "small_caps":   [self._us("SMALLCO", score=0.66, cap=8e8, sector="Health"),
+                             self._us("TINYCO", score=0.64, cap=4e8, sector="Energy")],
+            "vix": 17.0, "vix_regime": "NORMAL", "kill_switch": False, "ticker_count": 4,
+        })
+        smid = {e["ticker"] for e in result["top_buys_smid"]}
+        assert {"MIDCO", "SMALLCO", "TINYCO"} <= smid   # ≥3 small/mid surfaced
+        assert "MEGA" not in smid                        # large cap band-excluded
+
+    def test_cook_smid_dedup_across_lists(self, cook_mod, registry, tmp_path):
+        dup = self._us("DUPE", score=0.72, cap=1.5e9, sector="Tech")
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys_usa": [dup],
+            "small_caps":   [dict(dup)],
+            "vix": 17.0, "vix_regime": "NORMAL", "kill_switch": False, "ticker_count": 1,
+        })
+        tickers = [e["ticker"] for e in result["top_buys_smid"]]
+        assert tickers.count("DUPE") == 1
+
+    def test_cook_capitulation_ignores_mid_small_lists(self, cook_mod, registry, tmp_path):
+        """Under CAPITULATION the sleeve stays empty even when mid/small lists
+        are populated — the leverage desk is intentionally dark in panic."""
+        result = self._cook(cook_mod, registry, tmp_path, {
+            "top_buys_usa": [],
+            "small_caps":   [self._us("SMALLCO", score=0.66, cap=8e8)],
+            "vix": 35.0, "vix_regime": "CAPITULATION", "kill_switch": True,
+            "ticker_count": 1,
+        })
+        assert result["top_buys_smid"] == []
+
 
 # ---------------------------------------------------------------------------
 # cook_on_demand — ChatOps single-ticker payload

@@ -256,8 +256,11 @@ class TestDeskFields:
         assert "Insider $150k" in f["value"]
 
     def test_intl_insider_omitted_at_zero(self):
+        # The catalyst must not fabricate an insider DOLLAR figure at zero USD.
+        # (The cognitive driver strip may still show the insider_conviction
+        # FACTOR score — a legitimate MAR Art.19 factor — which is distinct.)
         f = _field(_embed(_build()), "EUROPE")  # default insider_usd=0.0
-        assert "Insider" not in f["value"]
+        assert "Insider $" not in f["value"]
 
     def test_momentum_vs_spy_rendered(self):
         f = _field(_embed(_build()), "USA")
@@ -703,6 +706,7 @@ class TestSmidLeverageDesk:
             assert f["value"].count("```") % 2 == 0
         assert "LEGEND" in e["fields"][-1]["name"]
 
+
     def test_smid_positioned_after_desks_before_matrix(self):
         e = _embed(_build(top_buys_smid=[_smid_entry("AAOI")]))
         names = [f["name"] for f in e["fields"]]
@@ -710,6 +714,101 @@ class TestSmidLeverageDesk:
         i_smid = next(i for i, n in enumerate(names) if self._TITLE in n)
         i_matrix = next(i for i, n in enumerate(names) if "FACTOR MATRIX" in n)
         assert i_asia < i_smid < i_matrix
+
+
+# ── 12. Cognitive factor block · regime nowcast · telemetry · sector exposure ──
+
+from src.delivery.send_discord import (  # noqa: E402
+    _factor_heat, _driver_strip, _overlay_tag, _telemetry_line,
+)
+
+
+class TestFactorHeatAndAttribution:
+    def test_heat_thresholds(self):
+        assert _factor_heat(0.80, unavailable=False) == "🟩"
+        assert _factor_heat(0.50, unavailable=False) == "🟨"
+        assert _factor_heat(0.20, unavailable=False) == "🟥"
+
+    def test_data_gap_is_white_not_red(self):
+        # Signed-None / thin coverage must never read as a weak 🟥 (CLAUDE.md §2).
+        assert _factor_heat(0.95, unavailable=True) == "⬜"
+
+    def test_driver_strip_ranks_and_marks_gaps(self):
+        entry = {"market": "USA", "factors": {
+            "insider_conviction": 0.82, "momentum_long": 0.71,
+            "analyst_consensus": 0.20}}
+        weights = {"insider_conviction": 0.30, "momentum_long": 0.15,
+                   "analyst_consensus": 0.10, "congress": 0.05}
+        strip = _driver_strip(entry, weights, missing={"congress"})
+        assert "🟩 Insider 0.82" in strip
+        assert "🟥 Analyst 0.20" in strip
+        assert "⬜ Congress n/a" in strip   # signed-None data gap, not bearish
+
+    def test_overlay_tag_us_only(self):
+        assert _overlay_tag({"raw_score": 0.91}, 0.80) == "raw 0.91→×0.80"
+        assert _overlay_tag({}, 0.80) == ""            # INTL: no raw_score
+        assert _overlay_tag({"raw_score": 0.0}, 0.80) == ""
+
+
+class TestTelemetryLine:
+    def test_absent_field_renders_nothing(self):
+        assert _telemetry_line({}) == ""
+
+    def test_low_coverage_warns(self):
+        line = _telemetry_line({"bulk_coverage": 0.60})
+        assert "⚠" in line and "60%" in line
+
+    def test_healthy_coverage_checks(self):
+        line = _telemetry_line({"bulk_coverage": 0.95})
+        assert "✓" in line and "95%" in line
+
+
+class TestRegimeBannerAndZones:
+    def test_regime_banner_present(self):
+        assert "MARKET REGIME" in _embed(_build())["description"]
+
+    def test_bear_vix_drives_market_regime_banner(self):
+        # VIX in the BEAR band → BEAR nowcast even without 63d momentum (tests
+        # carry none). Distinct from the risk-regime line.
+        assert "MARKET REGIME — BEAR" in _embed(_build(vix=24.0))["description"]
+
+    def test_capitulation_vix_banner(self):
+        e = _embed(_build(
+            vix=34.0, kill_switch=True,
+            top_buys_usa=[], top_buys_europe=[], top_buys_asia=[],
+            mvo_pools={}, watchlist=[_entry("JNJ", 0.41, badge="WATCHLIST")]))
+        assert "MARKET REGIME — CAPITULATION" in e["description"]
+
+    def test_book_alpha_scaled_zero_in_normal(self):
+        assert "Book alpha scaled 0%" in _embed(_build(vix=17.3))["description"]
+
+    def test_book_alpha_scaled_under_bear_overlay(self):
+        # VIX 24 → vix_multiplier 0.80 → overlay shown.
+        assert "overlay ×0.80" in _embed(_build(vix=24.0))["description"]
+
+    def test_telemetry_warning_in_description(self):
+        assert "TELEMETRY ⚠" in _embed(_build(bulk_coverage=0.60))["description"]
+
+    def test_telemetry_absent_is_silent(self):
+        # Pre-plumb artifacts carry no bulk_coverage — no telemetry line.
+        assert "bulk-cov" not in _embed(_build())["description"]
+
+    def test_sector_exposure_field_present(self):
+        f = _field(_embed(_build()), "SECTOR EXPOSURE")
+        assert f is not None
+        assert "🇺🇸" in f["value"]
+
+    def test_overlay_tag_rendered_on_us_pick(self):
+        f = _field(_embed(_build(
+            top_buys_usa=[_entry("NVDA", 0.84, raw_score=0.91)])), "USA")
+        assert "raw 0.91" in f["value"]
+
+    def test_lifecycle_line_on_rank1(self):
+        nvda = _entry("NVDA", 0.84, target_price=214.0, current_price=197.0,
+                      volume_spike=2.4)
+        f = _field(_embed(_build(top_buys_usa=[nvda])), "USA")
+        assert "🎯 tgt $214" in f["value"]
+        assert "relVol 2.4×" in f["value"]
 
 
 # ── 13. On-demand single-ticker audit (ChatOps) ────────────────────────────────

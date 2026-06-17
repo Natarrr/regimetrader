@@ -148,3 +148,91 @@ def apply_capitulation_filter(entries: List[dict], vix: float) -> List[dict]:
         e["_capitulation_survivor"] = True
         result.append(e)
     return result
+
+
+# ── Market-regime nowcast (DISPLAY-ONLY) ──────────────────────────────────────
+# A directional Bull/Euphoria/Bear read from VIX + trailing index momentum, used
+# only to give the daily brief a market-state header. It is deliberately NOT
+# wired into score_multiplier / vix_multiplier: the VIX RiskRegime remains the
+# sole sizing lever, so a frothy or defensive nowcast never silently re-scales
+# alpha. Thresholds are module constants (tunable; no hardcoded levels at call
+# sites). Standard risk-on/off nowcast: complacent vol + strong trend = froth;
+# elevated vol or negative trend = risk-off.
+
+_EUPHORIA_VIX_MAX = 14.0    # complacent volatility ceiling for the froth signature
+_EUPHORIA_MOM_MIN = 0.08    # +8% trailing-63d required on BOTH SPY and QQQ
+_BULL_MOM_MIN = 0.02        # +2% trailing-63d SPY → risk-on trend intact
+_BEAR_MOM_MAX = -0.05       # -5% trailing-63d SPY → risk-off
+
+
+class MarketRegime(str, Enum):
+    EUPHORIA = "EUPHORIA"
+    BULL = "BULL"
+    NEUTRAL = "NEUTRAL"
+    BEAR = "BEAR"
+    CAPITULATION = "CAPITULATION"
+
+
+def _is_missing(x: object) -> bool:
+    """True for None / NaN / non-numeric — a regime is never inferred from these."""
+    if x is None or isinstance(x, bool):
+        return True
+    if not isinstance(x, (int, float)):
+        return True
+    return math.isnan(float(x))
+
+
+def classify_market_regime(
+    vix: float,
+    spy_ret_63d: float | None,
+    qqq_ret_63d: float | None = None,
+) -> MarketRegime:
+    """Directional market-state nowcast from VIX + 63-day index momentum.
+
+    DISPLAY-ONLY — never feeds a score multiplier (see section note above).
+
+    VIX is mandatory (it is always present in the brief); a regime is never
+    guessed from momentum alone. The stressed regimes are a volatility fact and
+    hold without momentum, but EUPHORIA/BULL require the SPY/QQQ trend.
+
+    Ladder (first match wins):
+      NEUTRAL      : VIX missing/invalid (insufficient evidence)
+      CAPITULATION : VIX ≥ CAPITULATION_THRESHOLD   (parity with RiskRegime)
+      (momentum missing) BEAR if VIX ≥ BEAR_THRESHOLD else NEUTRAL
+      EUPHORIA     : VIX < _EUPHORIA_VIX_MAX and SPY & QQQ 63d ≥ _EUPHORIA_MOM_MIN
+      BEAR         : VIX ≥ BEAR_THRESHOLD or SPY 63d ≤ _BEAR_MOM_MAX
+      BULL         : SPY 63d ≥ _BULL_MOM_MIN
+      NEUTRAL      : otherwise
+    """
+    if _is_missing(vix) or float(vix) < 0:
+        return MarketRegime.NEUTRAL
+    v = float(vix)
+    if v >= _CAPITULATION_THRESHOLD:
+        return MarketRegime.CAPITULATION
+    if _is_missing(spy_ret_63d):
+        # No trend data: stressed regime still holds on vol; never fabricate BULL.
+        return MarketRegime.BEAR if v >= _BEAR_THRESHOLD else MarketRegime.NEUTRAL
+    spy = float(spy_ret_63d)
+    # QQQ confirms the froth signature; fall back to SPY when QQQ is unavailable.
+    qqq = spy if _is_missing(qqq_ret_63d) else float(qqq_ret_63d)
+    if v < _EUPHORIA_VIX_MAX and spy >= _EUPHORIA_MOM_MIN and qqq >= _EUPHORIA_MOM_MIN:
+        return MarketRegime.EUPHORIA
+    if v >= _BEAR_THRESHOLD or spy <= _BEAR_MOM_MAX:
+        return MarketRegime.BEAR
+    if spy >= _BULL_MOM_MIN:
+        return MarketRegime.BULL
+    return MarketRegime.NEUTRAL
+
+
+_MARKET_REGIME_LABEL: dict = {
+    MarketRegime.EUPHORIA:     ("🟣", "risk-on extreme — froth / mean-reversion caution"),
+    MarketRegime.BULL:         ("🟢", "risk-on — trend intact"),
+    MarketRegime.NEUTRAL:      ("⚪", "mixed — range-bound"),
+    MarketRegime.BEAR:         ("🟠", "risk-off — defensive"),
+    MarketRegime.CAPITULATION: ("🔴", "distressed — high-quality anchors only"),
+}
+
+
+def market_regime_label(regime: MarketRegime) -> tuple[str, str]:
+    """(emoji, one-line blurb) for the daily-brief market-regime banner."""
+    return _MARKET_REGIME_LABEL[regime]
