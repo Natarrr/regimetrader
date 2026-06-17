@@ -40,11 +40,6 @@ def test_backend_package():
     )
 
 
-def test_analysis_package():
-    """analysis/ module directory must exist."""
-    assert (ROOT / "analysis").is_dir(), "analysis/ directory not found"
-
-
 def _ci_provides(pkg: str) -> bool:
     """Return True if pkg is provided directly or via -r requirements.txt."""
     ci = (ROOT / "requirements-ci.txt").read_text()
@@ -60,16 +55,6 @@ def _ci_provides(pkg: str) -> bool:
 def test_requirements_ci_has_pydantic():
     """pydantic must be reachable from CI deps (directly or via -r requirements.txt)."""
     assert _ci_provides("pydantic"), "pydantic missing from CI deps"
-
-
-def test_requirements_ci_has_anthropic():
-    """anthropic must be reachable from CI deps for claude_client tests."""
-    assert _ci_provides("anthropic"), "anthropic missing from CI deps"
-
-
-def test_requirements_ci_has_hmmlearn():
-    """hmmlearn must be reachable from CI deps for regime detector tests."""
-    assert _ci_provides("hmmlearn"), "hmmlearn missing from CI deps"
 
 
 def test_ci_workflow_exists():

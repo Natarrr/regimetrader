@@ -13,8 +13,6 @@ omit =
     scripts/mock_webhook_server.py
     scripts/check_imports.py
     scripts/check_secrets.py
-    # Quant model stubs (untested by design in CI)
-    backend/quant_models/*
 
 [report]
 exclude_lines =

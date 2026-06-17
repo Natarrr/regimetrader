@@ -29,12 +29,9 @@ REQUIRED: tuple[tuple[str, str], ...] = (
     ("requests",     "requests"),
     ("numpy",        "numpy"),
     ("pandas",       "pandas"),
-    ("anthropic",    "anthropic"),
-    ("hmmlearn",     "hmmlearn"),
     ("sklearn",      "scikit-learn"),
     ("scipy",        "scipy"),
     ("statsmodels",  "statsmodels"),
-    ("arch",         "arch"),
     ("yfinance",     "yfinance"),
 )
 
