@@ -229,6 +229,11 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         # momentum, so momentum_spy_relative is intentionally NOT set (the old
         # mapping rendered absolute returns as "vs SPY 12m" in catalysts).
         "return_12_1m":                float(raw.get("return_12_1m") or 0.0),
+        # Recent run-up for the freshness/extension gate (send_discord). Absence
+        # stays None (unknown) — never coerced to 0.0, which would read as a real
+        # flat move and wrongly keep an unscored name on the actionable list.
+        "return_5d":                   raw.get("return_5d"),
+        "return_21d":                  raw.get("return_21d"),
         "analyst_consensus_score":     factor_snapshots.get("analyst_consensus"),
     }
 

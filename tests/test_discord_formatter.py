@@ -1049,3 +1049,109 @@ class TestWhaleAndNicheAlpha:
         assert "🐋 WHALE ACCUMULATION" in text     # rank-1 small-cap badge
         assert "[NICHE ALPHA]" in text             # 13F + insider velocity line
         assert "🎯 tgt $400" in text               # rank-2 per-row exit target
+
+
+# ── 14. Freshness / extension gate (already-moved names off the buy desk) ──────
+
+class TestExtensionGateUnit:
+    """_is_extended: cap-tier-aware run-up threshold; missing data ⇒ not extended."""
+
+    def test_large_cap_above_10pct_is_extended(self):
+        from src.delivery.send_discord import _is_extended
+        assert _is_extended({"return_5d": 0.12, "cap_tier": "large"})
+
+    def test_large_cap_below_10pct_is_fresh(self):
+        from src.delivery.send_discord import _is_extended
+        assert not _is_extended({"return_5d": 0.08, "cap_tier": "large"})
+
+    def test_smid_band_below_18pct_is_fresh(self):
+        """Small/mid-caps routinely run >10% — they only gate at the wider band."""
+        from src.delivery.send_discord import _is_extended
+        assert not _is_extended({"return_5d": 0.15, "cap_tier": "small"})
+
+    def test_smid_above_18pct_is_extended(self):
+        from src.delivery.send_discord import _is_extended
+        assert _is_extended({"return_5d": 0.20, "cap_tier": "small"})
+
+    def test_missing_return_5d_is_fresh(self):
+        from src.delivery.send_discord import _is_extended
+        assert not _is_extended({"cap_tier": "large"})
+        assert not _is_extended({"return_5d": None, "cap_tier": "large"})
+
+
+class TestExtensionGateRender:
+    """Already-moved names leave the actionable ALPHA DESK and surface in a
+    separate '⏱ EXTENDED / ALREADY-MOVED (WATCH)' section."""
+
+    def test_extended_large_cap_leaves_desk_for_watch_section(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("EXTD", 0.81, cap_tier="large", return_5d=0.13),
+            _entry("FRSH", 0.79, cap_tier="large", return_5d=0.04),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        ext = _field(e, "EXTENDED")
+        assert ext is not None
+        assert "EXTD" in ext["value"]
+        assert "EXTD" not in desk["value"]
+        assert "FRSH" in desk["value"]
+        assert "FRSH" not in ext["value"]
+
+    def test_midcap_15pct_stays_fresh(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("MIDX", 0.75, cap_tier="small", return_5d=0.15),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        ext = _field(e, "EXTENDED")
+        assert "MIDX" in desk["value"]
+        assert ext is None or "MIDX" not in ext["value"]
+
+    def test_missing_return_5d_stays_on_desk_no_section(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("NORM", 0.75),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        assert "NORM" in desk["value"]
+        assert _field(e, "EXTENDED") is None
+
+    def test_extended_line_shows_move_pct_and_window(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("RUNR", 0.82, cap_tier="large", return_5d=0.124),
+            _entry("KEEP", 0.70, cap_tier="large", return_5d=0.0),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        ext = _field(e, "EXTENDED")
+        assert ext is not None
+        assert "12" in ext["value"]      # +12.4% run-up surfaced
+        assert "5d" in ext["value"]      # window labelled honestly
+
+    def test_extended_section_aggregates_across_regions(self):
+        e = _embed(_build(
+            top_buys_usa=[_entry("USX", 0.80, cap_tier="large", return_5d=0.14)],
+            top_buys_europe=[_entry("EUX.AS", 0.78, market="EUROPE",
+                                    cap_tier="large", return_5d=0.16,
+                                    weight_coverage=0.9)],
+            top_buys_asia=[],
+        ))
+        ext = _field(e, "EXTENDED")
+        assert ext is not None
+        assert "USX" in ext["value"] and "EUX" in ext["value"]
+
+    def test_fresh_desk_line_shows_recent_move_token(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("TOKN", 0.79, cap_tier="large", return_5d=0.042),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        assert "5d" in desk["value"]     # freshness visible on the actionable name
+
+    def test_extended_section_respects_embed_budget(self):
+        """Many already-moved names must not blow the 1024 field / 6000 total
+        budgets (the WATCH block is markdown — no fences to orphan)."""
+        usa = [_entry(f"EXT{i:02d}", 0.85 - i * 0.01, cap_tier="large",
+                      return_5d=0.20 + i * 0.01, insider_usd=1_000_000 + i)
+               for i in range(12)]
+        e = _embed(_build(top_buys_usa=usa, top_buys_europe=[], top_buys_asia=[]))
+        ext = _field(e, "EXTENDED")
+        assert ext is not None and len(ext["value"]) <= 1024
+        total = (len(e.get("title", "")) + len(e.get("description", ""))
+                 + sum(len(f["name"]) + len(f["value"]) for f in e["fields"])
+                 + len((e.get("footer") or {}).get("text", "")))
+        assert total <= 6000, f"total embed chars {total} > 6000"
