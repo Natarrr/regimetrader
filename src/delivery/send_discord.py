@@ -423,7 +423,7 @@ def _market_pulse() -> Dict[str, Any]:
     the cosmetic price line. Network/data failure degrades to {} (logged, never
     raised) — the brief renders without the snapshot."""
     try:
-        from backend.data.market_service import MarketData  # noqa: PLC0415
+        from src.data.market_service import MarketData  # noqa: PLC0415
 
         def _snap(bars) -> dict:
             if bars is None or getattr(bars, "empty", True) or len(bars) < 2:

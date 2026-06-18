@@ -1,4 +1,4 @@
-# Path: backend/data/market_service.py
+# Path: src/data/market_service.py
 """Market price data service — historical OHLCV via yfinance."""
 from __future__ import annotations
 

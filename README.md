@@ -57,6 +57,7 @@ src/                    Core package (single namespace)
   engine/               StrategyEngine + profile_runner (INTL scoring)
   fetchers/             Market fetcher orchestrator
   ingestion/            run_pipeline, fmp_fetcher, fmp_bulk_prefetch
+  data/                 market_service (SPY/QQQ snapshot for Discord embeds)
   monitoring/           In-pipeline QA (factor_orthogonality)
   research/             historical_loader (run archiving)
   risk/                 regime.py (VIX thresholds SSOT), exit_rules.py
@@ -64,7 +65,6 @@ src/                    Core package (single namespace)
   services/             FMP API client
   utils/                io, formatting helpers
 backend/market_intel/   generate_top_lists.py scoring orchestrator + validator
-backend/data/           market_service (SPY/QQQ snapshot for Discord embeds)
 monitoring/             Ops monitoring: metrics export, threshold checks, alerts
 scripts/                CLI utilities (check_imports, backtest_signals, …)
 tests/                  Test suite (pytest)
