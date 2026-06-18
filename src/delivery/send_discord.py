@@ -103,6 +103,16 @@ _STALE_HOURS = 25
 _DELTA_STALE_HOURS = 48.0
 _NO_CATALYST = "no primary catalyst detected"
 
+# ── Freshness / extension gate ────────────────────────────────────────────────
+# A name already up this much over the last 5 sessions is a chase, not an entry:
+# it moves off the actionable ALPHA DESK into the ⏱ EXTENDED / ALREADY-MOVED
+# (WATCH) section. This is a DISPLAY/RISK gate only — it never touches
+# final_score, weights or factor math. Cap-tier-aware because small/mid-caps
+# routinely run further before mean-reverting; a flat threshold would dump the
+# whole SMID sleeve into "extended". Env-overridable for tuning without a deploy.
+_EXTENSION_PCT_LARGE = float(os.getenv("EXTENSION_PCT_LARGE", "0.10"))
+_EXTENSION_PCT_SMID  = float(os.getenv("EXTENSION_PCT_SMID",  "0.18"))
+
 # ── Factor matrix columns (9-factor US schema; intl swaps CG/NB/VA/QF for
 #    the EU/Asia value & liquidity factors — congress structurally absent) ────
 _MATRIX_US_COLS: List[Tuple[str, str]] = [
@@ -296,6 +306,46 @@ def _badge_from_score(score: float) -> str:
     return "WATCHLIST"
 
 
+def _extension_pct(entry: Dict[str, Any]) -> Optional[float]:
+    """Recent run-up (5-session return) for the freshness gate.
+
+    None = unknown (absent / short history / uniquely-stale tape upstream). A
+    missing value must NEVER read as a real 0% move — that would wrongly keep an
+    unscored-for-freshness name on the actionable desk (CLAUDE.md §2)."""
+    val = entry.get("return_5d")
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f
+
+
+def _extension_threshold(entry: Dict[str, Any]) -> float:
+    """Cap-tier-aware run-up gate: wider band for the more-volatile small/mid."""
+    tier = (entry.get("cap_tier") or "large").strip().lower()
+    return _EXTENSION_PCT_SMID if tier in ("small", "mid") else _EXTENSION_PCT_LARGE
+
+
+def _is_extended(entry: Dict[str, Any]) -> bool:
+    """True when the name has already run past its cap-tier threshold and is a
+    chase. Missing data ⇒ not extended (absence is not evidence of a top — keep
+    it on the actionable desk rather than hiding it)."""
+    ext = _extension_pct(entry)
+    return ext is not None and ext >= _extension_threshold(entry)
+
+
+def _freshness_token(entry: Dict[str, Any]) -> str:
+    """Compact ` · ±X.X% 5d` recency tag for an actionable desk line (empty when
+    the recent return is unknown). Negative reads as a pullback — useful entry
+    context, so it is shown, not suppressed."""
+    ext = _extension_pct(entry)
+    if ext is None:
+        return ""
+    return f" · {ext * 100:+.1f}% 5d"
+
+
 def _compute_catalyst(entry: Dict[str, Any]) -> str:
     """Evidence-first catalyst narrative, max 80 chars, signals joined by ' · '.
 
@@ -423,7 +473,7 @@ def _market_pulse() -> Dict[str, Any]:
     the cosmetic price line. Network/data failure degrades to {} (logged, never
     raised) — the brief renders without the snapshot."""
     try:
-        from backend.data.market_service import MarketData  # noqa: PLC0415
+        from src.data.market_service import MarketData  # noqa: PLC0415
 
         def _snap(bars) -> dict:
             if bars is None or getattr(bars, "empty", True) or len(bars) < 2:
@@ -861,6 +911,14 @@ class DiscordPayloadBuilder:
     def _region_entries(self, key: str) -> List[Dict[str, Any]]:
         return list(self.data.get(key) or [])
 
+    def _fresh_entries(self, key: str) -> List[Dict[str, Any]]:
+        """Region entries that have NOT already run up past the gate — the names
+        that are still actionable to enter."""
+        return [e for e in self._region_entries(key) if not _is_extended(e)]
+
+    def _extended_entries(self, key: str) -> List[Dict[str, Any]]:
+        return [e for e in self._region_entries(key) if _is_extended(e)]
+
     def _population(self) -> List[float]:
         """All scores in the artifact — denominator for percentile ranks."""
         keys = ("top_buys_usa", "top_buys_europe", "top_buys_asia",
@@ -963,7 +1021,8 @@ class DiscordPayloadBuilder:
         overlay_str = f" · {overlay_tag}" if overlay_tag else ""
         whale = _whale_badge(entry)
         head = (f"{medal} **{ticker}**{name} — {badge} · `{score:.4f}` · "
-                f"p{pct}{self._delta_tag(ticker, score)}{overlay_str}{whale}")
+                f"p{pct}{self._delta_tag(ticker, score)}{overlay_str}"
+                f"{_freshness_token(entry)}{whale}")
         lines = [head]
         # Zone 2 — cognitive factor attribution (emoji heat, markdown only).
         if show_drivers:
@@ -996,7 +1055,9 @@ class DiscordPayloadBuilder:
                     max_entries: int, *,
                     show_drivers: bool = True,
                     show_lifecycle: bool = True) -> Optional[Dict[str, Any]]:
-        entries = self._region_entries(key)
+        # Already-moved names are split off to the ⏱ EXTENDED section — the desk
+        # carries only still-actionable (fresh) entries.
+        entries = self._fresh_entries(key)
         if not entries:
             return None
         lines: List[str] = []
@@ -1013,7 +1074,7 @@ class DiscordPayloadBuilder:
     def _smid_field(self, max_entries: int) -> Optional[Dict[str, Any]]:
         """SMID leverage desk — plain ``` block, graceful None when the key
         is absent/empty (backward compat with pre-SMID artifacts)."""
-        entries = self._region_entries("top_buys_smid")
+        entries = self._fresh_entries("top_buys_smid")
         if not entries:
             return None
         rows = [_SMID_HEADER] + [_smid_row(e) for e in entries[:max_entries]]
@@ -1188,6 +1249,43 @@ class DiscordPayloadBuilder:
             "inline": False,
         }
 
+    # Regions scanned for already-moved names, aggregated into one WATCH block.
+    _EXTENDED_KEYS: Tuple[str, ...] = (
+        "top_buys_usa", "top_buys_europe", "top_buys_asia", "top_buys_smid",
+    )
+    _MAX_EXTENDED_ENTRIES = 6
+
+    def _extended_field(self) -> Optional[Dict[str, Any]]:
+        """⏱ EXTENDED / ALREADY-MOVED (WATCH): names that already ran past the
+        freshness gate, surfaced (not hidden) so the reader sees what's already
+        gone vs chaseable. Aggregated across US/EU/Asia/SMID, de-duplicated,
+        sorted by run-up. Evidence-first (CLAUDE.md §5): ticker · move · why."""
+        seen: set = set()
+        entries: List[Dict[str, Any]] = []
+        for key in self._EXTENDED_KEYS:
+            for e in self._extended_entries(key):
+                tic = e.get("ticker")
+                if tic in seen:
+                    continue
+                seen.add(tic)
+                entries.append(e)
+        if not entries:
+            return None
+        entries.sort(key=lambda e: -(_extension_pct(e) or 0.0))
+        lines: List[str] = []
+        for e in entries[:self._MAX_EXTENDED_ENTRIES]:
+            tic = e.get("ticker", "?")
+            ext = (_extension_pct(e) or 0.0) * 100
+            score = _safe_float(e.get("final_score"))
+            lines.append(
+                f"`{tic}` ⏱ already {ext:+.1f}% 5d · `{score:.3f}` — wait for pullback")
+            lines.append(f"└ {_compute_catalyst(e)}")
+        return {
+            "name":   "⏱ EXTENDED / ALREADY-MOVED (WATCH)",
+            "value":  _truncate("\n".join(lines)),
+            "inline": False,
+        }
+
     @staticmethod
     def _legend_field() -> Dict[str, Any]:
         return {
@@ -1259,6 +1357,10 @@ class DiscordPayloadBuilder:
             smid = self._smid_field(self.MAX_SMID_ENTRIES)
             if smid:
                 fields.append(smid)
+            # Already-moved names split off the actionable desks → WATCH block.
+            extended = self._extended_field()
+            if extended:
+                fields.append(extended)
             sector = self._sector_exposure_field()
             if sector:
                 fields.append(sector)

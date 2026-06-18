@@ -154,6 +154,8 @@ _DISPLAY_META_KEYS = (
     "atr_14",
     "inst_13f_evidence",   # v2.5 — 🐋 whale-accumulation badge evidence
     "insider_npr",         # v2.5 — acquired-vs-disposed spike (badge/[NICHE ALPHA])
+    "return_5d",           # recent run-up — freshness/extension gate (send_discord)
+    "return_21d",          # 1-month context for the extension read
 )
 
 # Absolute market-cap thresholds (standard institutional definitions)

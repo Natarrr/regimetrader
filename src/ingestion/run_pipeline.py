@@ -500,6 +500,8 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
 
     _default: Dict[str, Any] = {
         "return_12_1m":     None,
+        "return_5d":        None,   # recent run-up (freshness/extension gate)
+        "return_21d":       None,   # 1-month context for the extension read
         "spy_return_12_1m": spy_return,
         "volume_spike":     1.0,
     }
@@ -547,8 +549,21 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
             if baseline_avg > 0:
                 volume_spike = round(min(20.0, recent_avg / baseline_avg), 4)
 
+        # Recent run-up for the freshness/extension gate (send_discord splits
+        # already-moved names off the actionable list). Reuses the same `closes`
+        # already fetched for momentum — no extra API call. >= 22 bars is
+        # guaranteed here (shorter history returned _default above), so [-6]/[-22]
+        # always index real data. A uniquely-stale tape is flagged None below so a
+        # frozen candle never fabricates an "extended" read.
+        ret_5d  = ((closes[-1] - closes[-6])  / closes[-6])  if closes[-6]  else None
+        ret_21d = ((closes[-1] - closes[-22]) / closes[-22]) if closes[-22] else None
+        if ticker_lag > 3 and ticker_lag > spy_lag + 1:
+            ret_5d = ret_21d = None   # stale tape — recent return is unreliable
+
         return {
             "return_12_1m":     round(ret_12_1m, 6) if ret_12_1m is not None else None,
+            "return_5d":        round(ret_5d, 6)  if ret_5d  is not None else None,
+            "return_21d":       round(ret_21d, 6) if ret_21d is not None else None,
             "spy_return_12_1m": round(spy_return, 6),
             "volume_spike":     volume_spike,
         }
@@ -1265,6 +1280,41 @@ def _validate_universe_region(ticker_rows: List[Dict], region: str = "US") -> No
         )
 
 
+def _guarded_inst_flow_13f(
+    client: Any,
+    ticker: str,
+    failures_lock: threading.Lock,
+    failures_set: set,
+) -> Tuple[Dict[str, Any], Optional[float]]:
+    """Fetch the 13F position-delta summary and score it (audit correction C1).
+
+    The 13F route feeds a 0.04 SIGNED factor plus the 🐋 WHALE / [NICHE ALPHA]
+    display. A *structural* route failure (FMPEndpointError) must NOT propagate to
+    _score_ticker's outer handler and zero the whole ticker — that would discard
+    the insider/momentum/analyst signals already computed for a 0.04 display-grade
+    factor. Instead, record the broken endpoint (so fmp_health.json still flags it
+    — never silent per CLAUDE.md §2) and degrade the SIGNED factor to None
+    (data-absence, never bearish).
+
+    Extracted to module scope so the failure-isolation contract is unit-testable
+    without driving the full _score_ticker closure. Returns (summary, score);
+    ({}, None) on a structural failure or an empty 13F feed.
+    """
+    from src.scoring.alt_signals import score_inst_flow_13f  # noqa: PLC0415
+    try:
+        summary = client.get_institutional_ownership(ticker) or {}
+    except FMPEndpointError as exc:
+        log.warning(
+            "13F flow %s structural fail (endpoint=%s status=%d) — degraded to "
+            "unavailable; ticker's other factors unaffected.",
+            ticker, exc.path, exc.status,
+        )
+        with failures_lock:
+            failures_set.add(exc.path)
+        summary = {}
+    return summary, score_inst_flow_13f(summary)
+
+
 def run(
     tickers_file: Path,
     log_dir: Path,
@@ -1454,10 +1504,8 @@ def run(
             score_momentum_long,
             score_volume_attention,
         )
-        from src.scoring.alt_signals import (  # noqa: PLC0415
-            score_inst_flow_13f,
-            score_insider_npr_spike,
-        )
+        # score_inst_flow_13f is consumed inside _guarded_inst_flow_13f (audit C1).
+        from src.scoring.alt_signals import score_insider_npr_spike  # noqa: PLC0415
 
         ticker = row["ticker"]
         edgar_ok    = False
@@ -1611,12 +1659,14 @@ def run(
             _raw_current_price = _quote_data.get("price") if _quote_data else None
 
             # ── Whale accumulation vector (13F QoQ position delta) ─────────
-            # SIGNED factor: score_inst_flow_13f returns None when 13F coverage
-            # is absent (weight redistributed pro-rata downstream — never bearish).
-            # The raw summary rides along for the 🐋 WHALE badge / [NICHE ALPHA]
-            # display (generate_top_lists / send_discord).
-            _inst_13f_summary  = _fmp_client.get_institutional_ownership(ticker)
-            inst_flow_13f_score = score_inst_flow_13f(_inst_13f_summary)
+            # SIGNED factor + 🐋 WHALE / [NICHE ALPHA] display. Failure-isolated
+            # in _guarded_inst_flow_13f (audit C1): a structural 13F-route failure
+            # degrades this 0.04 factor to None and is recorded for fmp_health,
+            # instead of zeroing the whole ticker via the outer handler.
+            _inst_13f_summary, inst_flow_13f_score = _guarded_inst_flow_13f(
+                _fmp_client, ticker,
+                _structural_failures_lock, _structural_failures_in_scoring,
+            )
 
             # ── Insider acquired-vs-disposed spike (NPR overlay; NOT weighted) ──
             # Display/badge enrichment only. A dead statistics route must not
@@ -1655,6 +1705,8 @@ def run(
             }
 
             ret_12_1m = price_data.get("return_12_1m")
+            ret_5d    = price_data.get("return_5d")    # recent run-up (extension gate)
+            ret_21d   = price_data.get("return_21d")
             _spy12 = float(price_data.get("spy_return_12_1m") or 0.0)
 
             # Fix #7: relative CEO purchase significance (bps of market cap).
@@ -1721,6 +1773,8 @@ def run(
                 "earnings_surprise_days":  _eps_days,
                 "insider_usd":             float(total_purchases_usd),
                 "return_12_1m":            ret_12_1m,
+                "return_5d":               ret_5d,    # freshness/extension gate (send_discord)
+                "return_21d":              ret_21d,
                 "momentum_spy_relative":   float(ret_12_1m - _spy12) if ret_12_1m is not None else 0.0,
                 "volume_spike":            float(price_data["volume_spike"]),
                 "_edgar_ok":               edgar_ok,
@@ -1810,6 +1864,8 @@ def run(
                 "earnings_surprise_days":  0,
                 "insider_usd":             float(total_purchases_usd),
                 "return_12_1m":            None,
+                "return_5d":               None,
+                "return_21d":              None,
                 "momentum_spy_relative":   0.0,
                 "volume_spike":            1.0,
                 "_edgar_ok":               edgar_ok,
@@ -1851,6 +1907,8 @@ def run(
                 "earnings_surprise_days":  0,
                 "insider_usd":             float(total_purchases_usd),
                 "return_12_1m":            None,
+                "return_5d":               None,
+                "return_21d":              None,
                 "momentum_spy_relative":   0.0,
                 "volume_spike":            1.0,
                 "_edgar_ok":               edgar_ok,

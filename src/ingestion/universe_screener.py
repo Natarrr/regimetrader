@@ -162,7 +162,8 @@ def _volume_panel(
 def _append_churn(
     log_dir: Optional[Path], events: Sequence[Dict[str, Any]],
 ) -> None:
-    """Append-only churn audit (convention: logs/kill_switch_audit.ndjson)."""
+    """Append-only churn audit → logs/universe_churn.ndjson (ndjson audit-log
+    convention, mirroring logs/kill_switch_audit.ndjson)."""
     if not log_dir or not events:
         return
     path = Path(log_dir) / "universe_churn.ndjson"
@@ -177,39 +178,50 @@ def _screen_smid_candidates(
 ) -> Dict[str, Dict[str, Any]]:
     """{ticker: {sector, cap_tier, market_cap, adv_usd, beta}} in the SMID band.
 
-    Screens the $300M–$10B band server-side (``market_cap_lower_than`` ceiling +
-    ``is_actively_trading`` shell guard) with a share-volume floor, then applies
-    an ADV dollar-volume gate (price × volume ≥ ``_SMID_MIN_DOLLAR_VOL``) to drop
-    market-impact traps [Amihud 2002]. ``adv_usd`` and ``beta`` ride along for the
-    downstream soft-beta leverage rank. Rows lacking price/volume are kept on the
-    server-side share floor — absent data is never used to reject."""
+    Screens the SMALL ($300M–$2B) and MID ($2B–$10B) bands SEPARATELY. FMP's
+    company-screener returns rows market-cap-DESCENDING within a ceiling, so a
+    single $300M–$10B screen at limit=100 only ever surfaces the $6–10B top of the
+    band — true small caps never enter the candidate pool (confirmed by the
+    2026-06-17 dry-run: all 30 SMID names landed $6.17–9.90B, zero < $2B).
+    Splitting the ceiling forces each tranche into its own 100-row window.
+
+    Each band carries ``is_actively_trading`` (shell guard) + a share-volume floor,
+    then an ADV dollar-volume gate (price × volume ≥ ``_SMID_MIN_DOLLAR_VOL``) to
+    drop market-impact traps [Amihud 2002]. ``adv_usd`` and ``beta`` ride along for
+    the downstream soft-beta leverage rank. Rows lacking price/volume are kept on
+    the server-side share floor — absent data is never used to reject."""
+    bands = (
+        (_SMID_SCREEN_MIN_CAP, _SMID_MID_THRESHOLD),    # small: $300M–$2B
+        (_SMID_MID_THRESHOLD, _SMID_SCREEN_MAX_CAP),    # mid:   $2B–$10B
+    )
     out: Dict[str, Dict[str, Any]] = {}
     for exchange in _REGION_EXCHANGES.get(region, _REGION_EXCHANGES["US"]):
-        for row in client.get_company_screener(
-                exchange=exchange,
-                market_cap_more_than=_SMID_SCREEN_MIN_CAP,
-                market_cap_lower_than=_SMID_SCREEN_MAX_CAP,
-                volume_more_than=_SMID_SCREEN_MIN_VOLUME,
-                is_actively_trading=True,
-                limit=100):
-            sym = (row.get("symbol") or "").strip().upper()
-            if not sym or sym in out:
-                continue
-            mcap = float(row.get("marketCap") or 0.0)
-            if not (_SMID_SCREEN_MIN_CAP <= mcap <= _SMID_SCREEN_MAX_CAP):
-                continue
-            price = float(row.get("price") or 0.0)
-            volume = float(row.get("volume") or 0.0)
-            adv_usd = price * volume if price > 0 and volume > 0 else None
-            if adv_usd is not None and adv_usd < _SMID_MIN_DOLLAR_VOL:
-                continue   # illiquid → market-impact trap; drop
-            out[sym] = {
-                "sector": row.get("sector") or "Unknown",
-                "cap_tier": "small" if mcap < _SMID_MID_THRESHOLD else "mid",
-                "market_cap": mcap,
-                "adv_usd": adv_usd,
-                "beta": float(row["beta"]) if row.get("beta") is not None else None,
-            }
+        for lo_cap, hi_cap in bands:
+            for row in client.get_company_screener(
+                    exchange=exchange,
+                    market_cap_more_than=lo_cap,
+                    market_cap_lower_than=hi_cap,
+                    volume_more_than=_SMID_SCREEN_MIN_VOLUME,
+                    is_actively_trading=True,
+                    limit=100):
+                sym = (row.get("symbol") or "").strip().upper()
+                if not sym or sym in out:
+                    continue
+                mcap = float(row.get("marketCap") or 0.0)
+                if not (_SMID_SCREEN_MIN_CAP <= mcap <= _SMID_SCREEN_MAX_CAP):
+                    continue
+                price = float(row.get("price") or 0.0)
+                volume = float(row.get("volume") or 0.0)
+                adv_usd = price * volume if price > 0 and volume > 0 else None
+                if adv_usd is not None and adv_usd < _SMID_MIN_DOLLAR_VOL:
+                    continue   # illiquid → market-impact trap; drop
+                out[sym] = {
+                    "sector": row.get("sector") or "Unknown",
+                    "cap_tier": "small" if mcap < _SMID_MID_THRESHOLD else "mid",
+                    "market_cap": mcap,
+                    "adv_usd": adv_usd,
+                    "beta": float(row["beta"]) if row.get("beta") is not None else None,
+                }
     return out
 
 

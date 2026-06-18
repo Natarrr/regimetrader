@@ -20,6 +20,8 @@ _DISPLAY_META_KEYS = (
     "insider_usd",
     "market_cap",
     "return_12_1m",
+    "return_5d",     # recent run-up — freshness/extension gate (send_discord)
+    "return_21d",
     "target_price",
     "current_price",
     "earnings_surprise_pct",

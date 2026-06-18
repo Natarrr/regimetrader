@@ -265,6 +265,10 @@ class FMPFetcher(BaseMarketFetcher):
             p_far, p_near = closes[idx_far], closes[idx_near]
             return_12_1m = (p_near - p_far) / p_far if p_far != 0 else None
 
+        # Recent run-up for the freshness/extension gate (send_discord). Same
+        # listing-market closes already fetched for momentum — no extra call.
+        return_5d, return_21d = _short_returns(closes)
+
         volume_spike = 0.0
         n_vol = len(volumes)
         if n_vol > _VOL_BASELINE_SKIP + 5:
@@ -622,6 +626,8 @@ class FMPFetcher(BaseMarketFetcher):
             "transcript_tone_score":     0.0,
             # Raw inputs (diagnostic)
             "return_12_1m":              return_12_1m,
+            "return_5d":                 return_5d,    # extension gate (send_discord)
+            "return_21d":                return_21d,
             "volume_spike":              volume_spike,
             "market_cap":                mktcap_final,
             "target_price":              raw_target_price,
@@ -640,6 +646,19 @@ class FMPFetcher(BaseMarketFetcher):
             # Per-factor missing-source reason: "api_error" | "no_coverage"
             "source_diagnostics":        _diag,
         }
+
+
+def _short_returns(closes: list) -> tuple[Optional[float], Optional[float]]:
+    """(return_5d, return_21d) from a chronological (oldest-first) close array.
+
+    Recent run-up for the freshness/extension gate. Each leg is None when the
+    history is too short or the base price is zero — absence must never read as a
+    real 0% move (CLAUDE.md §2). No look-ahead: uses only realised closes.
+    """
+    r5 = ((closes[-1] - closes[-6]) / closes[-6]) if len(closes) >= 6 and closes[-6] else None
+    r21 = ((closes[-1] - closes[-22]) / closes[-22]) if len(closes) >= 22 and closes[-22] else None
+    return (round(r5, 6) if r5 is not None else None,
+            round(r21, 6) if r21 is not None else None)
 
 
 def _symbol_candidates(ticker: str) -> list[str]:
@@ -672,6 +691,7 @@ def _build_price_only_factors(
     from the historical-prices endpoint, so momentum and volume are valid.
     All other factors are None so StrategyEngine excludes them from the denominator.
     """
+    return_5d, return_21d = _short_returns(closes)
     return {
         "momentum_long_score":       momentum_long_score,
         "volume_attention_score":    volume_attention_score,
@@ -691,6 +711,8 @@ def _build_price_only_factors(
         "transcript_tone_score":     0.0,
         "revenue_revision_score":    None,
         "return_12_1m":              return_12_1m,
+        "return_5d":                 return_5d,    # extension gate (send_discord)
+        "return_21d":                return_21d,
         "volume_spike":              volume_spike,
         "market_cap":                0.0,
         "target_price":              None,

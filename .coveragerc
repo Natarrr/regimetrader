@@ -8,7 +8,7 @@ omit =
     # Live scaffolding — hard to unit-test, not trading logic
     monitoring/*
     # Data ingestion / offline tools
-    backend/data/*
+    src/data/*
     scripts/backtest_signals.py
     scripts/mock_webhook_server.py
     scripts/check_imports.py

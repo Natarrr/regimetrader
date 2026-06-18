@@ -74,6 +74,37 @@ class TestFetchPriceData:
             result = fetch_price_data("MSFT")
         assert "return_12_1m" in result
 
+    # ── return_5d (recent run-up / extension gate) ─────────────────────────────
+    def test_return_5d_positive_on_rising_tape(self):
+        """Rising recent closes → return_5d > 0 (name has already run up)."""
+        with self._patch(self._fake_rows(100.0, 110.0)):
+            result = fetch_price_data("AAPL")
+        assert result["return_5d"] is not None
+        assert result["return_5d"] > 0.0
+
+    def test_return_5d_negative_on_falling_tape(self):
+        with self._patch(self._fake_rows(110.0, 100.0)):
+            result = fetch_price_data("AAPL")
+        assert result["return_5d"] is not None
+        assert result["return_5d"] < 0.0
+
+    def test_return_5d_none_on_insufficient_history(self):
+        """< 22 bars hits the dead-signal default → return_5d is None, not 0.0."""
+        with self._patch([]):
+            result = fetch_price_data("INVALID")
+        assert result["return_5d"] is None
+
+    def test_return_5d_none_on_exception(self):
+        with patch("src.services.fmp_client.FMPClient.get_historical_prices",
+                   side_effect=Exception("network error")):
+            result = fetch_price_data("AAPL")
+        assert result["return_5d"] is None
+
+    def test_return_5d_key_present(self):
+        with self._patch(self._fake_rows(100.0, 105.0)):
+            result = fetch_price_data("MSFT")
+        assert "return_5d" in result
+
 
 class TestFetchFmpProfilesBatch:
     def test_returns_market_caps_for_all_tickers(self):

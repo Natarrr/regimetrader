@@ -238,6 +238,29 @@ def test_normalize_adds_congress_zero(cook_mod, registry):
     assert result["factors"].get("congress") == 0.0
 
 
+def test_normalize_forwards_return_5d(cook_mod, registry):
+    """Recent run-up rides through to the INTL entry for the extension gate."""
+    ticker_map = cook_mod._build_registry_map(registry)
+    raw = {
+        "ticker": "SAP.DE",
+        "composite_score": 0.70,
+        "region_applied": "INTL",
+        "factor_snapshots": {},
+        "return_5d": 0.12,
+    }
+    result = cook_mod._normalize_intl_entry(raw, ticker_map, vix=15.0)
+    assert result["return_5d"] == 0.12
+
+
+def test_normalize_return_5d_absent_is_none(cook_mod, registry):
+    """Absence must stay None (unknown), never coerced to a real 0.0% move."""
+    ticker_map = cook_mod._build_registry_map(registry)
+    raw = {"ticker": "SAP.DE", "composite_score": 0.70,
+           "region_applied": "INTL", "factor_snapshots": {}}
+    result = cook_mod._normalize_intl_entry(raw, ticker_map, vix=15.0)
+    assert result["return_5d"] is None
+
+
 def test_normalize_congress_cannot_be_overridden(cook_mod, registry):
     """Even if factor_snapshots mistakenly carries a congress value, cook zeroes it."""
     ticker_map = cook_mod._build_registry_map(registry)

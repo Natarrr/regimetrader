@@ -147,6 +147,43 @@ class TestSmidLiquidityGate:
         assert cands["LIQUID"]["adv_usd"] == pytest.approx(50_000_000)
 
 
+class _BandAwareScreenerClient:
+    """Simulates FMP cap-descending + limit: returns only names WITHIN the
+    requested [more_than, lower_than) ceiling. Reproduces the single-band bug —
+    a $300M–$10B screen would return only the top of the band — so the test
+    proves the small/mid SPLIT actually reaches sub-$2B names."""
+
+    _api_key = "test-key"
+    _POOL = [
+        ("TINY", 4.0e8), ("SMALLA", 1.2e9), ("SMALLB", 1.8e9),
+        ("MIDA", 4.0e9), ("MIDB", 9.5e9), ("TOOBIG", 15e9),
+    ]
+
+    def get_company_screener(self, exchange, market_cap_more_than=None,
+                             market_cap_lower_than=None, volume_more_than=None,
+                             is_actively_trading=None, limit=100):
+        if exchange != "NASDAQ":
+            return []
+        lo = market_cap_more_than or 0
+        hi = market_cap_lower_than if market_cap_lower_than is not None else float("inf")
+        rows = [{"symbol": s, "sector": "Tech", "marketCap": c,
+                 "price": 50.0, "volume": 1_000_000, "beta": 1.5}
+                for s, c in self._POOL if lo <= c < hi]
+        return rows[:limit]
+
+
+class TestSmidBandSplit:
+    def test_split_reaches_true_small_caps(self):
+        cands = _screen_smid_candidates(_BandAwareScreenerClient(), "US")
+        tiers = {s: m["cap_tier"] for s, m in cands.items()}
+        # The $300M–$2B band must surface true small caps (the bug: it never did).
+        assert tiers.get("TINY") == "small"
+        assert tiers.get("SMALLA") == "small"
+        assert tiers.get("MIDA") == "mid"
+        assert "TOOBIG" not in tiers                 # > $10B excluded
+        assert "small" in tiers.values() and "mid" in tiers.values()
+
+
 class TestLeverageRank:
     def test_soft_beta_tilts_toward_higher_beta_at_equal_adv(self):
         group = [
