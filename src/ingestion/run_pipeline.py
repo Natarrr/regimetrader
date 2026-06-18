@@ -1265,6 +1265,41 @@ def _validate_universe_region(ticker_rows: List[Dict], region: str = "US") -> No
         )
 
 
+def _guarded_inst_flow_13f(
+    client: Any,
+    ticker: str,
+    failures_lock: threading.Lock,
+    failures_set: set,
+) -> Tuple[Dict[str, Any], Optional[float]]:
+    """Fetch the 13F position-delta summary and score it (audit correction C1).
+
+    The 13F route feeds a 0.04 SIGNED factor plus the 🐋 WHALE / [NICHE ALPHA]
+    display. A *structural* route failure (FMPEndpointError) must NOT propagate to
+    _score_ticker's outer handler and zero the whole ticker — that would discard
+    the insider/momentum/analyst signals already computed for a 0.04 display-grade
+    factor. Instead, record the broken endpoint (so fmp_health.json still flags it
+    — never silent per CLAUDE.md §2) and degrade the SIGNED factor to None
+    (data-absence, never bearish).
+
+    Extracted to module scope so the failure-isolation contract is unit-testable
+    without driving the full _score_ticker closure. Returns (summary, score);
+    ({}, None) on a structural failure or an empty 13F feed.
+    """
+    from src.scoring.alt_signals import score_inst_flow_13f  # noqa: PLC0415
+    try:
+        summary = client.get_institutional_ownership(ticker) or {}
+    except FMPEndpointError as exc:
+        log.warning(
+            "13F flow %s structural fail (endpoint=%s status=%d) — degraded to "
+            "unavailable; ticker's other factors unaffected.",
+            ticker, exc.path, exc.status,
+        )
+        with failures_lock:
+            failures_set.add(exc.path)
+        summary = {}
+    return summary, score_inst_flow_13f(summary)
+
+
 def run(
     tickers_file: Path,
     log_dir: Path,
@@ -1454,10 +1489,8 @@ def run(
             score_momentum_long,
             score_volume_attention,
         )
-        from src.scoring.alt_signals import (  # noqa: PLC0415
-            score_inst_flow_13f,
-            score_insider_npr_spike,
-        )
+        # score_inst_flow_13f is consumed inside _guarded_inst_flow_13f (audit C1).
+        from src.scoring.alt_signals import score_insider_npr_spike  # noqa: PLC0415
 
         ticker = row["ticker"]
         edgar_ok    = False
@@ -1611,27 +1644,14 @@ def run(
             _raw_current_price = _quote_data.get("price") if _quote_data else None
 
             # ── Whale accumulation vector (13F QoQ position delta) ─────────
-            # SIGNED factor: score_inst_flow_13f returns None when 13F coverage
-            # is absent (weight redistributed pro-rata downstream — never bearish).
-            # The raw summary rides along for the 🐋 WHALE badge / [NICHE ALPHA]
-            # display (generate_top_lists / send_discord).
-            # A structural 13F-route failure must NOT zero the whole ticker: that
-            # would discard the insider/momentum/analyst signals already scored
-            # above for a 0.04 display-grade factor. Mirror the NPR guard below and
-            # the outer PATCH-08 handler — record the broken endpoint (fmp_health
-            # still sees it) and degrade the SIGNED factor to None (never bearish).
-            try:
-                _inst_13f_summary = _fmp_client.get_institutional_ownership(ticker)
-            except FMPEndpointError as _13f_exc:
-                log.warning(
-                    "13F flow %s structural fail (endpoint=%s status=%d) — degraded "
-                    "to unavailable; ticker's other factors unaffected.",
-                    ticker, _13f_exc.path, _13f_exc.status,
-                )
-                with _structural_failures_lock:
-                    _structural_failures_in_scoring.add(_13f_exc.path)
-                _inst_13f_summary = {}
-            inst_flow_13f_score = score_inst_flow_13f(_inst_13f_summary)
+            # SIGNED factor + 🐋 WHALE / [NICHE ALPHA] display. Failure-isolated
+            # in _guarded_inst_flow_13f (audit C1): a structural 13F-route failure
+            # degrades this 0.04 factor to None and is recorded for fmp_health,
+            # instead of zeroing the whole ticker via the outer handler.
+            _inst_13f_summary, inst_flow_13f_score = _guarded_inst_flow_13f(
+                _fmp_client, ticker,
+                _structural_failures_lock, _structural_failures_in_scoring,
+            )
 
             # ── Insider acquired-vs-disposed spike (NPR overlay; NOT weighted) ──
             # Display/badge enrichment only. A dead statistics route must not
