@@ -495,24 +495,29 @@ class FMPFetcher(BaseMarketFetcher):
             )
             _diag["quality_piotroski"] = "api_error"
 
-        # ── 7. Price target upside — symbol-candidate fallback ────────────────
+        # ── 7. Price target upside + currency-paired exit anchor ──────────────
+        # _paired_target_and_price is the single source of truth: the SCORE and
+        # the Discord 🎯 displayed level come from the SAME currency-paired
+        # (target, price) — same-symbol pairing + GBX/GBP rescue — so they can
+        # never disagree (the SHEL.L "$102 (−96.6%)" class of bug). Display
+        # fields stay None unless a VALID pairing exists (never show a level the
+        # score path rejected as stale / currency-mismatched).
         price_target_upside_score: Optional[float] = None
         raw_target_price = None
-        raw_current_price = quote.get("price")
+        raw_current_price = None
         try:
-            pt_data = None
+            from src.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
+            paired = None
             for _sym in _symbol_candidates(ticker):
-                pt_data = client.get_price_target_consensus(_sym)
-                if pt_data:
+                paired = client._paired_target_and_price(_sym)
+                if paired is not None:
                     break
-            price_target_upside_score = 0.0
-            raw_target_price = pt_data.get("targetConsensus") if pt_data else None
-            for _sym in _symbol_candidates(ticker):
-                upside = client.get_upside_to_target(_sym)
-                if upside is not None:
-                    price_target_upside_score = upside
-                    break
+            if paired is not None:
+                raw_target_price, raw_current_price, _ = paired
+                price_target_upside_score = score_price_target_upside(
+                    raw_target_price, raw_current_price)
             else:
+                price_target_upside_score = 0.0
                 _diag["price_target_upside"] = "no_coverage"
         except Exception as exc:
             logger.warning(
@@ -569,6 +574,7 @@ class FMPFetcher(BaseMarketFetcher):
 
         # ── 11. Dynamic P/B — Fama & French value trigger ─────────────────────
         pb_value_up_score: Optional[float] = None
+        price_to_book: Optional[float] = None
         try:
             if not ratios and "." in ticker:
                 ratios = client.get_ratios_ttm(ticker.split(".")[0])
@@ -576,6 +582,10 @@ class FMPFetcher(BaseMarketFetcher):
             price = float((quote or {}).get("price") or 0)
             if bvps > 0 and price > 0:
                 pb_value_up_score = score_pb_value_up(bvps, price)
+                # Raw P/B ratio for the Discord 🎯 line (price & bvps same
+                # currency → ratio is FX-invariant). Distinct from the inverted
+                # 0-1 pb_value_up_score above.
+                price_to_book = round(price / bvps, 4)
             else:
                 pb_value_up_score = 0.0
                 _diag["pb_value_up"] = "no_coverage"
@@ -604,6 +614,62 @@ class FMPFetcher(BaseMarketFetcher):
             )
             _diag["roic_quality"] = "api_error"
 
+        # ── 13. Candidate shadow factors (A1 valuation breadth + A2 growth /
+        #        earnings-quality). Computed for ALL tickers but ABSENT from
+        #        WEIGHTS_* / FACTOR_MATRIX_V3 (weight 0) → live composite is
+        #        unchanged. Forwarded via engine _DISPLAY_META_KEYS into the
+        #        ranking rows so the de-overlapped IC gate (src/research/
+        #        ic_metrics) can judge each before any weight is allocated.
+        #        FMP field names verified against stable/ (2026-06): netIncome,
+        #        ebitda, operatingCashFlow, totalAssets, revenue.
+        # ─────────────────────────────────────────────────────────────────────
+        from src.scoring.fundamental_signals import (  # noqa: PLC0415
+            score_earnings_yield, score_ev_ebitda,
+            score_revenue_growth, score_eps_growth, score_accruals,
+        )
+        earnings_yield_score: Optional[float] = None
+        ev_ebitda_score: Optional[float] = None
+        revenue_growth_score: Optional[float] = None
+        eps_growth_score: Optional[float] = None
+        accruals_score: Optional[float] = None
+        try:
+            def _stmt(method, **kw):
+                rows = method(ticker, **kw) or []
+                if not rows and "." in ticker:
+                    rows = method(ticker.split(".")[0], **kw) or []
+                return rows
+
+            inc_q = _stmt(client.get_income_statements, period="quarter", limit=8)
+            inc_a = _stmt(client.get_income_statements, period="annual", limit=2)
+            cf_cand = _stmt(client.get_cash_flow_statements, limit=4)
+            bs = _stmt(client.get_balance_sheet, period="quarter", limit=1)
+            ev_cand = client.get_enterprise_value(ticker)
+
+            # TTM aggregates from the 4 newest quarters (filingDate-anchored).
+            ni_ttm = (sum(float(q.get("netIncome") or 0.0) for q in inc_q[:4])
+                      if len(inc_q) >= 4 else None)
+            ebitda_ttm = (sum(float(q.get("ebitda") or 0.0) for q in inc_q[:4])
+                          if len(inc_q) >= 4 else None)
+            cfo_ttm = (sum(float(q.get("operatingCashFlow") or 0.0) for q in cf_cand[:4])
+                       if len(cf_cand) >= 4 else None)
+            total_assets = float(bs[0].get("totalAssets") or 0.0) if bs else None
+
+            # A1 — earnings yield (E/P) and enterprise multiple (EV/EBITDA).
+            if ni_ttm is not None and mktcap_final and mktcap_final > 0:
+                earnings_yield_score = score_earnings_yield(ni_ttm, mktcap_final)
+            if ev_cand and ev_cand > 0 and ebitda_ttm is not None:
+                ev_ebitda_score = score_ev_ebitda(ev_cand, ebitda_ttm)
+            # A2 — TTM YoY growth (SIGNED: None when undefined) + accruals.
+            revenue_growth_score = score_revenue_growth(inc_q, inc_a)
+            eps_growth_score = score_eps_growth(inc_q, inc_a)
+            if ni_ttm is not None and cfo_ttm is not None and total_assets is not None:
+                accruals_score = score_accruals(ni_ttm, cfo_ttm, total_assets)
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher candidate factors ABSENT %s: %s(%s) — shadow only, ignored",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+
         return {
             "momentum_long_score":       momentum_long_score,
             "volume_attention_score":    volume_attention_score,
@@ -621,6 +687,13 @@ class FMPFetcher(BaseMarketFetcher):
             "amihud_shock_score":        amihud_shock_score,
             "pb_value_up_score":         pb_value_up_score,
             "roic_quality_score":        roic_quality_score,
+            # Candidate shadow factors (A1/A2) — weight 0, IC-gated before any
+            # weight allocation; forwarded for IC measurement via _DISPLAY_META_KEYS.
+            "earnings_yield_score":      earnings_yield_score,
+            "ev_ebitda_score":           ev_ebitda_score,
+            "revenue_growth_score":      revenue_growth_score,
+            "eps_growth_score":          eps_growth_score,
+            "accruals_score":            accruals_score,
             # Structurally absent — always 0.0
             "congress_score":            0.0,
             "transcript_tone_score":     0.0,
@@ -632,6 +705,7 @@ class FMPFetcher(BaseMarketFetcher):
             "market_cap":                mktcap_final,
             "target_price":              raw_target_price,
             "current_price":             raw_current_price,
+            "price_to_book":             price_to_book,
             "news_sentiment_source":     "fmp" if (news_sentiment_score or 0) > 0 else "none",
             "news_buzz_source":          "fmp" if (news_buzz_score or 0) > 0 else "none",
             "analyst_consensus_source":  "bulk" if (analyst_consensus_score or 0) > 0 else "none",
@@ -707,6 +781,11 @@ def _build_price_only_factors(
         "amihud_shock_score":        0.0,
         "pb_value_up_score":         None,
         "roic_quality_score":        None,
+        "earnings_yield_score":      None,
+        "ev_ebitda_score":           None,
+        "revenue_growth_score":      None,
+        "eps_growth_score":          None,
+        "accruals_score":            None,
         "congress_score":            0.0,
         "transcript_tone_score":     0.0,
         "revenue_revision_score":    None,
@@ -717,6 +796,7 @@ def _build_price_only_factors(
         "market_cap":                0.0,
         "target_price":              None,
         "current_price":             None,
+        "price_to_book":             None,
         "quality_piotroski_raw":     None,
         "news_sentiment_source":     "none",
         "news_buzz_source":          "none",

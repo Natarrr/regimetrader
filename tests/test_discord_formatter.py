@@ -1029,9 +1029,63 @@ class TestWhaleAndNicheAlpha:
 
     def test_target_token_exit_anchor(self):
         from src.delivery.send_discord import _target_token
+        # US (no suffix) → '$' prefix, no warning when target sits above spot.
         assert _target_token({"target_price": 120.0, "current_price": 100.0}) == \
             "🎯 tgt $120 (+20.0%)"
+        # Absent target/price → empty (never fabricate a level).
         assert _target_token({"target_price": 0.0, "current_price": 100.0}) == ""
+        assert _target_token({"current_price": 100.0}) == ""
+
+    def test_target_token_listing_currency(self):
+        """Currency symbol follows the exchange suffix; the % is unit-invariant."""
+        from src.delivery.send_discord import _target_token
+        assert _target_token(
+            {"ticker": "TTE.PA", "target_price": 76.0, "current_price": 70.6}
+        ).startswith("🎯 tgt €76 (+7.6%)")        # Euronext Paris → €
+        assert _target_token(
+            {"ticker": "7203.T", "target_price": 3000.0, "current_price": 2500.0}
+        ).startswith("🎯 tgt ¥3000")               # Tokyo → ¥
+        assert _target_token(
+            {"ticker": "2318.HK", "target_price": 60.0, "current_price": 50.0}
+        ).startswith("🎯 tgt HK$60")               # Hong Kong → HK$
+
+    def test_target_token_lse_pounds_no_dollar(self):
+        """LSE pence quotes render as conventional £ (÷100), never '$', with a
+        bounded % — the upstream paired rescue means no SHEL.L '$102 (−96.6%)'
+        garbage."""
+        from src.delivery.send_discord import _target_token
+        out = _target_token(
+            {"ticker": "SHEL.L", "target_price": 3050.0, "current_price": 2900.0})
+        assert out == "🎯 tgt £30.50 (+5.2%)"
+        assert "$" not in out
+
+    def test_target_token_below_spot_warns(self):
+        """Consensus target under spot on a BUY → ⚠ tgt<px (e.g. LQDA −4.3%)."""
+        from src.delivery.send_discord import _target_token
+        out = _target_token(
+            {"ticker": "LQDA", "target_price": 68.0, "current_price": 71.05})
+        assert out.startswith("🎯 tgt $68 (-4.3%)")
+        assert "⚠ tgt<px" in out
+        assert "⚠ tgt<px" not in _target_token(      # above spot → no warning
+            {"ticker": "ULTA", "target_price": 671.0, "current_price": 456.0})
+
+    def test_pb_token(self):
+        from src.delivery.send_discord import _pb_token
+        assert _pb_token({"price_to_book": 1.84}) == "P/B 1.8×"
+        assert _pb_token({"price_to_book": 0.0}) == ""
+        assert _pb_token({}) == ""                    # absent → omitted, never 'None'
+
+    def test_pb_renders_on_desk_line(self):
+        """Every ranked name's 🎯 line carries the raw P/B ratio (rank-1 + below)."""
+        usa = [
+            _entry("NVDA", 0.84, target_price=214.0, current_price=197.0,
+                   volume_spike=2.4, price_to_book=12.5),
+            _entry("MSFT", 0.78, target_price=400.0, current_price=350.0,
+                   price_to_book=9.7),
+        ]
+        text = _all_text(_embed(_build(top_buys_usa=usa)))
+        assert "P/B 12.5×" in text                    # rank-1 lifecycle line
+        assert "P/B 9.7×" in text                     # rank-2 anchor line
 
     def test_badge_niche_and_target_render_in_embed(self):
         """Integration: a small-cap whale at rank 1 surfaces the 🐋 badge + the

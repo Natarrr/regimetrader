@@ -644,6 +644,33 @@ class TestGetIncomeStatements:
             assert client.get_income_statements("7203.T") == []
 
 
+class TestGetBalanceSheet:
+    """Accruals (Sloan 1996) totalAssets deflator — stable/balance-sheet-statement."""
+
+    def test_returns_empty_without_api_key(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        c = FMPClient(api_key="", cache_root=tmp_path / "fmp")
+        assert c.get_balance_sheet("AAPL") == []
+
+    def test_fetches_with_route_and_params(self, client):
+        rows = [{"date": "2026-03-31", "filingDate": "2026-05-02", "totalAssets": 1.0e12}]
+        with patch.object(client._session, "get",
+                          return_value=_ok_resp(rows)) as mock_get:
+            result = client.get_balance_sheet("AAPL", period="quarter", limit=1)
+        assert result == rows
+        url = mock_get.call_args[0][0]
+        params = mock_get.call_args[1]["params"]
+        assert url.split("?")[0].endswith("/balance-sheet-statement")
+        assert params["symbol"] == "AAPL"
+        assert params["period"] == "quarter"
+        assert params["limit"] == 1
+
+    def test_non_list_response_returns_empty(self, client):
+        with patch.object(client._session, "get",
+                          return_value=_ok_resp({"error": "x"})):
+            assert client.get_balance_sheet("AAPL") == []
+
+
 class TestInstitutionalOwnershipFallback:
     def test_prior_quarter_fallback_when_current_unfiled(self, client):
         # now − 45d frequently lands in the CURRENT, not-yet-ended quarter
@@ -743,3 +770,50 @@ class TestUpsideToTargetGuards:
         }
         with patch.object(client._session, "get", side_effect=_route(responses)):
             assert client.get_upside_to_target("AAPL") is None
+
+
+class TestPairedTargetAndPrice:
+    """_paired_target_and_price is the single source of truth feeding BOTH the
+    upside score and the Discord 🎯 displayed level — so they cannot disagree
+    (the SHEL.L '$102 (−96.6%)' class of bug)."""
+
+    def test_returns_rescued_same_currency_levels_for_l_line(self, client):
+        # LSE pence quote + GBP target: rescue lifts the target ×100 so the
+        # DISPLAYED (target, price) are both pence → a sane bounded upside, not
+        # the −96.6% garbage the un-paired display path produced.
+        responses = {
+            ("/price-target-consensus", "VOD.L"): [
+                {"symbol": "VOD.L", "targetConsensus": 3.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "VOD.L"): [{"symbol": "VOD.L", "price": 250.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            target_f, price_f, resolved = client._paired_target_and_price("VOD.L")
+        assert (target_f, price_f, resolved) == (300.0, 250.0, "VOD.L")
+        assert 0.2 < target_f / price_f < 5.0     # same-unit → bounded ratio
+
+    def test_pairs_quote_with_resolved_consensus_symbol(self, client):
+        # Consensus only on the base symbol → the price MUST come from the base
+        # (USD/USD), never base-target × local quote (USD/EUR).
+        responses = {
+            ("/price-target-consensus", "ASML"): [
+                {"symbol": "ASML", "targetConsensus": 900.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "ASML"): [{"symbol": "ASML", "price": 850.0}],
+            ("/quote", "ASML.AS"): [{"symbol": "ASML.AS", "price": 620.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            target_f, price_f, resolved = client._paired_target_and_price("ASML.AS")
+        assert (target_f, price_f, resolved) == (900.0, 850.0, "ASML")  # not 620
+
+    def test_none_on_currency_mismatch(self, client):
+        # Unrescuable scale mismatch → None → display renders nothing (never a
+        # fabricated/garbage level).
+        responses = {
+            ("/price-target-consensus", "AAPL"): [
+                {"symbol": "AAPL", "targetConsensus": 2000.0,
+                 "targetConsensusDate": _fresh_date()}],
+            ("/quote", "AAPL"): [{"symbol": "AAPL", "price": 100.0}],
+        }
+        with patch.object(client._session, "get", side_effect=_route(responses)):
+            assert client._paired_target_and_price("AAPL") is None

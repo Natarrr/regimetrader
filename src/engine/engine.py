@@ -24,6 +24,7 @@ _DISPLAY_META_KEYS = (
     "return_21d",
     "target_price",
     "current_price",
+    "price_to_book",
     "earnings_surprise_pct",
     "earnings_surprise_days",
     "analyst_consensus_source",
@@ -31,6 +32,15 @@ _DISPLAY_META_KEYS = (
     "analyst_revision_n_analysts",
     "price_target_upside_score",
     "quality_piotroski_score",
+    # Candidate shadow factors (A1 valuation breadth + A2 growth/earnings-quality).
+    # Forwarded verbatim into ranking rows for the de-overlapped IC gate
+    # (src/research/ic_metrics) — NOT in active_factors, so live composite is
+    # unchanged until a measured IC justifies a weight.
+    "earnings_yield_score",
+    "ev_ebitda_score",
+    "revenue_growth_score",
+    "eps_growth_score",
+    "accruals_score",
     # Exit-anchor / liquidity inputs — forwarded when the fetcher produces
     # them (atr_14 / adv_20d_usd are not fetched yet; keys are forward-compat).
     "atr_14",
