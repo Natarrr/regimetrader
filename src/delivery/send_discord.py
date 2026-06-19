@@ -336,6 +336,36 @@ def _is_extended(entry: Dict[str, Any]) -> bool:
     return ext is not None and ext >= _extension_threshold(entry)
 
 
+# ── Target-already-passed gate ────────────────────────────────────────────────
+# A name whose analyst consensus target sits at/below the current price has no
+# remaining upside — surfacing it as an actionable BUY is incoherent (the desk
+# would be buying a name the Street already calls fully valued). Like the
+# extension gate this is DISPLAY/RISK only — it never touches final_score,
+# weights or factor math; it moves the name off the actionable desk into the
+# WATCH section. MIN_TARGET_UPSIDE (default 0.0) is the consensus headroom
+# required to STAY actionable: 0.0 gates only already-passed targets; 0.05 would
+# require ≥ +5% upside to remain on the desk.
+_MIN_TARGET_UPSIDE = float(os.getenv("MIN_TARGET_UPSIDE", "0.0"))
+
+
+def _target_passed(entry: Dict[str, Any]) -> bool:
+    """True when the consensus target is already passed: current ≥ target ×
+    (1 + MIN_TARGET_UPSIDE). Missing/zero target or price ⇒ False (absence is not
+    evidence of a passed target — never gate on unknown; CLAUDE.md §2)."""
+    tgt = _safe_float(entry.get("target_price"))
+    cur = _safe_float(entry.get("current_price"))
+    if tgt <= 0 or cur <= 0:
+        return False
+    return tgt < cur * (1.0 + _MIN_TARGET_UPSIDE)
+
+
+def _off_actionable_desk(entry: Dict[str, Any]) -> bool:
+    """Name removed from the actionable buy desk → WATCH section: either already
+    extended (recent 5d run-up) OR its analyst target is already passed (no
+    upside left). Display/risk gate only — never mutates the score."""
+    return _is_extended(entry) or _target_passed(entry)
+
+
 def _freshness_token(entry: Dict[str, Any]) -> str:
     """Compact ` · ±X.X% 5d` recency tag for an actionable desk line (empty when
     the recent return is unknown). Negative reads as a pullback — useful entry
@@ -963,12 +993,12 @@ class DiscordPayloadBuilder:
         return list(self.data.get(key) or [])
 
     def _fresh_entries(self, key: str) -> List[Dict[str, Any]]:
-        """Region entries that have NOT already run up past the gate — the names
-        that are still actionable to enter."""
-        return [e for e in self._region_entries(key) if not _is_extended(e)]
+        """Region entries still actionable to enter — NOT already run-up past the
+        freshness gate AND NOT already past their analyst target (no upside)."""
+        return [e for e in self._region_entries(key) if not _off_actionable_desk(e)]
 
     def _extended_entries(self, key: str) -> List[Dict[str, Any]]:
-        return [e for e in self._region_entries(key) if _is_extended(e)]
+        return [e for e in self._region_entries(key) if _off_actionable_desk(e)]
 
     def _population(self) -> List[float]:
         """All scores in the artifact — denominator for percentile ranks."""
@@ -1307,10 +1337,11 @@ class DiscordPayloadBuilder:
     _MAX_EXTENDED_ENTRIES = 6
 
     def _extended_field(self) -> Optional[Dict[str, Any]]:
-        """⏱ EXTENDED / ALREADY-MOVED (WATCH): names that already ran past the
-        freshness gate, surfaced (not hidden) so the reader sees what's already
-        gone vs chaseable. Aggregated across US/EU/Asia/SMID, de-duplicated,
-        sorted by run-up. Evidence-first (CLAUDE.md §5): ticker · move · why."""
+        """⏱ EXTENDED · 🎯 PAST-TARGET (WATCH): names moved off the actionable
+        desk — either already ran past the freshness gate OR already past their
+        analyst target (no upside). Surfaced (not hidden) so the reader sees
+        what's already gone vs chaseable. Aggregated across US/EU/Asia/SMID,
+        de-duplicated. Evidence-first (CLAUDE.md §5): ticker · reason · why."""
         seen: set = set()
         entries: List[Dict[str, Any]] = []
         for key in self._EXTENDED_KEYS:
@@ -1326,13 +1357,21 @@ class DiscordPayloadBuilder:
         lines: List[str] = []
         for e in entries[:self._MAX_EXTENDED_ENTRIES]:
             tic = e.get("ticker", "?")
-            ext = (_extension_pct(e) or 0.0) * 100
             score = _safe_float(e.get("final_score"))
+            # Target-passed takes precedence (a more fundamental "no upside left"
+            # reason than a short-term run-up).
+            if _target_passed(e):
+                tgt = _safe_float(e.get("target_price"))
+                cur = _safe_float(e.get("current_price"))
+                up = (tgt / cur - 1.0) * 100 if cur > 0 else 0.0
+                reason = f"🎯 past target ({up:+.1f}%)"
+            else:
+                reason = f"⏱ already {(_extension_pct(e) or 0.0) * 100:+.1f}% 5d"
             lines.append(
-                f"`{tic}` ⏱ already {ext:+.1f}% 5d · `{score:.3f}` — wait for pullback")
+                f"`{tic}` {reason} · `{score:.3f}` — wait for pullback")
             lines.append(f"└ {_compute_catalyst(e)}")
         return {
-            "name":   "⏱ EXTENDED / ALREADY-MOVED (WATCH)",
+            "name":   "⏱ EXTENDED · 🎯 PAST-TARGET (WATCH)",
             "value":  _truncate("\n".join(lines)),
             "inline": False,
         }

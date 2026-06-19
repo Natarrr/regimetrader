@@ -1667,11 +1667,16 @@ def run(
             # redistributes the weight pro-rata — do NOT coerce to 0.0 here.
             price_target_upside_score = _fmp_client.get_upside_to_target(ticker)
 
-            # Store raw PT and current price for Discord display
-            _pt_data         = _fmp_client.get_price_target_consensus(ticker)
-            _quote_data      = _fmp_client.get_quote(ticker)
-            _raw_target_price  = _pt_data.get("targetConsensus") if _pt_data else None
-            _raw_current_price = _quote_data.get("price") if _quote_data else None
+            # Store CURRENCY-PAIRED PT + spot for Discord display + the
+            # target-passed gate (P2.4). Same _paired_target_and_price the upside
+            # SCORE uses (single source of truth) — no un-paired currency mismatch
+            # (US is USD today, but this keeps the US path symmetric with INTL and
+            # safe if a non-US symbol ever routes through run_pipeline).
+            _paired_pt = _fmp_client._paired_target_and_price(ticker)
+            if _paired_pt is not None:
+                _raw_target_price, _raw_current_price, _ = _paired_pt
+            else:
+                _raw_target_price = _raw_current_price = None
 
             # ── Whale accumulation vector (13F QoQ position delta) ─────────
             # SIGNED factor + 🐋 WHALE / [NICHE ALPHA] display. Failure-isolated

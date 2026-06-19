@@ -62,6 +62,31 @@ def compute_beta(
     return round(cov / var_b, 4)
 
 
+def compute_beta_aligned(
+    asset_dates: list[str] | None,
+    asset_closes: list[float] | None,
+    bench_dates: list[str] | None,
+    bench_closes: list[float] | None,
+    window: int = 30,
+) -> float | None:
+    """Date-aligned beta for cross-calendar pairs (an INTL ticker vs US SPY).
+
+    Intersects the two date series so only CO-TRADED sessions enter the returns
+    — a naive tail-alignment would pair mismatched dates across US/local holiday
+    gaps and bias the beta. Delegates to compute_beta once aligned. Returns None
+    when fewer than `window` co-traded sessions exist.
+    """
+    if not asset_dates or not asset_closes or not bench_dates or not bench_closes:
+        return None
+    bench_map = dict(zip(bench_dates, bench_closes))
+    paired = [(d, float(c), float(bench_map[d]))
+              for d, c in zip(asset_dates, asset_closes) if d in bench_map]
+    if len(paired) < window + 1:
+        return None
+    paired.sort(key=lambda x: x[0])   # oldest-first by ISO date
+    return compute_beta([p[1] for p in paired], [p[2] for p in paired], window=window)
+
+
 def score_momentum_long(
     return_12_1m: float | None,
     spy_return_12_1m: float = 0.0,

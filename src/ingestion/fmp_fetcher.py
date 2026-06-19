@@ -251,7 +251,7 @@ class FMPFetcher(BaseMarketFetcher):
         if not rows and "." in ticker:
             rows = client.get_historical_prices(
                 ticker.split(".")[0], limit=_PRICE_LIMIT)
-        closes, volumes, _ = fmp_prices_to_arrays(rows)
+        closes, volumes, dates = fmp_prices_to_arrays(rows)
 
         if len(closes) < 5:
             logger.warning(
@@ -614,6 +614,26 @@ class FMPFetcher(BaseMarketFetcher):
             )
             _diag["roic_quality"] = "api_error"
 
+        # ── 12b. Beta vs SPY (P2.1 INTL) — date-ALIGNED for the cross-calendar
+        #         pair (local listing vs US SPY): only co-traded sessions enter
+        #         the returns. Feeds the CAPITULATION low-beta gate (regime.py);
+        #         None when too few co-traded sessions. Non-fatal.
+        beta_30d: Optional[float] = None
+        try:
+            from src.scoring.momentum_signals import compute_beta_aligned  # noqa: PLC0415
+            # SPY benchmark series fetched ONCE per fetcher instance (memoized),
+            # not per ticker.
+            if not hasattr(self, "_spy_beta_series"):
+                _spy_c, _, _spy_d = fmp_prices_to_arrays(
+                    client.get_historical_prices("SPY", limit=60))
+                self._spy_beta_series = (_spy_d, _spy_c)
+            _spy_dates, _spy_closes = self._spy_beta_series
+            beta_30d = compute_beta_aligned(
+                dates, closes, _spy_dates, _spy_closes, window=30)
+        except Exception as _beta_exc:
+            logger.debug("FMPFetcher beta_30d %s failed (non-fatal): %s",
+                         ticker, _beta_exc)
+
         # ── 13. Candidate shadow factors (A1 valuation breadth + A2 growth /
         #        earnings-quality). Computed for ALL tickers but ABSENT from
         #        WEIGHTS_* / FACTOR_MATRIX_V3 (weight 0) → live composite is
@@ -706,6 +726,7 @@ class FMPFetcher(BaseMarketFetcher):
             "target_price":              raw_target_price,
             "current_price":             raw_current_price,
             "price_to_book":             price_to_book,
+            "beta_30d":                  beta_30d,   # P2.1 — CAPITULATION low-beta gate (INTL)
             "news_sentiment_source":     "fmp" if (news_sentiment_score or 0) > 0 else "none",
             "news_buzz_source":          "fmp" if (news_buzz_score or 0) > 0 else "none",
             "analyst_consensus_source":  "bulk" if (analyst_consensus_score or 0) > 0 else "none",
@@ -797,6 +818,7 @@ def _build_price_only_factors(
         "target_price":              None,
         "current_price":             None,
         "price_to_book":             None,
+        "beta_30d":                  None,
         "quality_piotroski_raw":     None,
         "news_sentiment_source":     "none",
         "news_buzz_source":          "none",
