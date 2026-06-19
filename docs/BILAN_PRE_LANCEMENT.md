@@ -30,6 +30,36 @@ est dans requirements mais jamais câblé). « Lancer » = émettre les signaux 
 | **Paper trade** | ❌ **non fait** | **Étape manquante critique.** Les pros : 30-60 jours / **50+ signaux** forward-testés avant capital réel, et comparaison fills réels vs hypothèses de coût. |
 | **Live** | ⚙️ signal-only | « Live » = émettre les signaux. L'exécution est manuelle ⇒ pas de risque d'auto-blow-up, mais dépend de la **discipline humaine** (tenir les signaux à −15/−20 %). |
 
+## 2bis. Résultats du backtest net-de-coûts (archive existante, 2026-06-19)
+
+Backtest sur **23 snapshots** (28 mai → 11 juin 2026), **net** des coûts P2.2,
+horizon T+10, vs SPY :
+
+| Tier | n | Win rate | Return moy (net) | Alpha vs SPY | Profit factor |
+|---|---|---|---|---|---|
+| TACTICAL BUY | 162 | 47.5 % | −0.02 % | **+1.00 %** | 0.99 |
+| HIGH BUY | 2 | 0 % | −6.83 % | −5.34 % | 0.00 |
+| Large caps | 164 | 47.0 % | −0.11 % | +0.90 % | — |
+
+Pire détracteur récurrent : **9984.T (SoftBank)**, `momentum_long=1.00` → reversion
+~ −17 % → **valide le risque momentum-reversion** que les gates extension/target-passed adressent.
+
+**Caveats critiques (à lire impérativement) :**
+
+1. **Échantillon minuscule (~3 semaines, 164 trades pricés) ⇒ NON significatif
+   statistiquement.** Pas un edge prouvé : alpha faiblement positif (+1 %) dans le
+   bruit, win rate < 50 %, profit factor ≈ 1.
+2. **Signaux PRÉ-améliorations.** Ces snapshots ont été générés **avant** les gates
+   (target-passed, extension, capitulation low-beta) et les correctifs d'audit (cov
+   MVO, beta, devise). Les gates auraient filtré une partie des pertes (déjà
+   au-delà du target / already-moved) ⇒ **baseline pré-gate**, pas le système actuel.
+3. **Poids hétérogènes** sur la période (config évolutive) — l'ère ancienne
+   `v2 (28/23/22/15/12)` ressort à 65.7 % WR / +1.84 % alpha mais sur 35 trades seulement.
+
+**Ce backtest CONFIRME le verdict :** edge historique thin et non significatif ⇒
+**NO-GO capital réel**, **GO paper / signaux** pour accumuler de la breadth et
+valider les gates en forward.
+
 ## 3. Forces (ce qui est solide)
 
 - **Robustesse logicielle** : 1477 tests verts, architecture isolée, `FMPEndpointError`
