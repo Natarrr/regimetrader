@@ -32,13 +32,11 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger(__name__)
 
-_FACTORS_DEFAULT = (
-    "edgar_score",
-    "insider_score",
-    "congress_score",
-    "news_score",
-    "momentum_score",
-)
+# Audit P3.2 — no module-level default factor list. The old `_FACTORS_DEFAULT`
+# carried legacy 5-factor names (edgar_score/insider_score/…) that no live key
+# matches; any caller relying on it would silently neutralize NOTHING (the
+# silent-zero trap). All callers pass an explicit `factors=` tuple, so the
+# argument is now REQUIRED — a future omission fails loudly, never silently.
 _SIGMOID_CLIP_LO = 0.01
 _SIGMOID_CLIP_HI = 0.99
 
@@ -67,7 +65,7 @@ def _bucket_stats(values: list[float]) -> tuple[float, float]:
 
 def neutralize_factors(
     results: list[dict[str, Any]],
-    factors: tuple[str, ...] = _FACTORS_DEFAULT,
+    factors: tuple[str, ...],
     group_by: tuple[str, ...] = ("sector", "cap_tier"),
     min_bucket_size: int = 5,
     fallback_group_by: tuple[str, ...] = ("cap_tier",),

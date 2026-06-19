@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -52,6 +53,26 @@ _BADGE_THRESHOLDS = {
     "TACTICAL BUY": 0.60,
 }
 _BENCHMARK = "SPY"
+
+# Audit P2.2 — round-trip transaction cost (entry + exit) as a fraction of
+# notional, by cap tier: small/mid-caps carry wider spreads + more slippage on
+# a ~20%-turnover book. Reported returns were previously GROSS (edge overstated,
+# the trader's #1 objection). Net return = gross − round-trip cost, applied to
+# the strategy leg only (the SPY benchmark is held passively). Env-overridable.
+_ROUNDTRIP_COST: Dict[str, float] = {
+    "large":   float(os.getenv("BT_COST_LARGE", "0.0020")),   # 20 bps
+    "mid":     float(os.getenv("BT_COST_MID",   "0.0040")),   # 40 bps
+    "small":   float(os.getenv("BT_COST_SMALL", "0.0060")),   # 60 bps
+}
+_DEFAULT_COST = _ROUNDTRIP_COST["large"]
+
+
+def _roundtrip_cost(cap_tier: str) -> float:
+    """Round-trip transaction cost for a cap tier (defaults to the large-cap
+    cost for unknown/missing tiers)."""
+    return _ROUNDTRIP_COST.get((cap_tier or "").lower(), _DEFAULT_COST)
+
+
 _ARCHIVE_DIR  = ROOT / "logs" / "archive"
 _REPORT_JSON  = ROOT / "logs" / "backtest_report_latest.json"
 _LEDGER_CSV   = ROOT / "logs" / "backtest_ledger_latest.csv"
@@ -380,6 +401,8 @@ def compute_returns(
         if series is None or series.empty:
             continue
 
+        cost = _roundtrip_cost(rec.cap_tier)   # P2.2 — net-of-cost returns
+
         # Entry: T+1 if post-market flag, else T+0 (same-day close)
         entry_date  = rec.signal_date
         entry_offset = 1 if rec.entry_next_day else 0
@@ -397,7 +420,9 @@ def compute_returns(
                 rec.alpha[h] = None
                 continue
 
-            ret = (exit_price - entry_price_raw) / entry_price_raw
+            # NET of the round-trip transaction cost (P2.2) — the reported edge
+            # is what the book actually keeps, not the gross paper return.
+            ret = (exit_price - entry_price_raw) / entry_price_raw - cost
             rec.returns[h] = float(ret)
 
             # FX isolation: intl prices are listing-currency (JPY for .T,
@@ -624,6 +649,8 @@ def build_json_report(
         "generated_at":  datetime.now(timezone.utc).isoformat(),
         "signal_count":  len(trades),
         "horizons":      _HORIZONS,
+        # P2.2 — returns/alpha below are NET of these round-trip costs (fractions).
+        "cost_model":    {"roundtrip_cost_by_tier": _ROUNDTRIP_COST},
         "badge_stats":   {
             badge: [_stats_to_dict(s) for s in stats]
             for badge, stats in badge_stats.items()
@@ -763,8 +790,10 @@ def build_markdown_report(
     lines.append(
         f"*Total archive signals parsed: {total_signals} — "
         "priced signals reflect those with available yfinance history. "
-        "Signals with dead-feed factors (congress=0.5, macro=0.5) are included "
-        "as-is; their weight redistribution is captured in the stored weights metadata.*"
+        "Returns are **NET of estimated round-trip transaction costs** "
+        f"(large {_ROUNDTRIP_COST['large']*1e4:.0f} / mid {_ROUNDTRIP_COST['mid']*1e4:.0f} / "
+        f"small {_ROUNDTRIP_COST['small']*1e4:.0f} bps); the SPY benchmark is held "
+        "passively. Signals with dead-feed factors are included as-is.*"
     )
     return "\n".join(lines)
 
