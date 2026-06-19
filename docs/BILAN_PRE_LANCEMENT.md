@@ -60,6 +60,15 @@ Pire détracteur récurrent : **9984.T (SoftBank)**, `momentum_long=1.00` → re
 **NO-GO capital réel**, **GO paper / signaux** pour accumuler de la breadth et
 valider les gates en forward.
 
+**IC par facteur (de-overlappé, `scripts/ic_from_archive.py`, T+5).** Sur 206
+lignes mais une **breadth effective de seulement 1–4** (López de Prado),
+**aucun facteur n'atteint la significativité** (|t-stat| < 1.7 partout). Directions
+indicatives : `quality_piotroski` +0.25 (le plus défendable), `congress` −0.37 et
+`momentum_long` ≈ 0/négatif à T+5 — **cohérent avec l'audit** (congress faiblement
+soutenu, edge structurellement retardé). ⇒ **On ne peut ni valider les facteurs,
+ni activer les flags, ni repondérer sur cette base.** Le script est à relancer à
+mesure que les snapshots s'accumulent (cible : n_effective ≥ 8 avant toute décision).
+
 ## 3. Forces (ce qui est solide)
 
 - **Robustesse logicielle** : 1477 tests verts, architecture isolée, `FMPEndpointError`
