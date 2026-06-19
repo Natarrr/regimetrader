@@ -340,6 +340,32 @@ def _cross_sectional_normalize(results: List[Dict[str, Any]]) -> List[Dict[str, 
     ]
 
 
+def _neutralized_factors(results: List[Dict[str, Any]]) -> List[Dict[str, float]]:
+    """P1.1 audit — cross-sectional NEUTRALIZED factors (sector×cap_tier
+    z-score→sigmoid), the SAME transform run_pipeline uses for the monitoring
+    `final_score`. Enabled by SCORING_NORM_NEUTRALIZE_TRADE=1 so the *traded*
+    composite and the *monitored* composite share one normalization
+    (validate-what-you-trade). Default path stays min-max
+    (`_cross_sectional_normalize`) until an IC backtest justifies the switch.
+
+    Output shape mirrors `_cross_sectional_normalize`: one factor-name-keyed
+    dict per row over FACTOR_FIELDS, values in [0, 1].
+    """
+    from src.scoring.neutralization import neutralize_factors  # noqa: PLC0415
+    neutralized = neutralize_factors(
+        results,
+        factors=tuple(FACTOR_FIELDS.values()),
+        group_by=("sector", "cap_tier"),
+        min_bucket_size=5,
+        fallback_group_by=("cap_tier",),
+    )
+    return [
+        {factor: round(float(r.get(f"{field}_neutral", 0.0) or 0.0), 4)
+         for factor, field in FACTOR_FIELDS.items()}
+        for r in neutralized
+    ]
+
+
 def _absolute_factors(row: Dict[str, Any]) -> Dict[str, float]:
     """Absolute factor mapping for single-ticker (on-demand) mode.
 
@@ -880,6 +906,10 @@ def generate(
     if single_ticker:
         # n=1: cross-sectional ranking is undefined — score absolutely.
         norm_factor_list = [_absolute_factors(r) for r in us_results]
+    elif os.getenv("SCORING_NORM_NEUTRALIZE_TRADE") == "1":
+        # P1.1 audit — unify the traded composite onto the monitoring path's
+        # neutralization (default OFF → min-max path below is byte-identical).
+        norm_factor_list = _neutralized_factors(us_results)
     else:
         norm_factor_list = _cross_sectional_normalize(us_results)
     assert len(norm_factor_list) == len(us_results), (
