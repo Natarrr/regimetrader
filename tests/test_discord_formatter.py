@@ -1133,6 +1133,58 @@ class TestExtensionGateUnit:
         assert not _is_extended({"return_5d": None, "cap_tier": "large"})
 
 
+class TestTargetPassedGateUnit:
+    """_target_passed: a consensus target at/below spot has no upside left —
+    incoherent as an actionable BUY. Missing target/price ⇒ never gated."""
+
+    def test_target_below_price_is_passed(self):
+        from src.delivery.send_discord import _target_passed
+        assert _target_passed({"target_price": 68.0, "current_price": 71.0})
+
+    def test_target_above_price_not_passed(self):
+        from src.delivery.send_discord import _target_passed
+        assert not _target_passed({"target_price": 95.0, "current_price": 71.0})
+
+    def test_missing_target_or_price_not_passed(self):
+        from src.delivery.send_discord import _target_passed
+        assert not _target_passed({"current_price": 71.0})
+        assert not _target_passed({"target_price": 68.0})
+        assert not _target_passed({"target_price": 0.0, "current_price": 71.0})
+
+    def test_off_desk_combines_extension_and_target(self):
+        from src.delivery.send_discord import _off_actionable_desk
+        assert _off_actionable_desk({"target_price": 68.0, "current_price": 71.0})
+        assert _off_actionable_desk({"return_5d": 0.13, "cap_tier": "large"})
+        assert not _off_actionable_desk(
+            {"target_price": 95.0, "current_price": 71.0, "return_5d": 0.02})
+
+
+class TestTargetPassedGateRender:
+    """A name whose target is already passed leaves the actionable ALPHA DESK
+    and surfaces in the '🎯 PAST-TARGET (WATCH)' section."""
+
+    def test_passed_target_leaves_desk_for_watch(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("PAST", 0.81, target_price=68.0, current_price=71.0),
+            _entry("UPSD", 0.79, target_price=95.0, current_price=71.0),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk  = _field(e, "ALPHA DESK")
+        watch = _field(e, "PAST-TARGET")
+        assert watch is not None
+        assert "PAST" in watch["value"] and "🎯 past target" in watch["value"]
+        assert "PAST" not in desk["value"]      # removed from actionable desk
+        assert "UPSD" in desk["value"]           # upside name stays actionable
+
+    def test_upside_name_stays_on_desk(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("UPSD", 0.75, target_price=95.0, current_price=71.0),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        assert "UPSD" in desk["value"]
+        watch = _field(e, "PAST-TARGET")
+        assert watch is None or "UPSD" not in watch["value"]
+
+
 class TestExtensionGateRender:
     """Already-moved names leave the actionable ALPHA DESK and surface in a
     separate '⏱ EXTENDED / ALREADY-MOVED (WATCH)' section."""
