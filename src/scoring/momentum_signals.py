@@ -24,6 +24,44 @@ import math
 log = logging.getLogger(__name__)
 
 
+def compute_beta(
+    asset_closes: list[float] | None,
+    benchmark_closes: list[float] | None,
+    window: int = 30,
+) -> float | None:
+    """Trailing rolling beta of an asset vs a benchmark (CAPM slope).
+
+        beta = Cov(r_asset, r_bench) / Var(r_bench)
+
+    over the most recent `window` daily simple returns. Both series must be
+    oldest-first and aligned to the SAME trading calendar (e.g. a US ticker vs
+    SPY) — for cross-calendar pairs (INTL vs SPY) the caller must align by date
+    first. Returns None when fewer than `window` return pairs exist or the
+    benchmark variance is ~0 (beta undefined).
+
+    Producer for the CAPITULATION low-beta gate
+    (src/risk/regime._is_capitulation_survivor), which is inert without a beta
+    factor: a name with beta > 1.2 is dropped from the crash-regime shortlist.
+    """
+    if not asset_closes or not benchmark_closes:
+        return None
+    a = [float(x) for x in asset_closes[-(window + 1):]]
+    b = [float(x) for x in benchmark_closes[-(window + 1):]]
+    ra = [a[i] / a[i - 1] - 1.0 for i in range(1, len(a)) if a[i - 1]]
+    rb = [b[i] / b[i - 1] - 1.0 for i in range(1, len(b)) if b[i - 1]]
+    m = min(len(ra), len(rb))
+    if m < window:
+        return None
+    ra, rb = ra[-window:], rb[-window:]
+    mean_a = sum(ra) / window
+    mean_b = sum(rb) / window
+    cov = sum((ra[i] - mean_a) * (rb[i] - mean_b) for i in range(window)) / window
+    var_b = sum((rb[i] - mean_b) ** 2 for i in range(window)) / window
+    if var_b < 1e-12:
+        return None
+    return round(cov / var_b, 4)
+
+
 def score_momentum_long(
     return_12_1m: float | None,
     spy_return_12_1m: float = 0.0,

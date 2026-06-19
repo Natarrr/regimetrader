@@ -25,6 +25,8 @@
 # Weights sum check enforced at module load time via assert.
 # Any modification must maintain sum == 1.0.
 
+import os
+
 WEIGHTS_VERSION = "v2.2-global"
 
 # ── US universe (Sprint v2.4: transcript_tone activated) ─────────────────────
@@ -175,9 +177,18 @@ def _piotroski_gate_multiplier(raw: int | None) -> float:
     F-score < suppress_below → 0.0 (BUY suppressed — financially distressed)
     F-score < discount_below → discount_factor (discounted)
     F-score >= discount_below → 1.0 (full weight)
-    None → missing_score/8 sentinel (conservative)
+    None → missing_score/8 sentinel (conservative, 0.375) by default.
+
+    Audit P1.3 — missing-data convergence flag. The repo carries THREE divergent
+    missing-Piotroski conventions (this 0.375 live gate; _score_compositor's 1.0;
+    engine_v3's 0.1875). Setting PIOTROSKI_GATE_NEUTRAL_MISSING=1 makes a missing
+    F-score neutral (1.0) — absence is not bearish — converging this live gate onto
+    _score_compositor's contract. Default OFF preserves the live convention until
+    an IC backtest justifies the switch (changes the traded score).
     """
     if raw is None:
+        if os.getenv("PIOTROSKI_GATE_NEUTRAL_MISSING") == "1":
+            return 1.0
         return PIOTROSKI_GATE["missing_score"] / 8.0
     if raw < PIOTROSKI_GATE["suppress_below"]:
         return 0.0

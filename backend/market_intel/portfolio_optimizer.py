@@ -127,28 +127,58 @@ def _calibrate_scores_to_returns(
     return np.clip(mid + z * scale, lower_return, upper_return)
 
 
-def build_async_covariance(price_series: dict[str, list[float]]) -> Optional[np.ndarray]:
-    """Build covariance matrix using 2-day rolling log-return window for global assets.
+# Minimum NON-overlapping return observations before a sample covariance is
+# trusted at all. Below this the caller falls back (file cov → identity).
+_MIN_COV_OBS = 10
 
-    Smooths non-overlapping timezone trading deltas (Tokyo/London/New York).
-    log_ret_2d[t] = log(price[t] / price[t-2] + ε).
-    Returns None if fewer than 5 observations.
+
+def build_async_covariance(price_series: dict[str, list[float]]) -> Optional[np.ndarray]:
+    """Ledoit-Wolf-shrunk covariance from NON-overlapping 2-day log returns.
+
+    Two fixes over the previous `np.cov` on rolling 2-day returns:
+      1. NON-overlapping 2-day steps (log(p[i+2]/p[i]) for i = 0,2,4,…). A rolling
+         2-day window shares a day between consecutive observations, inducing
+         autocorrelation that biases the covariance — the same leakage the IC
+         backtest de-overlaps (López de Prado). The 2-day span still smooths
+         non-synchronous timezone trading (Tokyo/London/NY).
+      2. **Ledoit-Wolf shrinkage** toward a scaled-identity target. A raw sample
+         covariance with observations < assets is rank-deficient/singular, and
+         feeding it to SLSQP produces error-maximizing (extreme, unstable)
+         weights. LW shrinkage guarantees a positive-definite, well-conditioned
+         matrix even when assets > observations.
+
+    Returns None when fewer than `_MIN_COV_OBS` non-overlapping observations
+    exist (the caller then falls back to the stored cov, else identity).
     """
     if not price_series:
         return None
     tickers = list(price_series.keys())
     min_len = min(len(v) for v in price_series.values())
-    if min_len < 5:
+    # Non-overlapping 2-day returns need 2·obs+1 prices for `obs` observations.
+    if min_len < 2 * _MIN_COV_OBS + 1:
         return None
 
+    idx = np.arange(0, min_len - 2, 2)   # 0,2,4,… with idx+2 < min_len
     returns_matrix = []
     for t in tickers:
-        prices = np.array(price_series[t][-min_len:], dtype=float)
-        log_ret_2d = np.log(prices[2:] / prices[:-2] + 1e-10)
-        returns_matrix.append(log_ret_2d)
+        prices = np.asarray(price_series[t][-min_len:], dtype=float)
+        log_ret = np.log(prices[idx + 2] / prices[idx] + 1e-10)
+        returns_matrix.append(log_ret)
 
-    R = np.array(returns_matrix)   # (n_tickers, n_periods − 2)
-    return np.cov(R)
+    R = np.array(returns_matrix)          # (n_assets, n_obs)
+    if R.shape[1] < _MIN_COV_OBS:
+        return None
+    try:
+        from sklearn.covariance import ledoit_wolf  # noqa: PLC0415
+        shrunk, _ = ledoit_wolf(R.T)      # sklearn expects (n_samples, n_features)
+        return shrunk
+    except Exception as exc:
+        # Diagonal-of-variance fallback — always positive-definite, never the
+        # rank-deficient raw sample covariance.
+        log.warning("Ledoit-Wolf shrinkage failed (%s) — diagonal fallback", exc)
+        var = np.var(R, axis=1)
+        var = np.where(var <= 1e-10, 1e-10, var)
+        return np.diag(var)
 
 
 _LARGE_CAP_THRESHOLD = 10_000_000_000   # $10B
