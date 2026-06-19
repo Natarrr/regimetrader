@@ -186,7 +186,9 @@ def test_fmp_fetcher_historical_price_falls_back_to_base_symbol():
         result = f.prepare(["ASML.AS"])
 
     assert len(result) == 1
-    assert call_args == ["ASML.AS", "ASML"]
+    # First two calls are the ticker → base-symbol fallback; a trailing "SPY"
+    # call may follow (P2.1 beta benchmark, fetched once per instance).
+    assert call_args[:2] == ["ASML.AS", "ASML"]
 
 
 def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
@@ -206,7 +208,8 @@ def test_fmp_fetcher_multiple_tickers_returns_multiple_entries():
     with patch("src.services.fmp_client.FMPClient", return_value=mock):
         result = f.prepare(["SAP.DE", "SIE.DE"])
     assert len(result) == 2
-    assert call_count[0] == 2
+    # One call per ticker + one shared "SPY" fetch (P2.1 beta, memoized once).
+    assert call_count[0] == 3
 
 
 def test_build_ticker_index_supports_base_symbol_lookup():

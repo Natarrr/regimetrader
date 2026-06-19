@@ -49,6 +49,42 @@ class TestComputeBeta:
         assert compute_beta(asset, flat, window=30) is None
 
 
+def _iso_dates(n: int, start: str = "2026-01-01") -> list[str]:
+    from datetime import date, timedelta
+    d0 = date.fromisoformat(start)
+    return [(d0 + timedelta(days=i)).isoformat() for i in range(n)]
+
+
+class TestComputeBetaAligned:
+    """Date-aligned beta for INTL (local listing vs US SPY) — only co-traded
+    sessions enter the returns."""
+
+    def test_identical_aligned_beta_one(self):
+        from src.scoring.momentum_signals import compute_beta_aligned
+        closes = _closes_from_returns(_BENCH_RETS)
+        dts = _iso_dates(len(closes))
+        assert compute_beta_aligned(dts, closes, dts, closes, window=30) == \
+            pytest.approx(1.0, abs=1e-6)
+
+    def test_drops_non_cotraded_dates(self):
+        from src.scoring.momentum_signals import compute_beta_aligned
+        closes = _closes_from_returns(_BENCH_RETS)
+        dts = _iso_dates(len(closes))
+        # 3 local-holiday sessions the benchmark never traded → dropped, leaving
+        # the 31 co-traded sessions → beta 1.0.
+        a_dates = ["2025-12-20", "2025-12-21", "2025-12-22"] + dts
+        a_closes = [50.0, 51.0, 52.0] + closes
+        assert compute_beta_aligned(a_dates, a_closes, dts, closes, window=30) == \
+            pytest.approx(1.0, abs=1e-6)
+
+    def test_none_when_too_few_cotraded(self):
+        from src.scoring.momentum_signals import compute_beta_aligned
+        closes = _closes_from_returns(_BENCH_RETS)
+        dts = _iso_dates(len(closes))
+        assert compute_beta_aligned(dts, closes, dts[:10], closes[:10],
+                                    window=30) is None
+
+
 class TestCapitulationBetaGate:
     """The beta gate (inert without a producer) now excludes high-beta names."""
 

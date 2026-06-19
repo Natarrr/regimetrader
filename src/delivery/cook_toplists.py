@@ -216,6 +216,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         "target_price":    raw.get("target_price"),
         "current_price":   raw.get("current_price"),
         "price_to_book":   raw.get("price_to_book"),  # raw P/B ratio for 🎯 line
+        "beta_30d":        raw.get("beta_30d"),       # P2.1 — CAPITULATION low-beta gate
         # Forward analyst meta for badge lines
         "analyst_consensus_source":    raw.get("analyst_consensus_source", "none"),
         "analyst_revision_score":      float(raw.get("analyst_revision_score") or 0.0),

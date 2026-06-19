@@ -25,6 +25,7 @@ _DISPLAY_META_KEYS = (
     "target_price",
     "current_price",
     "price_to_book",
+    "beta_30d",       # P2.1 — CAPITULATION low-beta gate (INTL producer)
     "earnings_surprise_pct",
     "earnings_surprise_days",
     "analyst_consensus_source",
