@@ -1207,30 +1207,28 @@ class FMPClient:
             result["_resolved_symbol"] = resolved
         return result
 
-    def get_upside_to_target(self, ticker: str, max_age_days: int = 90) -> Optional[float]:
-        """Analyst consensus price target upside score in [0, 1], or None.
+    def _paired_target_and_price(
+        self, ticker: str, max_age_days: int = 90
+    ) -> Optional[Tuple[float, float, str]]:
+        """Currency-paired analyst target + spot price, or None.
 
-        Computes score_price_target_upside(targetConsensus, currentPrice)
-        using two already-cached FMP calls:
-          - get_price_target_consensus() → stable/price-target-consensus (ratings bucket, 6h TTL)
-          - get_quote()                  → stable/quote (quote bucket, 5min TTL)
+        SINGLE SOURCE OF TRUTH behind both get_upside_to_target (the score) and
+        the Discord 🎯 exit-anchor (the displayed level) — so the two can never
+        disagree (the SHEL.L "$102 (−96.6%)" class of bug).
 
-        Staleness check: if the consensus target is older than max_age_days (default 90),
-        returns None rather than a misleading score based on a stale target.
+        Pairs the consensus target with the quote from the SAME resolved symbol
+        variant (a USD ADR target must never meet a local-currency quote),
+        applies the LSE GBX/GBP 100× rescue, enforces the staleness cutoff
+        (max_age_days), and a [0.2, 5.0] order-of-magnitude backstop (residual
+        currency mixing → None).
 
-        Returns None when:
-          - No API key
-          - targetConsensus or price is missing, zero, or non-numeric
-          - Target is older than max_age_days (stale — treated as dead signal)
-          - Either delegated call raises an exception
-
-        None → caller converts to 0.0 via `or 0.0` → dead signal penalized
-        in cross-sectional normalization. Distinct from 0.50 (at-target, valid data).
+        Returns (target, price, resolved_symbol) — target and price in the SAME
+        currency unit. None on: no API key, missing/zero/non-numeric target or
+        price, stale target, suspected currency mismatch, or any exception.
         """
         if not self._api_key:
             return None
         try:
-            from src.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
             from datetime import date as _date  # noqa: PLC0415
             target_data = self.get_price_target_consensus(ticker)
             # Same-symbol pairing: the quote MUST come from the same symbol
@@ -1254,7 +1252,7 @@ class FMPClient:
                     age_days = (datetime.now(timezone.utc).date() - target_date).days
                     if age_days > max_age_days:
                         log.debug(
-                            "get_upside_to_target %s: target is %dd old (> %dd threshold) — "
+                            "_paired_target_and_price %s: target is %dd old (> %dd threshold) — "
                             "returning None (stale, treated as dead signal)",
                             ticker, age_days, max_age_days,
                         )
@@ -1267,7 +1265,8 @@ class FMPClient:
             ratio = target_f / price_f
             # GBX/GBP rescue: LSE lines quote in pence while consensus targets
             # are often published in pounds (structural 100× hazard). Rescue
-            # recovers the signal instead of None-dropping the UK book.
+            # recovers the signal instead of None-dropping the UK book. After
+            # rescue, target and price are both in pence (GBX).
             if quote_symbol.upper().endswith(".L"):
                 if 0.005 <= ratio <= 0.02:
                     target_f *= 100.0
@@ -1275,18 +1274,43 @@ class FMPClient:
                     target_f /= 100.0
                 ratio = target_f / price_f
             # Order-of-magnitude backstop (all symbols): post-rescue scale
-            # mismatch means residual currency mixing — None, never a score.
+            # mismatch means residual currency mixing — None, never a level.
             if ratio > 5.0 or ratio < 0.2:
                 log.warning(
-                    "get_upside_to_target %s: target/price ratio %.3f outside "
+                    "_paired_target_and_price %s: target/price ratio %.3f outside "
                     "[0.2, 5.0] — suspected currency/scale mismatch, returning None",
                     ticker, ratio,
                 )
                 return None
-            return score_price_target_upside(target_f, price_f)
+            return (target_f, price_f, quote_symbol)
         except Exception as exc:
-            log.debug("get_upside_to_target %s failed: %s", ticker, exc)
+            log.debug("_paired_target_and_price %s failed: %s", ticker, exc)
             return None
+
+    def get_upside_to_target(self, ticker: str, max_age_days: int = 90) -> Optional[float]:
+        """Analyst consensus price target upside score in [0, 1], or None.
+
+        Computes score_price_target_upside(targetConsensus, currentPrice) over the
+        currency-paired (target, price) from _paired_target_and_price() — the same
+        pairing/rescue the Discord 🎯 exit-anchor renders, so score and displayed
+        level can never disagree.
+
+        Returns None when:
+          - No API key
+          - targetConsensus or price is missing, zero, or non-numeric
+          - Target is older than max_age_days (stale — treated as dead signal)
+          - Suspected currency/scale mismatch (post-rescue ratio outside [0.2, 5.0])
+          - Either delegated call raises an exception
+
+        None → caller converts to 0.0 via `or 0.0` → dead signal penalized
+        in cross-sectional normalization. Distinct from 0.50 (at-target, valid data).
+        """
+        from src.scoring.momentum_signals import score_price_target_upside  # noqa: PLC0415
+        paired = self._paired_target_and_price(ticker, max_age_days=max_age_days)
+        if paired is None:
+            return None
+        target_f, price_f, _ = paired
+        return score_price_target_upside(target_f, price_f)
 
     def get_batch_quotes(self, tickers: List[str]) -> Dict[str, Dict]:
         """Batch quote (stable/batch-quote). PASS in smoke-test.
@@ -1356,6 +1380,30 @@ class FMPClient:
         if cached is not None:
             return cached
         data = self._get("income-statement",
+                         {"symbol": ticker, "period": period, "limit": limit},
+                         bucket="key_metrics") or []
+        result = data if isinstance(data, list) else []
+        if result:  # never cache an empty/transient miss for the 24h TTL
+            self._cache_write("key_metrics", cache_key, result)
+        return result
+
+    def get_balance_sheet(
+        self, ticker: str, period: str = "quarter", limit: int = 1
+    ) -> List[Dict]:
+        """Balance-sheet statements (stable/balance-sheet-statement), newest-first.
+
+        Candidate accruals factor (Sloan 1996) input: totalAssets as the
+        deflator for (netIncome − operatingCashFlow). Rows carry filingDate for
+        look-ahead-safe anchoring (CLAUDE.md §3). 24h TTL (key_metrics bucket),
+        keyed by period+limit like get_income_statements to avoid aliasing.
+        """
+        if not self._api_key:
+            return []
+        cache_key = f"{ticker}:bs:{period}:{limit}"
+        cached = self._cache_read("key_metrics", cache_key)
+        if cached is not None:
+            return cached
+        data = self._get("balance-sheet-statement",
                          {"symbol": ticker, "period": period, "limit": limit},
                          bucket="key_metrics") or []
         result = data if isinstance(data, list) else []

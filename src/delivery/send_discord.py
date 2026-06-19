@@ -660,13 +660,61 @@ def _decay_note(entry: Dict[str, Any]) -> str:
     return ""
 
 
+# Home-market currency symbol by exchange suffix — the 🎯 target level renders in
+# the currency of the market each name trades on (no FX infra upstream; the % is
+# unit-invariant after FMPClient._paired_target_and_price). '.L' (LSE) quotes in
+# pence → mapped to '£' and divided by 100 in _target_token (conventional pounds).
+# '.SS'/'.SZ' use 'CN¥' to disambiguate the yuan from the Japanese yen ('¥', '.T').
+_CCY_SUFFIX: Dict[str, str] = {
+    ".PA": "€", ".AS": "€", ".DE": "€", ".F": "€", ".MC": "€", ".MI": "€",
+    ".BR": "€", ".HE": "€", ".LS": "€", ".VI": "€",
+    ".SW": "CHF",                    # SIX Swiss → Swiss franc
+    ".L":  "£",                      # LSE pence → pounds (÷100 in _target_token)
+    ".T":  "¥",                      # Tokyo → yen
+    ".SS": "CN¥", ".SZ": "CN¥",      # Shanghai / Shenzhen → yuan (≠ JP ¥)
+    ".HK": "HK$",                    # Hong Kong dollar
+    ".KS": "₩",                      # Korea → won
+}
+
+
+def _ccy_prefix(ticker: str) -> str:
+    """Home-market currency symbol from the exchange suffix ('$' default).
+    '.L' → '£' (pence→pounds conversion is applied by _target_token)."""
+    up = (ticker or "").upper()
+    for suf, sym in _CCY_SUFFIX.items():
+        if up.endswith(suf):
+            return sym
+    return "$"
+
+
 def _target_token(entry: Dict[str, Any]) -> str:
-    """🎯 analyst target price + upside — the exit anchor. Empty when either the
-    consensus target or the current price is absent (never fabricate a level)."""
+    """🎯 analyst target price + upside — the exit anchor ("know when to sell").
+
+    Empty when either the consensus target or the current price is absent (never
+    fabricate a level). target_price / current_price are currency-paired upstream
+    (FMPClient._paired_target_and_price), so the % is always sound and the level
+    renders in the instrument's home-market currency. ⚠ tgt<px flags a consensus
+    target below spot (e.g. consensus lagging a fast momentum name)."""
     tgt = _safe_float(entry.get("target_price"))
     cur = _safe_float(entry.get("current_price"))
-    if tgt > 0 and cur > 0:
-        return f"🎯 tgt ${tgt:.0f} ({(tgt / cur - 1) * 100:+.1f}%)"
+    if tgt <= 0 or cur <= 0:
+        return ""
+    ticker = entry.get("ticker") or ""
+    pct = (tgt / cur - 1) * 100
+    if ticker.upper().endswith(".L"):
+        level = f"£{tgt / 100:.2f}"    # LSE pence (GBX) → conventional pounds
+    else:
+        level = f"{_ccy_prefix(ticker)}{tgt:.0f}"
+    warn = " · ⚠ tgt<px" if tgt < cur else ""
+    return f"🎯 tgt {level} ({pct:+.1f}%){warn}"
+
+
+def _pb_token(entry: Dict[str, Any]) -> str:
+    """P/B raw ratio — book-value cheapness alongside the exit target. Omitted
+    when price-to-book is absent (never renders 'None')."""
+    pb = _safe_float(entry.get("price_to_book"))
+    if pb > 0:
+        return f"P/B {pb:.1f}×"
     return ""
 
 
@@ -718,6 +766,9 @@ def _lifecycle_line(entry: Dict[str, Any]) -> str:
     tgt = _target_token(entry)
     if tgt:
         bits.append(tgt)
+    pb = _pb_token(entry)
+    if pb:
+        bits.append(pb)
     relvol = _safe_float(entry.get("volume_spike"))
     if relvol > 0:
         bits.append(f"relVol {relvol:.1f}×")
@@ -1045,9 +1096,9 @@ class DiscordPayloadBuilder:
             if life:
                 lines.append(f"└ {life}")
         elif show_lifecycle:
-            tgt = _target_token(entry)
-            if tgt:
-                lines.append(f"└ {tgt}")
+            anchor = " · ".join(t for t in (_target_token(entry), _pb_token(entry)) if t)
+            if anchor:
+                lines.append(f"└ {anchor}")
         return lines
 
     def _desk_field(self, key: str, flag: str, label: str,
@@ -1293,13 +1344,15 @@ class DiscordPayloadBuilder:
             "value": (
                 "🟩 strong ≥.66 · 🟨 mid · 🟥 weak <.40 · ⬜ data gap (not bearish) · "
                 "🐋 [NICHE ALPHA] institutional/insider velocity · "
-                "`raw→×` pre-overlay alpha × VIX dampening\n"
+                "`raw→×` pre-overlay alpha × VIX dampening · "
+                "🎯 tgt analyst target in listing ccy (⚠ tgt<px = target below spot) · "
+                "`P/B n×` raw price-to-book\n"
                 "*IC Insider Conviction · IB Insider Breadth · "
                 "CG Congress (US-only) · NS News Sentiment · NB News Buzz · "
                 "MO Momentum 12-1m · VA Volume Attention · "
                 "AC Analyst Consensus · QF Piotroski Quality · 13F Whale Flow (QoQ) · "
                 "FCF Free Cash Flow Yield · AMH Amihud Liquidity · "
-                "PB Price-to-Book · ROI ROIC Quality (intl only)*"
+                "PB Price-to-Book (matrix score) · ROI ROIC Quality (intl only)*"
             ),
             "inline": False,
         }

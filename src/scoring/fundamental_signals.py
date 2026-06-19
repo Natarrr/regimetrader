@@ -365,3 +365,178 @@ def score_margin_expansion(
             return 0.5 + delta / 0.20
 
     return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CANDIDATE FACTORS — shadow-first (computed, NOT yet weighted). Added to widen
+# valuation breadth (A1) and add growth/earnings-quality (A2) per the model
+# audit. Each must pass a de-overlapped IC gate (src/research/ic_metrics) before
+# any weight is allocated in WEIGHTS_* / FACTOR_MATRIX_V3.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── A1 · Earnings Yield (E/P) ─────────────────────────────────────────────────
+
+def score_earnings_yield(net_income_ttm: float, market_cap: float) -> float:
+    """Basu (1977) earnings yield E/P = TTM net income / market cap → [0, 1].
+
+    Formula:
+        ey      = net_income_ttm / market_cap
+        clipped = max(0.0, min(0.15, ey))    # practical [0%, 15%] band
+        score   = clipped / 0.15             # linear map to [0, 1]
+
+    UNSIGNED dead-signal: 0.0 when net income ≤ 0 (loss-making) or market cap ≤ 0.
+    Distinct from fcf_yield (cash/EV-based): E/P captures accrual earnings and
+    diversifies the value pillar beyond FCF yield + P/B.
+
+    Reference: Basu (1977), Journal of Finance 32(3).
+    """
+    ni = _f(net_income_ttm)
+    mc = _f(market_cap)
+    if ni is None or mc is None or ni <= 0 or mc <= 0:
+        return 0.0
+    clipped = max(0.0, min(0.15, ni / mc))
+    return round(clipped / 0.15, 4)
+
+
+# ── A1 · Enterprise multiple (EV/EBITDA) ──────────────────────────────────────
+
+def score_ev_ebitda(enterprise_value: float, ebitda_ttm: float) -> float:
+    """Loughran & Wellman (2011) enterprise multiple EV/EBITDA, inverted → [0, 1].
+
+    Formula:
+        ratio   = enterprise_value / ebitda_ttm
+        clipped = max(5.0, min(35.0, ratio))      # ≈ 10th–90th pct of large/mid-caps
+        score   = 1 - (clipped - 5.0) / 30.0      # low multiple → high score
+
+    The [5×, 35×] band spans the realistic cross-section: a tighter [4, 20]
+    floors every premium mega-cap (AAPL ≈28×, ASML ≈32×) at 0.0, collapsing the
+    top half of the universe to a single mass-point that kills cross-sectional
+    discrimination (and IC).
+
+    UNSIGNED dead-signal: 0.0 when EBITDA ≤ 0 (no positive operating earnings)
+    or EV ≤ 0. Capital-structure-neutral complement to E/P and FCF yield.
+
+    Reference: Loughran & Wellman (2011), JFQA 46(6).
+    """
+    ev = _f(enterprise_value)
+    eb = _f(ebitda_ttm)
+    if ev is None or eb is None or ev <= 0 or eb <= 0:
+        return 0.0
+    clipped = max(5.0, min(35.0, ev / eb))
+    return round(1.0 - (clipped - 5.0) / 30.0, 4)
+
+
+# ── A2 · TTM YoY growth (revenue / earnings) ──────────────────────────────────
+
+def _valid_field_rows(rows: list[dict], field: str) -> list[dict]:
+    """Rows carrying date + filingDate + `field`, newest-first by period end.
+    filingDate is required — look-ahead anchoring (CLAUDE.md §3)."""
+    out = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if not row.get("date") or not row.get("filingDate"):
+            continue
+        if _f(row.get(field)) is None:
+            continue
+        out.append(row)
+    return sorted(out, key=lambda r: str(r["date"]), reverse=True)
+
+
+def _ttm_field_sum(rows: list[dict], field: str) -> Optional[float]:
+    vals = [_f(r.get(field)) for r in rows]
+    if any(v is None for v in vals):
+        return None
+    return sum(vals)
+
+
+def _ttm_growth_score(
+    quarterly_rows: list[dict],
+    annual_rows: list[dict],
+    field: str,
+    band: float,
+) -> Optional[float]:
+    """SIGNED TTM YoY growth of `field`: g = TTM(q0–3) / TTM(q4–7) − 1.
+
+        score = 0.5 + clip(g, −band, +band) / (2·band)
+
+    Same discrete-quarter validation as score_margin_expansion (70–110d gaps;
+    rejects cumulative/semi-annual rows), with an annual fallback FY0 vs FY−1.
+    SIGNED: None when both tracks unavailable OR prior TTM ≤ 0 (growth off a
+    non-positive base is undefined — must not read as a level).
+    """
+    from datetime import date as _date
+
+    quarters = _valid_field_rows(quarterly_rows, field)
+    if len(quarters) >= 8:
+        window = quarters[:8]
+        try:
+            ends = [_date.fromisoformat(str(r["date"])[:10]) for r in window]
+            gaps = [(ends[i] - ends[i + 1]).days for i in range(len(ends) - 1)]
+            discrete = all(_QTR_GAP_MIN_DAYS <= g <= _QTR_GAP_MAX_DAYS
+                           for g in gaps)
+        except ValueError:
+            discrete = False
+        if discrete:
+            now = _ttm_field_sum(window[:4], field)
+            prior = _ttm_field_sum(window[4:8], field)
+            if now is not None and prior is not None and prior > 0:
+                g = max(-band, min(band, now / prior - 1.0))
+                return 0.5 + g / (2.0 * band)
+
+    annuals = _valid_field_rows(annual_rows, field)
+    if len(annuals) >= 2 and str(annuals[0]["date"]) != str(annuals[1]["date"]):
+        now = _f(annuals[0].get(field))
+        prior = _f(annuals[1].get(field))
+        if now is not None and prior is not None and prior > 0:
+            g = max(-band, min(band, now / prior - 1.0))
+            return 0.5 + g / (2.0 * band)
+
+    return None
+
+
+def score_revenue_growth(
+    quarterly_rows: list[dict], annual_rows: list[dict]
+) -> Optional[float]:
+    """TTM revenue YoY growth, SIGNED → [0, 1] (band ±30%). filingDate-anchored.
+
+    Reference: Lakonishok, Shleifer & Vishny (1994) — fundamental growth axis.
+    """
+    return _ttm_growth_score(quarterly_rows, annual_rows, "revenue", band=0.30)
+
+
+def score_eps_growth(
+    quarterly_rows: list[dict], annual_rows: list[dict]
+) -> Optional[float]:
+    """TTM earnings (net income) YoY growth, SIGNED → [0, 1] (band ±50% — EPS is
+    more volatile than revenue). Prior TTM ≤ 0 → None (growth off a loss base
+    is undefined). filingDate-anchored.
+    """
+    return _ttm_growth_score(quarterly_rows, annual_rows, "netIncome", band=0.50)
+
+
+# ── A2 · Accruals anomaly (Sloan 1996) ────────────────────────────────────────
+
+def score_accruals(
+    net_income_ttm: float, cfo_ttm: float, total_assets: float
+) -> float:
+    """Sloan (1996) accruals anomaly: accruals = (NI − CFO) / total assets.
+
+    HIGH accruals predict LOWER future returns (earnings less cash-backed), so
+    the score INVERTS the ratio:
+        ratio   = (net_income_ttm − cfo_ttm) / total_assets
+        clipped = max(−0.20, min(0.20, ratio))
+        score   = 1 − (clipped + 0.20) / 0.40    # low accruals → high score
+
+    UNSIGNED dead-signal: 0.0 when total assets ≤ 0 or NI/CFO missing (broken
+    feed). Earnings-quality complement to the Piotroski gate.
+
+    Reference: Sloan (1996), The Accounting Review 71(3).
+    """
+    ni = _f(net_income_ttm)
+    cfo = _f(cfo_ttm)
+    ta = _f(total_assets)
+    if ni is None or cfo is None or ta is None or ta <= 0:
+        return 0.0
+    clipped = max(-0.20, min(0.20, (ni - cfo) / ta))
+    return round(1.0 - (clipped + 0.20) / 0.40, 4)

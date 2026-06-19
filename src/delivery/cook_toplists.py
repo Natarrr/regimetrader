@@ -215,6 +215,7 @@ def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dic
         # Forward raw prices for exit-anchor enrichment (src/risk/exit_rules)
         "target_price":    raw.get("target_price"),
         "current_price":   raw.get("current_price"),
+        "price_to_book":   raw.get("price_to_book"),  # raw P/B ratio for 🎯 line
         # Forward analyst meta for badge lines
         "analyst_consensus_source":    raw.get("analyst_consensus_source", "none"),
         "analyst_revision_score":      float(raw.get("analyst_revision_score") or 0.0),
