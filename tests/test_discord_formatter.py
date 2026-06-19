@@ -1185,6 +1185,49 @@ class TestTargetPassedGateRender:
         assert watch is None or "UPSD" not in watch["value"]
 
 
+class TestStaleCatalystGateUnit:
+    """_catalyst_stale: a positive earnings surprise beyond the PEAD drift window
+    is a spent catalyst — the drift it was selected for already happened."""
+
+    def test_positive_surprise_beyond_window_is_stale(self):
+        from src.delivery.send_discord import _catalyst_stale
+        assert _catalyst_stale(
+            {"earnings_surprise_pct": 0.05, "earnings_surprise_days": 75})
+
+    def test_fresh_surprise_not_stale(self):
+        from src.delivery.send_discord import _catalyst_stale
+        assert not _catalyst_stale(
+            {"earnings_surprise_pct": 0.05, "earnings_surprise_days": 20})
+
+    def test_negative_or_absent_surprise_not_stale(self):
+        from src.delivery.send_discord import _catalyst_stale
+        assert not _catalyst_stale(
+            {"earnings_surprise_pct": -0.03, "earnings_surprise_days": 75})  # miss
+        assert not _catalyst_stale({"earnings_surprise_days": 75})            # no pct
+        assert not _catalyst_stale({})
+
+    def test_off_desk_includes_stale_catalyst(self):
+        from src.delivery.send_discord import _off_actionable_desk
+        assert _off_actionable_desk(
+            {"earnings_surprise_pct": 0.05, "earnings_surprise_days": 75})
+
+
+class TestStaleCatalystGateRender:
+    """A spent-PEAD name leaves the actionable desk for the WATCH section."""
+
+    def test_stale_catalyst_leaves_desk_for_watch(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("STAL", 0.81, earnings_surprise_pct=0.06, earnings_surprise_days=75),
+            _entry("FRSH", 0.79, earnings_surprise_pct=0.06, earnings_surprise_days=15),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk  = _field(e, "ALPHA DESK")
+        watch = _field(e, "STALE")
+        assert watch is not None
+        assert "STAL" in watch["value"] and "🍂 PEAD spent" in watch["value"]
+        assert "STAL" not in desk["value"]      # removed from actionable desk
+        assert "FRSH" in desk["value"]           # fresh-catalyst name stays
+
+
 class TestExtensionGateRender:
     """Already-moved names leave the actionable ALPHA DESK and surface in a
     separate '⏱ EXTENDED / ALREADY-MOVED (WATCH)' section."""
