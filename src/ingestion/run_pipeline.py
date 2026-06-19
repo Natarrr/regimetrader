@@ -504,6 +504,7 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
         "return_21d":       None,   # 1-month context for the extension read
         "spy_return_12_1m": spy_return,
         "volume_spike":     1.0,
+        "closes":           None,   # daily closes for the beta_30d producer (P2.1)
     }
     try:
         rows = _FC().get_historical_prices(ticker, limit=310)
@@ -566,6 +567,7 @@ def fetch_price_data(ticker: str, spy_return: float = 0.0) -> Dict[str, Any]:
             "return_21d":       round(ret_21d, 6) if ret_21d is not None else None,
             "spy_return_12_1m": round(spy_return, 6),
             "volume_spike":     volume_spike,
+            "closes":           closes,   # daily closes for the beta_30d producer (P2.1)
         }
     except Exception as exc:
         log.debug("fetch_price_data %s failed: %s", ticker, exc)
@@ -1458,6 +1460,15 @@ def run(
     # provides early detection of bear markets like 2022 rate shock (VIX <30, SPY -19%).
     log.info("Fetching SPY 12-1 month return + momentum regime (Jegadeesh-Titman + PATCH 10)…")
     spy_return_baseline, _spy_return_63d, _spy_momentum_regime = _fetch_spy_full_regime()
+    # Audit P2.1 — SPY daily closes for the per-ticker beta_30d producer, which
+    # activates the otherwise-inert CAPITULATION low-beta gate (regime.py). One
+    # cached fetch, captured by the _score_ticker closure across worker threads.
+    try:
+        from src.services.fmp_client import fmp_prices_to_arrays as _fp2a  # noqa: PLC0415
+        spy_closes, _, _ = _fp2a(_fmp_client.get_historical_prices("SPY", limit=60))
+    except Exception as _spy_beta_exc:
+        log.warning("SPY closes for beta_30d unavailable: %s — beta None", _spy_beta_exc)
+        spy_closes = []
     log.info(
         "SPY: 12-1m=%.4f (%.1f%%)  63d=%s  regime=%s",
         spy_return_baseline, spy_return_baseline * 100,
@@ -1503,6 +1514,7 @@ def run(
         from src.scoring.momentum_signals import (  # noqa: PLC0415
             score_momentum_long,
             score_volume_attention,
+            compute_beta,
         )
         # score_inst_flow_13f is consumed inside _guarded_inst_flow_13f (audit C1).
         from src.scoring.alt_signals import score_insider_npr_spike  # noqa: PLC0415
@@ -1564,6 +1576,9 @@ def run(
 
             # ── Fix #3: orthogonal momentum + attention signals ───────────
             price_data = fetch_price_data(ticker, spy_return=spy_return_baseline)
+            # P2.1 — 30-day beta vs SPY (same US trading calendar). Feeds the
+            # CAPITULATION low-beta gate; None when history is thin.
+            beta_30d = compute_beta(price_data.get("closes"), spy_closes, window=30)
             mom_long_score = score_momentum_long(
                 price_data["return_12_1m"],
                 price_data["spy_return_12_1m"],
@@ -1723,6 +1738,7 @@ def run(
                 "sector":                  sector.get(ticker, "Unknown"),
                 "cap_tier":                cap_tier.get(ticker, "large"),
                 "market_cap":              mktcap,
+                "beta_30d":                beta_30d,   # P2.1 — CAPITULATION low-beta gate
                 # ── Orthogonal insider factors ────────────────────────────
                 "insider_conviction_score": conviction_score,
                 "insider_breadth_score":    breadth_score,

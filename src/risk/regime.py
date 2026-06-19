@@ -111,7 +111,11 @@ def _is_capitulation_survivor(entry: dict) -> bool:
                               cross-sectional; INTL: raw profile score)
     """
     factors = entry.get("factors", {})
-    beta_raw = factors.get("beta") or factors.get("beta_30d")
+    # Top-level beta_30d (US pipeline, P2.1) takes precedence; fall back to a
+    # beta carried inside factors (INTL path / tests).
+    beta_raw = entry.get("beta_30d")
+    if beta_raw is None:
+        beta_raw = factors.get("beta") or factors.get("beta_30d")
     if beta_raw is not None and float(beta_raw) > _BETA_MAX:
         return False
     de_raw = factors.get("debt_to_equity")
