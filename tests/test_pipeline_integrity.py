@@ -317,11 +317,15 @@ class TestFetchEdgarDataRecency:
 
     def test_uses_transaction_date_not_filing_date(self):
         """When p_transactions carry a 'date' field, recency uses that, not form4_filings[0]['date']."""
-        from datetime import date, timedelta
+        from datetime import datetime, timedelta, timezone
         from unittest.mock import patch
 
-        tx_date_str = (date.today() - timedelta(days=10)).isoformat()
-        filing_date_str = (date.today() - timedelta(days=8)).isoformat()  # 2 days later (filing lag)
+        # Match the production clock basis (datetime.now(timezone.utc).date(),
+        # run_pipeline:474) — date.today() is LOCAL and drifts ±1 day vs UTC at
+        # the day boundary, which is the hardcoded-fixture date-drift fragility.
+        _today = datetime.now(timezone.utc).date()
+        tx_date_str = (_today - timedelta(days=10)).isoformat()
+        filing_date_str = (_today - timedelta(days=8)).isoformat()  # 2 days later (filing lag)
 
         p_tx = [{"date": tx_date_str, "value": 50_000, "title": "CEO", "code": "P", "is_ceo": True}]
 
@@ -338,10 +342,12 @@ class TestFetchEdgarDataRecency:
 
     def test_filing_date_used_as_fallback_when_no_tx_dates(self):
         """When p_transactions have no 'date' field, falls back to filing date without error."""
-        from datetime import date, timedelta
+        from datetime import datetime, timedelta, timezone
         from unittest.mock import patch
 
-        filing_date_str = (date.today() - timedelta(days=5)).isoformat()
+        # UTC basis to match production (run_pipeline:474) — avoids the local-vs-UTC
+        # day-boundary off-by-one (date-drift fragility).
+        filing_date_str = (datetime.now(timezone.utc).date() - timedelta(days=5)).isoformat()
         p_tx_no_date = [{"value": 30_000, "title": "CFO", "code": "P", "is_ceo": False}]
 
         with patch("src.ingestion.run_pipeline._load_cik_map", return_value={"TEST": "0001234567"}), \
