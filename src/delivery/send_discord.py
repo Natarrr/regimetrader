@@ -359,11 +359,32 @@ def _target_passed(entry: Dict[str, Any]) -> bool:
     return tgt < cur * (1.0 + _MIN_TARGET_UPSIDE)
 
 
+# ── Stale-catalyst (PEAD already played out) gate ─────────────────────────────
+# A name carried by a POSITIVE earnings surprise whose recency is now beyond the
+# post-earnings-drift window [Bernard & Thomas, 1989] is resting on a SPENT
+# catalyst — the drift it was selected for has already happened. Like the other
+# gates this is DISPLAY/RISK only; it moves the name off the actionable desk into
+# the WATCH section. Names with no positive surprise, or a still-fresh one, are
+# NOT gated. PEAD_STALE_DAYS (default = the PEAD window) is env-overridable.
+_PEAD_STALE_DAYS = int(os.getenv("PEAD_STALE_DAYS", str(_SMID_PEAD_WINDOW_DAYS)))
+
+
+def _catalyst_stale(entry: Dict[str, Any]) -> bool:
+    """True when the earnings/PEAD catalyst has already played out — a positive
+    earnings surprise whose recency exceeds the PEAD drift window. Absent or
+    still-fresh surprise ⇒ False (never gate on unknown; CLAUDE.md §2)."""
+    pct = entry.get("earnings_surprise_pct")
+    if pct is None or _safe_float(pct) <= 0:
+        return False
+    return int(entry.get("earnings_surprise_days") or 0) > _PEAD_STALE_DAYS
+
+
 def _off_actionable_desk(entry: Dict[str, Any]) -> bool:
-    """Name removed from the actionable buy desk → WATCH section: either already
-    extended (recent 5d run-up) OR its analyst target is already passed (no
-    upside left). Display/risk gate only — never mutates the score."""
-    return _is_extended(entry) or _target_passed(entry)
+    """Name removed from the actionable buy desk → WATCH section when any of:
+    already extended (recent 5d run-up), analyst target already passed (no upside
+    left), OR its earnings/PEAD catalyst is spent (drift window elapsed).
+    Display/risk gate only — never mutates the score."""
+    return _is_extended(entry) or _target_passed(entry) or _catalyst_stale(entry)
 
 
 def _freshness_token(entry: Dict[str, Any]) -> str:
@@ -1358,20 +1379,23 @@ class DiscordPayloadBuilder:
         for e in entries[:self._MAX_EXTENDED_ENTRIES]:
             tic = e.get("ticker", "?")
             score = _safe_float(e.get("final_score"))
-            # Target-passed takes precedence (a more fundamental "no upside left"
-            # reason than a short-term run-up).
+            # Reason precedence: no-upside (target passed) > spent catalyst
+            # (PEAD elapsed) > short-term run-up (extended).
             if _target_passed(e):
                 tgt = _safe_float(e.get("target_price"))
                 cur = _safe_float(e.get("current_price"))
                 up = (tgt / cur - 1.0) * 100 if cur > 0 else 0.0
                 reason = f"🎯 past target ({up:+.1f}%)"
+            elif _catalyst_stale(e):
+                days = int(e.get("earnings_surprise_days") or 0)
+                reason = f"🍂 PEAD spent ({days}d ago)"
             else:
                 reason = f"⏱ already {(_extension_pct(e) or 0.0) * 100:+.1f}% 5d"
             lines.append(
                 f"`{tic}` {reason} · `{score:.3f}` — wait for pullback")
             lines.append(f"└ {_compute_catalyst(e)}")
         return {
-            "name":   "⏱ EXTENDED · 🎯 PAST-TARGET (WATCH)",
+            "name":   "⏱ EXTENDED · 🎯 PAST-TARGET · 🍂 STALE (WATCH)",
             "value":  _truncate("\n".join(lines)),
             "inline": False,
         }
