@@ -1160,29 +1160,32 @@ class TestTargetPassedGateUnit:
 
 
 class TestTargetPassedGateRender:
-    """A name whose target is already passed leaves the actionable ALPHA DESK
-    and surfaces in the '🎯 PAST-TARGET (WATCH)' section."""
+    """A name whose target is already passed (no upside) is HIDDEN from the brief
+    entirely — not on the desk AND not in the WATCH section."""
 
-    def test_passed_target_leaves_desk_for_watch(self):
+    def test_passed_target_hidden_from_entire_message(self):
         e = _embed(_build(top_buys_usa=[
-            _entry("PAST", 0.81, target_price=68.0, current_price=71.0),
+            _entry("NOUP", 0.81, target_price=68.0, current_price=71.0),
             _entry("UPSD", 0.79, target_price=95.0, current_price=71.0),
         ], top_buys_europe=[], top_buys_asia=[]))
-        desk  = _field(e, "ALPHA DESK")
-        watch = _field(e, "PAST-TARGET")
-        assert watch is not None
-        assert "PAST" in watch["value"] and "🎯 past target" in watch["value"]
-        assert "PAST" not in desk["value"]      # removed from actionable desk
-        assert "UPSD" in desk["value"]           # upside name stays actionable
+        text = _all_text(e)
+        assert "NOUP" not in text                # hidden everywhere (desk + watch)
+        assert "UPSD" in _field(e, "ALPHA DESK")["value"]   # upside name stays
+
+    def test_passed_target_not_even_in_watch(self):
+        # Even when it would otherwise qualify for WATCH (extended run-up), a
+        # target-passed name is suppressed, never surfaced.
+        e = _embed(_build(top_buys_usa=[
+            _entry("NOUP", 0.81, target_price=68.0, current_price=71.0,
+                   cap_tier="large", return_5d=0.15),   # also extended
+        ], top_buys_europe=[], top_buys_asia=[]))
+        assert "NOUP" not in _all_text(e)
 
     def test_upside_name_stays_on_desk(self):
         e = _embed(_build(top_buys_usa=[
             _entry("UPSD", 0.75, target_price=95.0, current_price=71.0),
         ], top_buys_europe=[], top_buys_asia=[]))
-        desk = _field(e, "ALPHA DESK")
-        assert "UPSD" in desk["value"]
-        watch = _field(e, "PAST-TARGET")
-        assert watch is None or "UPSD" not in watch["value"]
+        assert "UPSD" in _field(e, "ALPHA DESK")["value"]
 
 
 class TestStaleCatalystGateUnit:
