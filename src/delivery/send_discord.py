@@ -937,10 +937,32 @@ class DiscordPayloadBuilder:
         yesterday_age_h: Optional[float] = None,
         now: Optional[datetime] = None,
     ) -> None:
-        self.data = data
+        self.data = self._suppress_no_upside(data)
         self.yesterday_scores = yesterday_scores or {}
         self.yesterday_age_h = yesterday_age_h
         self.now = now or datetime.now(timezone.utc)
+
+    # Lists whose entries are displayed names — a target-passed (no-upside) name
+    # is stripped from ALL of them so it is hidden from the brief entirely (desk,
+    # WATCH, sector exposure, factor matrix, percentile pool). User request:
+    # surfacing a "buy" with no remaining upside makes no sense.
+    _SUPPRESS_NO_UPSIDE_KEYS: Tuple[str, ...] = (
+        "top_buys_usa", "top_buys_europe", "top_buys_asia", "top_buys_smid",
+        "usa_overflow", "eu_overflow", "asia_overflow",
+        "eu_mid_small", "asia_mid_small", "watchlist",
+    )
+
+    @classmethod
+    def _suppress_no_upside(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Shallow-copy `data` with target-passed names removed from every
+        displayed list (never mutates the caller's dict)."""
+        out = dict(data)
+        for k in cls._SUPPRESS_NO_UPSIDE_KEYS:
+            lst = data.get(k)
+            if isinstance(lst, list):
+                out[k] = [e for e in lst
+                          if not (isinstance(e, dict) and _target_passed(e))]
+        return out
 
     # ── Validation ────────────────────────────────────────────────────────────
 
@@ -1014,12 +1036,17 @@ class DiscordPayloadBuilder:
         return list(self.data.get(key) or [])
 
     def _fresh_entries(self, key: str) -> List[Dict[str, Any]]:
-        """Region entries still actionable to enter — NOT already run-up past the
-        freshness gate AND NOT already past their analyst target (no upside)."""
+        """Region entries still actionable to enter — none of: run-up extended,
+        spent earnings/PEAD catalyst, or analyst target already passed."""
         return [e for e in self._region_entries(key) if not _off_actionable_desk(e)]
 
     def _extended_entries(self, key: str) -> List[Dict[str, Any]]:
-        return [e for e in self._region_entries(key) if _off_actionable_desk(e)]
+        """WATCH-section names: run-up extended OR spent catalyst — but NEVER
+        target-passed. A name whose analyst target is already passed has NO upside
+        left, so it is HIDDEN from the brief entirely (not even surfaced as WATCH):
+        showing a 'buy' with no remaining upside makes no sense (user request)."""
+        return [e for e in self._region_entries(key)
+                if (_is_extended(e) or _catalyst_stale(e)) and not _target_passed(e)]
 
     def _population(self) -> List[float]:
         """All scores in the artifact — denominator for percentile ranks."""
@@ -1358,11 +1385,12 @@ class DiscordPayloadBuilder:
     _MAX_EXTENDED_ENTRIES = 6
 
     def _extended_field(self) -> Optional[Dict[str, Any]]:
-        """⏱ EXTENDED · 🎯 PAST-TARGET (WATCH): names moved off the actionable
-        desk — either already ran past the freshness gate OR already past their
-        analyst target (no upside). Surfaced (not hidden) so the reader sees
-        what's already gone vs chaseable. Aggregated across US/EU/Asia/SMID,
-        de-duplicated. Evidence-first (CLAUDE.md §5): ticker · reason · why."""
+        """⏱ EXTENDED · 🍂 STALE (WATCH): names moved off the actionable desk —
+        either already ran past the freshness gate OR their earnings/PEAD catalyst
+        is spent. Surfaced (not hidden) so the reader sees what's already gone vs
+        chaseable. Target-passed names (no upside) are NOT here — they are hidden
+        from the brief entirely. Aggregated across US/EU/Asia/SMID, de-duplicated.
+        Evidence-first (CLAUDE.md §5): ticker · reason · why."""
         seen: set = set()
         entries: List[Dict[str, Any]] = []
         for key in self._EXTENDED_KEYS:
@@ -1379,14 +1407,9 @@ class DiscordPayloadBuilder:
         for e in entries[:self._MAX_EXTENDED_ENTRIES]:
             tic = e.get("ticker", "?")
             score = _safe_float(e.get("final_score"))
-            # Reason precedence: no-upside (target passed) > spent catalyst
-            # (PEAD elapsed) > short-term run-up (extended).
-            if _target_passed(e):
-                tgt = _safe_float(e.get("target_price"))
-                cur = _safe_float(e.get("current_price"))
-                up = (tgt / cur - 1.0) * 100 if cur > 0 else 0.0
-                reason = f"🎯 past target ({up:+.1f}%)"
-            elif _catalyst_stale(e):
+            # Reason precedence: spent catalyst (PEAD elapsed) > short-term run-up.
+            # Target-passed names never reach WATCH — they are hidden entirely.
+            if _catalyst_stale(e):
                 days = int(e.get("earnings_surprise_days") or 0)
                 reason = f"🍂 PEAD spent ({days}d ago)"
             else:
@@ -1395,7 +1418,7 @@ class DiscordPayloadBuilder:
                 f"`{tic}` {reason} · `{score:.3f}` — wait for pullback")
             lines.append(f"└ {_compute_catalyst(e)}")
         return {
-            "name":   "⏱ EXTENDED · 🎯 PAST-TARGET · 🍂 STALE (WATCH)",
+            "name":   "⏱ EXTENDED · 🍂 STALE (WATCH)",
             "value":  _truncate("\n".join(lines)),
             "inline": False,
         }
