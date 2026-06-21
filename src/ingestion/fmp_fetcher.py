@@ -634,6 +634,26 @@ class FMPFetcher(BaseMarketFetcher):
             logger.debug("FMPFetcher beta_30d %s failed (non-fatal): %s",
                          ticker, _beta_exc)
 
+        # ── 12c. Technical candidate factors (RSI reversal + ADX trend) ───────
+        #         Derived from the OHLCV already fetched (rows) — ZERO new API
+        #         calls. Weight-0 candidates, IC-gated like A1/A2 below.
+        rsi_reversion_score: Optional[float] = None
+        adx_trend_score: Optional[float] = 0.0
+        try:
+            from src.scoring.momentum_signals import (  # noqa: PLC0415
+                score_rsi_reversion, score_adx_trend,
+            )
+            _rev = list(reversed(rows))  # rows are newest-first → oldest-first
+            highs = [float(r.get("high") or 0.0) for r in _rev]
+            lows = [float(r.get("low") or 0.0) for r in _rev]
+            rsi_reversion_score = score_rsi_reversion(closes)
+            adx_trend_score = score_adx_trend(highs, lows, closes)
+        except Exception as exc:
+            logger.warning(
+                "FMPFetcher technical candidates ABSENT %s: %s(%s) — shadow only",
+                ticker, type(exc).__name__, str(exc)[:80],
+            )
+
         # ── 13. Candidate shadow factors (A1 valuation breadth + A2 growth /
         #        earnings-quality). Computed for ALL tickers but ABSENT from
         #        WEIGHTS_* / FACTOR_MATRIX_V3 (weight 0) → live composite is
@@ -646,12 +666,15 @@ class FMPFetcher(BaseMarketFetcher):
         from src.scoring.fundamental_signals import (  # noqa: PLC0415
             score_earnings_yield, score_ev_ebitda,
             score_revenue_growth, score_eps_growth, score_accruals,
+            score_sector_relative_value, score_dcf_upside,
         )
         earnings_yield_score: Optional[float] = None
         ev_ebitda_score: Optional[float] = None
         revenue_growth_score: Optional[float] = None
         eps_growth_score: Optional[float] = None
         accruals_score: Optional[float] = None
+        sector_relative_value_score: Optional[float] = None
+        dcf_upside_score: Optional[float] = None
         try:
             def _stmt(method, **kw):
                 rows = method(ticker, **kw) or []
@@ -684,6 +707,24 @@ class FMPFetcher(BaseMarketFetcher):
             eps_growth_score = score_eps_growth(inc_q, inc_a)
             if ni_ttm is not None and cfo_ttm is not None and total_assets is not None:
                 accruals_score = score_accruals(ni_ttm, cfo_ttm, total_assets)
+            # A3 — sector-relative value (own P/E vs sector P/E) + DCF upside.
+            #       sector-pe-snapshot is US-exchange-oriented: INTL exchanges
+            #       often return empty → 0.0 (dead, IC-gate tolerant). Cached per
+            #       (exchange, date) so this costs ≤1 snapshot call per exchange.
+            stock_pe = _flt(quote.get("pe")) if quote else None
+            if stock_pe and stock_pe > 0 and sector_from_quote:
+                sec_pe = client.get_sector_pe(
+                    sector_from_quote, exchange=(quote.get("exchange") or "NASDAQ"))
+                if sec_pe:
+                    sector_relative_value_score = score_sector_relative_value(
+                        stock_pe, sec_pe)
+            # DCF: same-currency guard — use the currency-resolved price from the
+            # analyst-target pairing when available (raw_current_price), else the
+            # listing quote. FMP DCF is a black box → strictly weight-0.
+            dcf_val = client.get_levered_dcf(ticker)
+            _dcf_price = raw_current_price or (_flt(quote.get("price")) if quote else None)
+            if dcf_val is not None and _dcf_price:
+                dcf_upside_score = score_dcf_upside(dcf_val, _dcf_price)
         except Exception as exc:
             logger.warning(
                 "FMPFetcher candidate factors ABSENT %s: %s(%s) — shadow only, ignored",
@@ -714,6 +755,11 @@ class FMPFetcher(BaseMarketFetcher):
             "revenue_growth_score":      revenue_growth_score,
             "eps_growth_score":          eps_growth_score,
             "accruals_score":            accruals_score,
+            # A3 valuation/technical candidates — weight 0, IC-gated
+            "sector_relative_value_score": sector_relative_value_score,
+            "dcf_upside_score":          dcf_upside_score,
+            "rsi_reversion_score":       rsi_reversion_score,
+            "adx_trend_score":           adx_trend_score,
             # Structurally absent — always 0.0
             "congress_score":            0.0,
             "transcript_tone_score":     0.0,
@@ -741,6 +787,16 @@ class FMPFetcher(BaseMarketFetcher):
             # Per-factor missing-source reason: "api_error" | "no_coverage"
             "source_diagnostics":        _diag,
         }
+
+
+def _flt(value) -> Optional[float]:
+    """float() that maps None/garbage to None (candidate-factor input guard)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _short_returns(closes: list) -> tuple[Optional[float], Optional[float]]:

@@ -14,6 +14,7 @@ from research.scripts.backfill_factors import (
     forward_excess_return,
     momentum_excess,
     sample_snapshot_indices,
+    windowed_technical,
 )
 
 
@@ -55,6 +56,40 @@ class TestMomentumExcess:
         closes = [10.0, 11.0, 12.0]
         spy = [10.0, 10.0, 10.0]
         assert momentum_excess(closes, spy, 2, lookback=5, skip=1) is None
+
+
+class TestWindowedTechnical:
+    """Point-in-time RSI/ADX: every value at idx uses only closes/highs/lows
+    observable on or before idx (no look-ahead)."""
+
+    def test_pure_uptrend_window(self):
+        highs = [10.0 + i for i in range(40)]
+        lows = [h - 2.0 for h in highs]
+        closes = list(highs)
+        tech = windowed_technical(highs, lows, closes, idx=39, window=60)
+        # rising series → RSI 100 (overbought → reversal-down) and ADX maxed
+        assert tech["rsi_reversion"] == 0.0
+        assert tech["adx_trend"] == 1.0
+
+    def test_only_uses_data_up_to_idx(self):
+        # A spike AFTER idx must not change the value at idx (no look-ahead).
+        highs = [10.0 + i for i in range(40)]
+        lows = [h - 2.0 for h in highs]
+        closes = list(highs)
+        baseline = windowed_technical(highs, lows, closes, idx=30, window=60)
+        closes_future = list(closes)
+        for j in range(31, 40):
+            closes_future[j] = 999.0          # future shock, post-idx
+        shocked = windowed_technical(highs, lows, closes_future, idx=30, window=60)
+        assert shocked == baseline
+
+    def test_insufficient_window_is_safe(self):
+        highs = [10.0 + i for i in range(6)]
+        lows = [h - 2.0 for h in highs]
+        closes = list(highs)
+        tech = windowed_technical(highs, lows, closes, idx=5, window=60)
+        assert tech["rsi_reversion"] is None   # SIGNED → None
+        assert tech["adx_trend"] == 0.0        # UNSIGNED → dead 0.0
 
 
 class TestAnchorFiling:

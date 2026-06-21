@@ -42,6 +42,12 @@ _DISPLAY_META_KEYS = (
     "revenue_growth_score",
     "eps_growth_score",
     "accruals_score",
+    # A3 valuation/technical candidates (sector-relative value, DCF upside,
+    # RSI reversal, ADX trend) — same weight-0 IC-gate treatment.
+    "sector_relative_value_score",
+    "dcf_upside_score",
+    "rsi_reversion_score",
+    "adx_trend_score",
     # Exit-anchor / liquidity inputs — forwarded when the fetcher produces
     # them (atr_14 / adv_20d_usd are not fetched yet; keys are forward-compat).
     "atr_14",

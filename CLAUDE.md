@@ -12,6 +12,7 @@
 
 * **Isolation:** `ClaudeClient` is an API wrapper only. Zero FMP logic or trading math permitted inside the client.
 * **API Stability:** All FMP interactions must use `stable/` routes.
+* **LLM exposure (MCP):** Live FMP calls remain barred from the LLM path. The `src/mcp/` server is the ONE permitted LLM-facing surface and is strictly **read-only over committed artifacts** (`logs/*.json`) — it performs no FMP calls and never re-scores, so it cannot bypass the `safety_gate` (consistent with §1: status from artifact state). New MCP tools must read artifacts only.
 * **Error Handling:**
   * Never use silent `try/except` blocks to return `None` or suppress errors.
   * On network/auth failure, propagate `FMPEndpointError`.

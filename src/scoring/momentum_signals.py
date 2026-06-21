@@ -193,6 +193,163 @@ def score_price_target_upside(
     return round((clipped + 0.50) / 1.00, 4)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CANDIDATE TECHNICAL FACTORS — shadow-first (computed, NOT yet weighted).
+# Derived from the OHLCV series the pipeline already pulls (get_historical_prices),
+# so they carry ZERO marginal FMP cost. Pure-Python Wilder math (matching the
+# hand-rolled idiom of compute_beta / score_amihud_shock — no TA dependency).
+# Each must pass a de-overlapped IC gate (src/research/ic_metrics) before any
+# weight is allocated in WEIGHTS_* / FACTOR_MATRIX_V3.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _clean_floats(seq) -> list[float] | None:
+    """Parse a sequence to floats; None if empty or any element is None/NaN."""
+    if not seq:
+        return None
+    out: list[float] = []
+    for x in seq:
+        if x is None:
+            return None
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(v):
+            return None
+        out.append(v)
+    return out
+
+
+def score_rsi_reversion(
+    closes: list[float] | None, period: int = 14
+) -> float | None:
+    """Wilder (1978) RSI mapped to a SHORT-TERM REVERSAL tilt, in [0, 1].
+
+    RSI = 100 − 100/(1 + RS),  RS = Wilder-smoothed avg gain / avg loss over
+    `period` daily closes (closes oldest-first). The REVERSAL mapping inverts
+    RSI around the 50 midpoint:
+
+        score = 0.5 + (50 − RSI) / 100
+
+        RSI 100 (overbought) → 0.0   (expect mean-reversion DOWN)
+        RSI  50 (neutral)    → 0.5
+        RSI   0 (oversold)   → 1.0   (expect mean-reversion UP)
+
+    Orthogonal by construction to score_momentum_long: the 12-1m premium is the
+    intermediate-horizon continuation effect, while RSI(14) captures the
+    short-horizon reversal (De Bondt & Thaler 1985; Jegadeesh 1990) that the
+    momentum factor deliberately skips (the skip-month).
+
+    SIGNED factor: returns None when fewer than `period + 1` parseable closes
+    exist (recent IPO / sparse history) or any value is non-numeric — absence
+    must never read as a real RSI observation (CLAUDE.md §2). A flat series
+    (no gains and no losses) maps to RSI 50 → 0.5, a genuine neutral reading.
+
+    Reference: Wilder (1978), "New Concepts in Technical Trading Systems".
+    """
+    prices = _clean_floats(closes)
+    if prices is None or len(prices) < period + 1:
+        return None
+
+    gains: list[float] = []
+    losses: list[float] = []
+    for i in range(1, len(prices)):
+        delta = prices[i] - prices[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+    if avg_gain == 0.0 and avg_loss == 0.0:
+        rsi = 50.0
+    elif avg_loss == 0.0:
+        rsi = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi = 100.0 - 100.0 / (1.0 + rs)
+
+    return round(0.5 + (50.0 - rsi) / 100.0, 4)
+
+
+def score_adx_trend(
+    highs: list[float] | None,
+    lows: list[float] | None,
+    closes: list[float] | None,
+    period: int = 14,
+) -> float:
+    """Wilder (1978) ADX trend-strength, mapped to [0, 1].
+
+    ADX is the Wilder-smoothed average of the Directional Index
+    DX = 100·|+DI − −DI| / (+DI + −DI), built from smoothed +DM / −DM / TR.
+    It measures the STRENGTH of a trend irrespective of direction (an up- and a
+    down-trend of equal slope yield the same ADX).
+
+        score = clip(ADX, 0, 50) / 50      # ADX≥50 (very strong) → 1.0
+
+    NON-DIRECTIONAL by design: this is a candidate for measuring whether
+    trend-strength conditions forward returns (e.g. as an interaction with
+    momentum). Its standalone IC may well be ~0 — that is precisely what the
+    de-overlapped IC gate exists to decide before any weight is granted.
+
+    UNSIGNED dead-signal: returns 0.0 when inputs are missing/ragged, contain a
+    non-numeric value, or there is less than 2·period + 1 of aligned history
+    (the minimum to produce one smoothed ADX value). A perfectly flat series
+    (no range) also returns 0.0 — no trend information.
+
+    Reference: Wilder (1978), "New Concepts in Technical Trading Systems".
+    """
+    H = _clean_floats(highs)
+    L = _clean_floats(lows)
+    C = _clean_floats(closes)
+    if H is None or L is None or C is None:
+        return 0.0
+    n = len(C)
+    if len(H) != n or len(L) != n or n < 2 * period + 1:
+        return 0.0
+
+    trs: list[float] = []
+    plus_dm: list[float] = []
+    minus_dm: list[float] = []
+    for i in range(1, n):
+        up = H[i] - H[i - 1]
+        down = L[i - 1] - L[i]
+        plus_dm.append(up if (up > down and up > 0.0) else 0.0)
+        minus_dm.append(down if (down > up and down > 0.0) else 0.0)
+        trs.append(max(H[i] - L[i], abs(H[i] - C[i - 1]), abs(L[i] - C[i - 1])))
+
+    def _wilder(seq: list[float]) -> list[float]:
+        smoothed = sum(seq[:period])
+        out = [smoothed]
+        for i in range(period, len(seq)):
+            smoothed = smoothed - smoothed / period + seq[i]
+            out.append(smoothed)
+        return out
+
+    str_, spdm, smdm = _wilder(trs), _wilder(plus_dm), _wilder(minus_dm)
+
+    dxs: list[float] = []
+    for tr_s, pdm_s, mdm_s in zip(str_, spdm, smdm):
+        if tr_s <= 0.0:
+            dxs.append(0.0)
+            continue
+        pdi = 100.0 * pdm_s / tr_s
+        mdi = 100.0 * mdm_s / tr_s
+        denom = pdi + mdi
+        dxs.append(100.0 * abs(pdi - mdi) / denom if denom > 0.0 else 0.0)
+
+    if len(dxs) < period:
+        return 0.0
+    adx = sum(dxs[:period]) / period
+    for i in range(period, len(dxs)):
+        adx = (adx * (period - 1) + dxs[i]) / period
+
+    return round(max(0.0, min(50.0, adx)) / 50.0, 4)
+
+
 def score_quality_piotroski(ratios: dict) -> tuple[float, int]:
     """Simplified 8-point Piotroski F-score, in [0, 1], with raw count.
 

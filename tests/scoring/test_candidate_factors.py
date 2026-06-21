@@ -10,10 +10,12 @@ import pytest
 
 from src.scoring.fundamental_signals import (
     score_accruals,
+    score_dcf_upside,
     score_earnings_yield,
     score_eps_growth,
     score_ev_ebitda,
     score_revenue_growth,
+    score_sector_relative_value,
 )
 
 
@@ -149,3 +151,55 @@ class TestAccruals:
 
     def test_bounded_unit_interval(self):
         assert 0.0 <= score_accruals(5.0, 7.0, 80.0) <= 1.0
+
+
+# ── A3 · Sector-relative value (own P/E vs sector P/E) ─────────────────────────
+
+class TestSectorRelativeValue:
+    def test_parity_with_sector(self):
+        # ratio 1.0 → 1 - (1.0-0.5)/1.5
+        assert score_sector_relative_value(20.0, 20.0) == pytest.approx(0.6667, abs=1e-4)
+
+    def test_cheap_vs_sector_scores_high(self):
+        assert score_sector_relative_value(10.0, 20.0) == 1.0     # ratio 0.5 → clip → 1.0
+
+    def test_expensive_vs_sector_floors_zero(self):
+        assert score_sector_relative_value(40.0, 20.0) == 0.0     # ratio 2.0 → clip → 0.0
+
+    def test_loss_making_dead_zero(self):
+        assert score_sector_relative_value(-5.0, 20.0) == 0.0
+        assert score_sector_relative_value(0.0, 20.0) == 0.0
+
+    def test_bad_sector_pe_dead_zero(self):
+        assert score_sector_relative_value(20.0, 0.0) == 0.0
+        assert score_sector_relative_value(20.0, None) == 0.0
+        assert score_sector_relative_value(20.0, -10.0) == 0.0
+
+    def test_cheaper_outranks_pricier(self):
+        assert (score_sector_relative_value(15.0, 20.0)
+                > score_sector_relative_value(30.0, 20.0))
+
+
+# ── A3 · DCF intrinsic-value upside (SIGNED, center 0.5) ───────────────────────
+
+class TestDcfUpside:
+    def test_at_fair_value_is_neutral_half(self):
+        assert score_dcf_upside(100.0, 100.0) == 0.5
+
+    def test_full_upside_caps_at_one(self):
+        assert score_dcf_upside(150.0, 100.0) == 1.0             # +50% → clip → 1.0
+
+    def test_full_downside_floors_zero(self):
+        assert score_dcf_upside(50.0, 100.0) == 0.0             # -50% → clip → 0.0
+
+    def test_midband_upside(self):
+        assert score_dcf_upside(120.0, 100.0) == pytest.approx(0.70, abs=1e-4)
+
+    def test_signed_none_when_unavailable(self):
+        assert score_dcf_upside(None, 100.0) is None
+        assert score_dcf_upside(120.0, 0.0) is None
+        assert score_dcf_upside(120.0, None) is None
+
+    def test_none_when_dcf_non_positive(self):
+        assert score_dcf_upside(0.0, 100.0) is None
+        assert score_dcf_upside(-30.0, 100.0) is None
