@@ -18,11 +18,23 @@ neutralization buckets and region masks that bar US-structural factors from
 EU/ASIA. The regional theses, factor weights (sum 1.0, 3×3 pillars), and
 cross-sectional neutralization are sound.
 
-The **one material gap is universe breadth, not logic**: the investable universe
-is large-cap-dominated with a thin mid-cap sleeve and **zero small-caps**, even
-though the SMID machinery (ADV floors, `cap_tier` neutralization, soft-beta
-rank) is built to support a "small" tier. In its current state, **"SMID"
-effectively means "Mid/Large."**
+**Small-caps come from a runtime SMID satellite, not the static CSVs.** The
+`config/universe*.csv` files are only the large/mid **core anchor**; the small
+($300M–$2B) + mid ($2B–$10B) sleeve is screened dynamically each run by
+`src/ingestion/universe_screener._resolve_smid_satellite`, gated by
+`UNIVERSE_SMID_SATELLITE`.
+
+- **US: already live.** `run_us_pipeline` sets `UNIVERSE_SMID_SATELLITE=1`
+  (default, no repo-variable override) and `run_pipeline` calls
+  `resolve_universe`, so small-caps enter the US selection at runtime. The
+  fetcher classifies tiers correctly 3-way (`<$2B` small / `$2–10B` mid / `≥$10B`
+  large).
+- **EU/APAC: was the real gap (now fixed in this change).** The INTL job seeded
+  EU/Asia only from `ticker_registry.json` (large/mid lists), never called the
+  satellite, and its job `env` did not set the flag. Resolved here by adding
+  `UNIVERSE_SMID_SATELLITE` to the `run_intl_pipeline` env and calling a new
+  `smid_satellite_tickers()` helper in the INTL fetch step (per region, flag-
+  gated, non-raising → degrades to registry-only on any failure).
 
 ---
 
@@ -75,23 +87,31 @@ quality_dupont, transcript_tone}` — masked out of EU/ASIA pools. ✔
 
 ## 5. Findings
 
-### F1 — No small-caps; sparse mid-caps (MATERIAL)
-Root cause in [tools/build_universes.py](../tools/build_universes.py):
-- screener floor `marketCapMoreThan = 2_000_000_000` ($2B) → nothing below $2B is
-  ever fetched;
-- classifier `cap_tier = "large" if mcap >= 10e9 else "mid"` — **two-way, no
-  "small" branch** — despite the module docstring defining `small < $2B` and
-  `ADV_FLOOR` carrying explicit `small` floors.
+### F1 — Small-caps reach US but not EU/APAC (RESOLVED in this change)
 
-Consequence: the "small" tier is structurally unreachable; the SMID strategy's
-small-cap leg is dormant. **This is a universe-scope decision, not a logic bug**
-— flagged for the lead quant, not changed here (SMID scope is a locked decision;
-launch posture is paper-only/conservative).
+The static CSVs carry no small-caps **by design** (they are the core anchor).
+Small-caps are added at runtime by the SMID satellite. That path was wired and
+enabled for **US** but **absent for EU/APAC**:
 
-*Lever to enable small-caps (if desired):* lower the screener floor (e.g. to
-$3–5B mid floor and a separate small band), and make the classifier 3-way
-(`small < $2B`, `mid $2–10B`, `large ≥ $10B`). Re-validate ADV floors and the
-soft-beta gate against the wider, less-liquid set before any weight.
+- US `run_pipeline` → `resolve_universe` → `_resolve_smid_satellite`, with
+  `UNIVERSE_SMID_SATELLITE=1` in the `run_us_pipeline` job. (live)
+- EU/APAC INTL fetch seeded from `ticker_registry.json` only, no satellite call,
+  and the flag was not in the `run_intl_pipeline` job `env`. (gap)
+
+**Fix applied here:**
+
+1. New public helper `smid_satellite_tickers(client, region, existing)` in
+   [src/ingestion/universe_screener.py](../src/ingestion/universe_screener.py) —
+   flag-gated, key-guarded, never raises.
+2. INTL fetch step ([daily_trading_pipeline.yml](../.github/workflows/daily_trading_pipeline.yml))
+   now appends the EU + ASIA small/mid sleeve per region.
+3. `UNIVERSE_SMID_SATELLITE` added to the `run_intl_pipeline` job `env`
+   (default `'1'`, repo-variable overridable — parity with US).
+
+`_resolve_smid_satellite` already screens EU/ASIA exchanges and balances
+small vs mid; the INTL fetcher already classifies `cap_tier` 3-way, so the new
+names are labelled and neutralised correctly. The existing ADV dollar-volume
+gate (`SMID_MIN_DOLLAR_VOL`, $3M/day) guards liquidity.
 
 ### F2 — Mid-cap buckets under-fill (MINOR, follows F1)
 With ~21 mid-cap US names across 11 sectors (≈2/sector), most
@@ -114,10 +134,14 @@ end-to-end run is needed to judge the live selection empirically.
 
 ## 6. Recommendations
 
-1. **Decide small-cap scope** (F1). If SMID should include small-caps, apply the
-   lever in F1; otherwise rename/scope expectations to "Mid/Large" to avoid
-   overstating reach.
-2. **Broaden the mid sleeve** to clear `min_bucket_size` per sector (F2).
-3. **Run one fresh full pipeline** (US + EU + APAC) to refresh `logs/` and verify
-   the live selection matches this design review (F4).
+1. **Small-cap scope — DONE** (F1): EU/APAC now receive the SMID satellite, at
+   parity with US. Next daily run will surface EU/Asia small/mid names
+   (`origin="smid_satellite"`) subject to the $3M/day ADV gate.
+2. **Run one fresh full pipeline** (US + EU + APAC) to refresh `logs/` and
+   confirm the new EU/APAC small-caps appear (F4); inspect
+   `logs/marketintel_events`/churn for the `smid_satellite` additions.
+3. **Tune the sleeve if needed**: `UNIVERSE_SMID_K` (per-region count, default
+   30), `SMID_MIN_DOLLAR_VOL` (liquidity floor), `SMID_BETA_ALPHA` (leverage
+   tilt) — all env-overridable; repo-variable `UNIVERSE_SMID_SATELLITE=0` kills
+   it globally if a run must revert to core-only.
 4. No changes required to scoring/region/neutralization logic — it is coherent.
