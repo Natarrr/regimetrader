@@ -298,6 +298,36 @@ def _resolve_smid_satellite(
     return rows
 
 
+def smid_satellite_tickers(
+    client: Any, region: str, existing: Sequence[str],
+    *, log_dir: Optional[Path] = None,
+) -> List[str]:
+    """Small/mid satellite TICKERS for ``region``, gated by UNIVERSE_SMID_SATELLITE.
+
+    Public wrapper over ``_resolve_smid_satellite`` for callers that assemble
+    their universe OUTSIDE ``resolve_universe`` — the INTL fetch step seeds EU/Asia
+    from ``ticker_registry.json`` (large/mid only), so it needs a direct way to
+    add the small/mid leverage sleeve the US path already gets via
+    ``resolve_universe``. Returns ``[]`` when the flag is off, the FMP key is
+    absent, or screening fails — it NEVER raises, so it can never break the
+    caller's core universe (degrade to core-only).
+    """
+    if not _smid_enabled():
+        return []
+    if client is None or not getattr(client, "_api_key", ""):
+        log.warning(
+            "UNIVERSE_SMID_SATELLITE set but FMP key absent — no %s satellite.",
+            region)
+        return []
+    try:
+        rows = _resolve_smid_satellite(
+            client, region, set(existing or ()), log_dir=log_dir)
+        return [r["ticker"] for r in rows]
+    except Exception as exc:  # never break the caller's core universe
+        log.warning("SMID satellite (%s) failed: %s — core only.", region, exc)
+        return []
+
+
 def resolve_universe(
     tickers_file: Path,
     region: str = "US",

@@ -16,10 +16,52 @@ from src.ingestion.universe_screener import (
     cross_sectional_rank,
     merge_universe,
     select_satellite,
+    smid_satellite_tickers,
     _screen_smid_candidates,
     _resolve_smid_satellite,
     _leverage_rank,
 )
+
+
+class _FakeClient:
+    def __init__(self, key="k"):
+        self._api_key = key
+
+
+class TestSmidSatelliteTickers:
+    """Public wrapper used by the INTL fetch step (registry-seeded, not CSV).
+    Flag-gated, key-guarded, and never raises — so it can never break the
+    caller's core universe."""
+
+    def test_returns_empty_when_flag_off(self, monkeypatch):
+        monkeypatch.delenv("UNIVERSE_SMID_SATELLITE", raising=False)
+        assert smid_satellite_tickers(_FakeClient(), "EU", []) == []
+
+    def test_returns_empty_when_no_api_key(self, monkeypatch):
+        monkeypatch.setenv("UNIVERSE_SMID_SATELLITE", "1")
+        assert smid_satellite_tickers(_FakeClient(key=""), "EU", []) == []
+        assert smid_satellite_tickers(None, "EU", []) == []
+
+    def test_returns_satellite_tickers_when_enabled(self, monkeypatch):
+        monkeypatch.setenv("UNIVERSE_SMID_SATELLITE", "1")
+        monkeypatch.setattr(
+            "src.ingestion.universe_screener._resolve_smid_satellite",
+            lambda client, region, existing, **kw: [
+                {"ticker": "AAA.L", "cap_tier": "small"},
+                {"ticker": "BBB.L", "cap_tier": "mid"},
+            ],
+        )
+        out = smid_satellite_tickers(_FakeClient(), "EU", ["ZZZ.L"])
+        assert out == ["AAA.L", "BBB.L"]
+
+    def test_never_raises_on_screen_failure(self, monkeypatch):
+        monkeypatch.setenv("UNIVERSE_SMID_SATELLITE", "1")
+
+        def _boom(*a, **k):
+            raise RuntimeError("FMP screener down")
+        monkeypatch.setattr(
+            "src.ingestion.universe_screener._resolve_smid_satellite", _boom)
+        assert smid_satellite_tickers(_FakeClient(), "ASIA", []) == []
 
 
 class TestComputeVolumeVelocity:

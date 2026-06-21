@@ -396,6 +396,9 @@ jobs:
       contents: read
     env:
       PYTHONPATH: ${{ github.workspace }}
+      # Phase 2 — small/mid-cap rotation for EU + Asia (parity with the US job).
+      # Honored by the SMID satellite wiring in the INTL fetch step below.
+      UNIVERSE_SMID_SATELLITE: ${{ vars.UNIVERSE_SMID_SATELLITE || '1' }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -499,6 +502,23 @@ jobs:
           eu_tickers   = [e["ticker"] for e in registry.get("europe", []) + registry.get("europe_mid", [])]
           asia_tickers = [e["ticker"] for e in registry.get("asia",   []) + registry.get("asia_mid",   [])]
           log.info("Registry: %d EU + %d Asia tickers (incl. mid/small)", len(eu_tickers), len(asia_tickers))
+
+          # Phase 2 SMID — add the small/mid leverage sleeve per region. The US
+          # path gets this via resolve_universe; INTL seeds from the registry
+          # (large/mid only), so add it explicitly. Flag-gated (UNIVERSE_SMID_
+          # SATELLITE) and non-raising inside the helper → degrades to registry-
+          # only on any failure.
+          try:
+              from src.ingestion.universe_screener import smid_satellite_tickers
+              from src.services.fmp_client import FMPClient
+              _smid_client = FMPClient(api_key=api_key)
+              _eu_add = smid_satellite_tickers(_smid_client, "EU", eu_tickers, log_dir=Path("logs"))
+              _as_add = smid_satellite_tickers(_smid_client, "ASIA", asia_tickers, log_dir=Path("logs"))
+              eu_tickers   += [t for t in _eu_add if t not in eu_tickers]
+              asia_tickers += [t for t in _as_add if t not in asia_tickers]
+              log.info("SMID satellite: +%d EU, +%d Asia small/mid names", len(_eu_add), len(_as_add))
+          except Exception as exc:
+              log.warning("SMID satellite wiring failed: %s — registry universe only", exc)
 
           payload: list[dict] = []
           for market_enum, tickers in [
