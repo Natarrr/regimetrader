@@ -128,6 +128,36 @@ def volume_zscore(
     return (volumes[idx] - mu) / sd
 
 
+def windowed_technical(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    idx: int,
+    window: int = 60,
+) -> Dict[str, Optional[float]]:
+    """Point-in-time RSI-reversal + ADX-trend at ``idx`` (look-ahead-safe).
+
+    Uses ONLY the trailing slice ``[idx-window+1 .. idx]`` (inclusive) — no bar
+    after ``idx`` enters either statistic, so the value is exactly what was
+    observable on the snapshot date. These are the only candidate factors that
+    are genuinely reconstructable from price history; valuation candidates
+    (sector P/E, DCF) need a point-in-time fundamentals source and are emitted
+    by the live archive instead (CLAUDE.md §3 — no look-ahead).
+
+    Mirrors momentum_long / volume_attention: bare factor names, returned as a
+    dict so reconstruct_ticker can splat it into the record.
+    """
+    from src.scoring.momentum_signals import score_adx_trend, score_rsi_reversion
+    lo = max(0, idx - window + 1)
+    h = list(highs[lo:idx + 1])
+    l = list(lows[lo:idx + 1])
+    c = list(closes[lo:idx + 1])
+    return {
+        "rsi_reversion": score_rsi_reversion(c),
+        "adx_trend": score_adx_trend(h, l, c),
+    }
+
+
 def anchor_filing(
     filings: Sequence[Dict[str, Any]],
     d: date,
@@ -176,6 +206,10 @@ def reconstruct_ticker(
     closes, volumes, dates = fmp_prices_to_arrays(rows)
     if len(closes) < lookback + horizon + 2:
         return []
+    # Highs/lows for ADX, aligned oldest-first exactly like fmp_prices_to_arrays.
+    _ordered = list(reversed(rows or []))
+    highs = [float(r.get("high", 0) or 0) for r in _ordered]
+    lows = [float(r.get("low", 0) or 0) for r in _ordered]
     spy_aligned: List[Optional[float]] = [spy_map.get(dt) for dt in dates]
 
     out: List[Dict[str, Any]] = []
@@ -184,14 +218,16 @@ def reconstruct_ticker(
         spy_fwd = _ratio(spy_aligned, idx, idx + horizon)
         if asset_fwd is None or spy_fwd is None:
             continue   # SPY non-trading on this calendar slot → unmeasurable
-        out.append({
+        rec = {
             "ticker": ticker,
             "snapshot_date": dates[idx],
             "momentum_long": momentum_excess(closes, spy_aligned, idx, lookback, skip),
             "volume_attention": volume_zscore(volumes, idx, vol_window),
             "forward_return_21d": asset_fwd,
             "spy_return_21d": spy_fwd,
-        })
+        }
+        rec.update(windowed_technical(highs, lows, closes, idx))   # rsi/adx (PIT)
+        out.append(rec)
     return out
 
 

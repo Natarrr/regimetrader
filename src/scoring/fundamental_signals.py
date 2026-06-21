@@ -540,3 +540,70 @@ def score_accruals(
         return 0.0
     clipped = max(-0.20, min(0.20, (ni - cfo) / ta))
     return round(1.0 - (clipped + 0.20) / 0.40, 4)
+
+
+# ── A3 · Sector-relative value (own P/E vs sector P/E) ─────────────────────────
+
+def score_sector_relative_value(
+    stock_pe: float, sector_pe: float
+) -> float:
+    """Cheapness of a stock's P/E relative to its OWN sector's P/E → [0, 1].
+
+    Formula:
+        ratio   = stock_pe / sector_pe
+        clipped = max(0.5, min(2.0, ratio))    # half-to-double the sector multiple
+        score   = 1 − (clipped − 0.5) / 1.5    # cheaper than sector → higher score
+
+    Anchors valuation to the peer group explicitly — complementary to the
+    absolute value factors (E/P, EV/EBITDA, P/B) which compare across the whole
+    cross-section. Because the v3 engine already normalizes within sector × cap
+    buckets, a sector-relative input adds a within-peer dispersion axis the
+    absolute multiples cannot.
+
+    UNSIGNED dead-signal: 0.0 when stock_pe ≤ 0 (loss-making — P/E undefined),
+    sector_pe ≤ 0, or either input is missing/non-numeric.
+
+    Reference: Asness, Porter & Stevens (2000) — within-industry value spreads.
+    """
+    spe = _f(stock_pe)
+    secpe = _f(sector_pe)
+    if spe is None or secpe is None or spe <= 0 or secpe <= 0:
+        return 0.0
+    clipped = max(0.5, min(2.0, spe / secpe))
+    return round(1.0 - (clipped - 0.5) / 1.5, 4)
+
+
+# ── A3 · DCF intrinsic-value upside ───────────────────────────────────────────
+
+def score_dcf_upside(
+    dcf_value: Optional[float], current_price: Optional[float]
+) -> Optional[float]:
+    """Model-implied intrinsic upside, SIGNED → [0, 1], center 0.5.
+
+    Formula:
+        upside  = (dcf_value − current_price) / current_price
+        clipped = max(−0.50, min(+0.50, upside))   # ±50% practical bound
+        score   = (clipped + 0.50) / 1.00          # linear map → [0, 1]
+
+        +50% upside → 1.00 ;  at fair value → 0.50 ;  −50% → 0.00
+
+    Orthogonal to price_target_upside: that signal is the SELL-SIDE consensus
+    target, this is a MODEL-BASED intrinsic value (FMP levered DCF). The two can
+    diverge sharply (analysts anchored to price vs. a cash-flow model), which is
+    exactly the spread this candidate tests. NB: FMP's DCF is a black-box model
+    output — kept strictly weight-0 until the IC gate justifies otherwise.
+
+    SIGNED factor (add to SIGNED_FACTORS on promotion): per CLAUDE.md §2 a
+    missing/non-positive input returns None ("unavailable"), never 0.0 — a 0.0
+    here is a real −50% intrinsic-downside observation. dcf_value ≤ 0 is a
+    nonsensical valuation and also returns None.
+
+    Reference: Damodaran (2012), "Investment Valuation", 3rd ed.
+    """
+    dcf = _f(dcf_value)
+    price = _f(current_price)
+    if dcf is None or price is None or dcf <= 0 or price <= 0:
+        return None
+    upside = (dcf - price) / price
+    clipped = max(-0.50, min(0.50, upside))
+    return round((clipped + 0.50) / 1.00, 4)

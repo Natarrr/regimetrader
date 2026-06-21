@@ -817,3 +817,69 @@ class TestPairedTargetAndPrice:
         }
         with patch.object(client._session, "get", side_effect=_route(responses)):
             assert client._paired_target_and_price("AAPL") is None
+
+
+# ── Candidate-factor endpoints (Track A) ────────────────────────────────────
+
+class TestLeveredDcf:
+    def test_returns_dcf_value(self, client):
+        payload = [{"symbol": "AAPL", "date": "2026-06-01", "dcf": 250.3,
+                    "Stock Price": 210.0}]
+        with patch.object(client._session, "get", return_value=_ok_resp(payload)):
+            assert client.get_levered_dcf("AAPL") == pytest.approx(250.3)
+
+    def test_none_when_empty(self, client):
+        with patch.object(client._session, "get", return_value=_empty_resp()):
+            assert client.get_levered_dcf("AAPL") is None
+
+    def test_falls_back_to_base_symbol(self, client):
+        payload_base = [{"symbol": "ASML", "dcf": 900.0}]
+
+        def _route(url, params=None, **kw):
+            return _ok_resp(payload_base) if params.get("symbol") == "ASML" else _empty_resp()
+
+        with patch.object(client._session, "get", side_effect=_route):
+            assert client.get_levered_dcf("ASML.AS") == pytest.approx(900.0)
+
+    def test_no_key_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FMP_API_KEY", raising=False)
+        c = FMPClient(cache_root=tmp_path / "fmp")
+        assert c.get_levered_dcf("AAPL") is None
+
+
+class TestSectorPe:
+    SNAPSHOT = [
+        {"date": "2026-06-19", "sector": "Technology", "exchange": "NASDAQ", "pe": 35.2},
+        {"date": "2026-06-19", "sector": "Energy", "exchange": "NASDAQ", "pe": 12.0},
+    ]
+
+    def test_returns_matching_sector_pe(self, client):
+        with patch.object(client._session, "get", return_value=_ok_resp(self.SNAPSHOT)):
+            assert client.get_sector_pe(
+                "Technology", exchange="NASDAQ", date="2026-06-19"
+            ) == pytest.approx(35.2)
+
+    def test_case_insensitive_match(self, client):
+        with patch.object(client._session, "get", return_value=_ok_resp(self.SNAPSHOT)):
+            assert client.get_sector_pe(
+                "energy", exchange="NASDAQ", date="2026-06-19"
+            ) == pytest.approx(12.0)
+
+    def test_none_for_unknown_sector(self, client):
+        with patch.object(client._session, "get", return_value=_ok_resp(self.SNAPSHOT)):
+            assert client.get_sector_pe(
+                "Utilities", exchange="NASDAQ", date="2026-06-19"
+            ) is None
+
+    def test_snapshot_cached_one_fetch_per_exchange_date(self, client):
+        with patch.object(client._session, "get",
+                          return_value=_ok_resp(self.SNAPSHOT)) as mock_get:
+            client.get_sector_pe("Technology", exchange="NASDAQ", date="2026-06-19")
+            client.get_sector_pe("Energy", exchange="NASDAQ", date="2026-06-19")
+        assert mock_get.call_count == 1   # second sector served from cached snapshot
+
+    def test_none_when_empty(self, client):
+        with patch.object(client._session, "get", return_value=_empty_resp()):
+            assert client.get_sector_pe(
+                "Technology", exchange="NASDAQ", date="2026-06-19"
+            ) is None

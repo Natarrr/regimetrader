@@ -30,6 +30,11 @@ _DEFAULT_OUT = Path("research/ic_report.json")
 _HORIZON_DAYS = 21
 _EXCESS_KEY = "excess_return_21d"
 
+# Weight-0 candidate factors that are point-in-time reconstructable in the
+# backfill (price-derived). OFF by default so the optimizer's report input is
+# unchanged; enable with --candidates to inspect their de-overlapped IC.
+_CANDIDATE_TECHNICAL_FACTORS = ("rsi_reversion", "adx_trend")
+
 
 def load_ndjson(path: Path) -> List[Dict[str, Any]]:
     """Read one JSON object per non-blank line."""
@@ -115,6 +120,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="default: ic_report.json (v2.2) / ic_report_v3.json (v3)")
     parser.add_argument("--engine", choices=["v2.2", "v3"], default="v2.2")
     parser.add_argument("--horizon", type=int, default=_HORIZON_DAYS)
+    parser.add_argument("--candidates", action="store_true",
+                        help="also measure weight-0 technical candidates "
+                             "(rsi_reversion, adx_trend); does not change WEIGHTS")
     args = parser.parse_args(argv)
 
     if not args.backfill.exists():
@@ -125,6 +133,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     out = args.out or (Path("research/ic_report_v3.json")
                        if args.engine == "v3" else _DEFAULT_OUT)
     factors = _default_factors(args.engine)
+    if args.candidates:
+        factors = factors + [f for f in _CANDIDATE_TECHNICAL_FACTORS
+                             if f not in factors]
     payload = run(args.backfill, out, factors, horizon_days=args.horizon)
 
     print(f"IC report ({args.engine}) -> {out}  "
