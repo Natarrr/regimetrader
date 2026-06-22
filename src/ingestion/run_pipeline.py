@@ -1364,9 +1364,32 @@ def run(
     _ambiguous_bases: set = set()
     if bulk_cache is not None:
         try:
-            from src.ingestion.fmp_bulk_prefetch import build_ticker_index_with_ambiguous as _bti_ambig  # noqa: PLC0415
-            _bulk_consensus_idx, _ambiguous_bases = _bti_ambig(bulk_cache, "upgrades-downgrades-consensus-bulk")
-            _bulk_ratios_idx, _ratios_ambiguous = _bti_ambig(bulk_cache, "ratios-ttm-bulk")
+            from src.ingestion.fmp_bulk_prefetch import (  # noqa: PLC0415
+                build_ticker_index_with_ambiguous as _bti_ambig,
+                is_endpoint_usable as _ep_usable,
+                read_prefetch_status as _read_status,
+            )
+            # Audit F3: honor the prefetch staleness marker. A stale/failed bulk
+            # snapshot is skipped (index left empty) so the existing per-ticker
+            # FMP fallback engages, instead of scoring an old snapshot as fresh.
+            _bulk_status = _read_status(bulk_cache)
+            _CONS_EP = "upgrades-downgrades-consensus-bulk"
+            _RATIOS_EP = "ratios-ttm-bulk"
+            _ratios_ambiguous: set = set()
+            if _ep_usable(_bulk_status, _CONS_EP):
+                _bulk_consensus_idx, _ambiguous_bases = _bti_ambig(bulk_cache, _CONS_EP)
+            else:
+                log.error(
+                    "Bulk consensus snapshot %s status=%s — skipping bulk; "
+                    "per-ticker grades-consensus fallback engages",
+                    _CONS_EP, _bulk_status.get(_CONS_EP))
+            if _ep_usable(_bulk_status, _RATIOS_EP):
+                _bulk_ratios_idx, _ratios_ambiguous = _bti_ambig(bulk_cache, _RATIOS_EP)
+            else:
+                log.error(
+                    "Bulk ratios snapshot %s status=%s — skipping bulk; "
+                    "per-ticker ratios-ttm fallback engages",
+                    _RATIOS_EP, _bulk_status.get(_RATIOS_EP))
             log.info(
                 "Bulk cache loaded: consensus=%d symbols (ambiguous=%d), ratios=%d symbols (ambiguous=%d)",
                 len(_bulk_consensus_idx), len(_ambiguous_bases),

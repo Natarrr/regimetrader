@@ -37,10 +37,14 @@ Insider data coverage (critical for EU/Asia):
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
 from src.core.fetchers_base import BaseMarketFetcher, MarketEnum, TickerEntry
 from src.ingestion.v3_shadow import v3_shadow_enabled as _v3_shadow_enabled
+from src.utils.freshness import (
+    is_us_listing, is_us_rth, quote_age_seconds, series_age_days,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,14 @@ _VOL_BASELINE_SKIP = 5
 _VOL_MAX_SPIKE = 20.0
 _MIN_BARS_MOMENTUM = 252
 _PRICE_LIMIT = 280   # 13 months of trading days
+
+# ── Freshness gates (audit F1/F2) ─────────────────────────────────────────────
+# F2: newest EOD bar older than this ⇒ stale tape (halt/delist/feed gap) ⇒ drop.
+#     4 days covers a 3-day weekend + a holiday without rejecting a healthy tape.
+# F1: a quote older than this during US RTH ⇒ stale price ⇒ drop quote-derived
+#     factors for US listings (INTL / after-hours are flag-only — see the gate).
+_PRICE_SERIES_MAX_AGE_DAYS = int(os.getenv("PRICE_SERIES_MAX_AGE_DAYS", "4"))
+_QUOTE_MAX_AGE_RTH_SEC = float(os.getenv("QUOTE_MAX_AGE_RTH_MIN", "15")) * 60.0
 
 
 class FMPFetcher(BaseMarketFetcher):
@@ -258,6 +270,17 @@ class FMPFetcher(BaseMarketFetcher):
                 "FMPFetcher: no price data for %s — skipping", ticker)
             return None
 
+        # ── Price-series recency gate (audit F2) ─────────────────────────────
+        # A newest EOD bar older than the threshold is a halted/delisted/gapped
+        # tape — drop the name before it emits phantom momentum / return_5d into
+        # the Discord extension gate. Region-agnostic; weekend/holiday tolerant.
+        _series_age = series_age_days(dates[-1]) if dates else None
+        if _series_age is not None and _series_age > _PRICE_SERIES_MAX_AGE_DAYS:
+            logger.warning(
+                "FMPFetcher: stale price series for %s (latest=%s age=%dd > %dd) — skipping",
+                ticker, dates[-1], _series_age, _PRICE_SERIES_MAX_AGE_DAYS)
+            return None
+
         return_12_1m: Optional[float] = None
         if len(closes) >= _MIN_BARS_MOMENTUM:
             idx_far = max(0, len(closes) - _MIN_BARS_MOMENTUM)
@@ -294,6 +317,20 @@ class FMPFetcher(BaseMarketFetcher):
         if not quote:
             logger.warning(
                 "FMPFetcher: no quote for %s — all FMP factors absent from denominator", ticker)
+            return _build_price_only_factors(
+                closes, volumes, return_12_1m, volume_spike,
+                momentum_long_score, volume_attention_score,
+            )
+        # ── Quote freshness gate (audit F1) ──────────────────────────────────
+        # A stale US quote during US RTH must not feed price/marketCap/sector
+        # into scoring — drop quote-derived factors (price-only path) so they
+        # leave the StrategyEngine denominator rather than scoring a stale value
+        # (absence ≠ bearish, CLAUDE.md §2). INTL / after-hours are kept.
+        if _should_reject_stale_quote(ticker, quote):
+            logger.warning(
+                "FMPFetcher: stale quote for %s during US RTH (age=%.0fs > %.0fs) — "
+                "dropping quote-derived factors from denominator",
+                ticker, quote_age_seconds(quote) or -1.0, _QUOTE_MAX_AGE_RTH_SEC)
             return _build_price_only_factors(
                 closes, volumes, return_12_1m, volume_spike,
                 momentum_long_score, volume_attention_score,
@@ -797,6 +834,20 @@ def _flt(value) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _should_reject_stale_quote(ticker: str, quote: dict, now=None) -> bool:
+    """True when a present-but-stale quote must drop quote-derived FMP factors.
+
+    Audit F1. Scoped to US listings during US regular trading hours: an EU/Asia
+    listing or an after-hours US quote is governed by a closed/other session and
+    is kept (flag-only). An absent/unparseable timestamp is NOT a reject —
+    absence of a timestamp is not evidence of staleness (CLAUDE.md §2).
+    """
+    if not (is_us_listing(ticker) and is_us_rth(now)):
+        return False
+    age = quote_age_seconds(quote, now)
+    return age is not None and age > _QUOTE_MAX_AGE_RTH_SEC
 
 
 def _short_returns(closes: list) -> tuple[Optional[float], Optional[float]]:

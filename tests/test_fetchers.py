@@ -67,7 +67,13 @@ def test_fmp_fetcher_market_asia():
 
 def _fmp_price_rows(n: int, start: float = 100.0, end: float = 115.0,
                     vol: float = 2_000_000, last_vol: float | None = None) -> list:
-    """Build FMP historical-price-eod/full rows (newest-first) for n trading days."""
+    """Build FMP historical-price-eod/full rows (newest-first) for n trading days.
+
+    Dates are anchored so the newest bar is today; otherwise the price-series
+    recency gate (fmp_fetcher F2) would correctly reject these fixtures as stale.
+    """
+    from datetime import date, timedelta
+    today = date.today()
     rows = []
     step = (end - start) / max(n - 1, 1)
     for i in range(n):
@@ -76,7 +82,7 @@ def _fmp_price_rows(n: int, start: float = 100.0, end: float = 115.0,
         if last_vol is not None and i == n - 1:
             v = last_vol
         rows.append({
-            "date":   f"2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}",
+            "date":   (today - timedelta(days=(n - 1 - i))).isoformat(),
             "close":  close,
             "volume": v,
         })

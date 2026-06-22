@@ -340,6 +340,42 @@ def prefetch(
     return results
 
 
+def read_prefetch_status(cache_dir: Path) -> dict[str, str]:
+    """Return ``{endpoint: status}`` from ``bulk_prefetch_status.json``.
+
+    Status is one of "fresh" | "stale" | "failed" (written by ``prefetch()``).
+    Returns ``{}`` when the marker is absent or unreadable — the consumer then
+    has no freshness info and falls back to its prior behavior (load what exists)
+    rather than gating blindly. Never raises (CLAUDE.md §2: no silent crash on a
+    missing artifact, but a missing marker is a legitimate, non-error state).
+    """
+    p = cache_dir / "bulk_prefetch_status.json"
+    if not p.exists():
+        return {}
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("read_prefetch_status: unreadable marker %s: %s", p, exc)
+        return {}
+    endpoints = payload.get("endpoints", {})
+    return {
+        ep: str(detail.get("status", ""))
+        for ep, detail in endpoints.items()
+        if isinstance(detail, dict)
+    }
+
+
+def is_endpoint_usable(status_map: dict[str, str], endpoint: str) -> bool:
+    """False when the bulk snapshot for *endpoint* is "stale" or "failed".
+
+    A missing/unknown status is usable (True) so a cache dir written before
+    status tracking — or with no marker — behaves exactly as before. When False,
+    the caller must skip the bulk index so the per-ticker FMP fallback engages
+    (audit F3: never score a stale bulk snapshot as if fresh).
+    """
+    return status_map.get(endpoint) not in ("stale", "failed")
+
+
 def load_bulk(cache_dir: Path, endpoint: str) -> list[dict[str, Any]]:
     """Load a cached bulk endpoint.
 
