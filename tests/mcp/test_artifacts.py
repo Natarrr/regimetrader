@@ -118,3 +118,47 @@ class TestMissingArtifacts:
         assert store.toplists()["names"] == []
         assert store.regime() == {"vix": None, "vix_regime": None, "kill_switch": None}
         assert store.search_universe() == []
+
+
+class TestSleeveBucketsSurfaced:
+    """Small/mid sleeves (eu_mid_small / asia_mid_small / top_buys_smid) must be
+    visible through the MCP — that's where INTL small-caps and the US SMID
+    leverage sleeve live after cook (they're not in top_buys_*)."""
+
+    @pytest.fixture
+    def store(self, tmp_path: Path) -> ArtifactStore:
+        (tmp_path / "top_lists.json").write_text(json.dumps({
+            "top_buys_usa": [{"ticker": "AAPL", "final_score": 0.62,
+                              "badge": "buy", "market": "USA", "factors": {}}],
+            "top_buys_europe": [], "top_buys_asia": [],
+            "eu_mid_small": [{"ticker": "K33.ST", "final_score": 0.41,
+                              "badge": "watch", "market": "EUROPE",
+                              "cap_tier": "small", "factors": {}}],
+            "asia_mid_small": [{"ticker": "6603.HK", "final_score": 0.45,
+                                "badge": "watch", "market": "ASIA",
+                                "cap_tier": "small", "factors": {}}],
+            "top_buys_smid": [{"ticker": "IONQ", "final_score": 0.55,
+                               "badge": "buy", "cap_tier": "small", "factors": {}}],
+            "vix": 17.0, "vix_regime": "Normal", "kill_switch": False,
+        }), encoding="utf-8")
+        return ArtifactStore(tmp_path)
+
+    def test_smallcaps_surface_in_toplists(self, store):
+        tickers = {r["ticker"] for r in store.toplists()["names"]}
+        assert {"K33.ST", "6603.HK", "IONQ"} <= tickers
+
+    def test_eu_smallcap_under_europe_filter(self, store):
+        eu = [r["ticker"] for r in store.toplists(market="europe")["names"]]
+        assert "K33.ST" in eu
+
+    def test_smid_sleeve_defaults_to_usa(self, store):
+        usa = [r["ticker"] for r in store.toplists(market="usa")["names"]]
+        assert "IONQ" in usa            # top_buys_smid has no market → defaults USA
+
+    def test_search_universe_includes_sleeves(self, store):
+        names = {r["ticker"] for r in store.search_universe(min_score=0.4)}
+        assert {"K33.ST", "6603.HK", "IONQ", "AAPL"} <= names
+
+    def test_ticker_score_finds_sleeve_name(self, store):
+        out = store.ticker_score("K33.ST")
+        assert out is not None and out["final_score"] == 0.41
