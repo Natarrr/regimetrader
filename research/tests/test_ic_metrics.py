@@ -66,14 +66,25 @@ class TestFactorICSeries:
 
 class TestEffectiveBreadth:
     def test_daily_snapshots_collapse_to_horizon_spacing(self):
-        # 63 consecutive calendar days, 21-day horizon → 3 independent windows
+        # 63 consecutive calendar days; 21 business-day (≈ trading-day) embargo
+        # → 3 independent windows.
         dates = [date(2025, 1, 1) + timedelta(days=k) for k in range(63)]
         assert effective_breadth(dates, horizon_days=21) == 3
 
-    def test_already_spaced_snapshots_unchanged(self):
-        # monthly snapshots already exceed the 21-day horizon → all independent
+    def test_monthly_firsts_collapse_short_month_overlap(self):
+        # The 21-day horizon is in TRADING days (~30 calendar). A calendar-month
+        # gap is only ~20–23 business days, so Feb 1 → Mar 1 (20 business days)
+        # overlaps and must collapse: five independent windows, not six.
         dates = [date(2025, m, 1) for m in range(1, 7)]
-        assert effective_breadth(dates, horizon_days=21) == 6
+        assert effective_breadth(dates, horizon_days=21) == 5
+
+    def test_trading_day_spaced_snapshots_all_independent(self):
+        # Snapshots sampled exactly 21 trading days apart (how the backfill is
+        # built) stay fully independent — n_effective == n_snapshots.
+        import pandas as pd
+        bdays = pd.bdate_range("2025-01-02", periods=200)
+        dates = [bdays[i].date() for i in range(0, 200, 21)]
+        assert effective_breadth(dates, horizon_days=21) == len(dates)
 
 
 class TestAggregateIC:

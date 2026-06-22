@@ -31,7 +31,9 @@ def _snapshot_data_with_market():
                 "badge": "HIGH BUY",
                 "market": "ASIA",
                 "company_name": "Sony",
-                "factors": {"edgar": 0.8}
+                # quality_piotroski present → no retroactive pre-EU-gate discount;
+                # this test checks market/company_name passthrough, not the gate.
+                "factors": {"edgar": 0.8, "quality_piotroski": 0.6}
             }
         ]
     }

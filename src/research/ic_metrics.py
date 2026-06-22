@@ -27,6 +27,8 @@ import statistics
 from datetime import date
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 from tools.compare_v22_v3 import spearman  # SSOT rank correlation
 
 _RETURN_KEY = "forward_return_21d"
@@ -87,9 +89,14 @@ def _as_date(value: Any) -> date:
 def effective_breadth(dates: Sequence[date], horizon_days: int = 21) -> int:
     """Count of non-overlapping forward-return windows among the snapshot dates.
 
-    Greedy maximal subset with consecutive gaps >= horizon_days — the
-    de-overlapping that prevents a 21-day horizon sampled daily/weekly from
-    masquerading as 21x/4x the independent breadth (López de Prado 2018).
+    Greedy maximal subset whose consecutive gaps span >= ``horizon_days``
+    *trading* sessions. The forward-return label covers ``horizon_days`` TRADING
+    days, so the embargo is measured in business days (``np.busday_count``), not
+    calendar days: a calendar-day gap would let a 21-trading-day (~30 calendar)
+    window masquerade as independent after only ~15 sessions, inflating the IR
+    t-statistic (López de Prado 2018, ch. 7). Business days approximate trading
+    days up to exchange holidays (~9/yr), a far smaller error than the ~30%
+    calendar-vs-trading mismatch it replaces.
     """
     ordered = sorted(_as_date(d) for d in dates)
     if not ordered:
@@ -97,7 +104,7 @@ def effective_breadth(dates: Sequence[date], horizon_days: int = 21) -> int:
     kept = 1
     anchor = ordered[0]
     for d in ordered[1:]:
-        if (d - anchor).days >= horizon_days:
+        if np.busday_count(np.datetime64(anchor), np.datetime64(d)) >= horizon_days:
             kept += 1
             anchor = d
     return kept

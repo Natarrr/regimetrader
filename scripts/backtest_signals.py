@@ -30,7 +30,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -89,8 +89,10 @@ _CANONICAL_FACTORS = (
 )
 _FACTOR_ALIASES = {"macro": "momentum"}
 
-# Pre-market cutoff: signals generated before 13:30 UTC use same-day close;
-# signals generated after use next-day open (we approximate as next-day close).
+# Entry-timing cutoff: signals generated before ~21:00 UTC (≈ NYSE close) enter
+# at that day's close; signals generated at/after it enter at the next trading
+# day's close (entry_next_day). Entry is therefore always at/after signal time —
+# no look-ahead.
 _POST_MARKET_UTC_HOUR = 21   # 21:00 UTC ≈ NYSE close
 
 
@@ -118,19 +120,43 @@ def _era_label(weights: Dict[str, float]) -> str:
     return f"custom ({fingerprint})"
 
 
+# Buy-list sections parsed from a snapshot: legacy US artifact (top_buys,
+# mid_caps, small_caps, sector_picks) AND the combined cooked payload
+# (top_buys_usa/_europe/_asia). watchlist/overflow are intentionally excluded —
+# CAPITULATION survivors are force-badged WATCHLIST (not a buy signal) and would
+# be dropped by the badge filter anyway.
+_BUY_LIST_KEYS = (
+    "top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
+    "mid_caps", "small_caps",
+)
+
+
+def _iter_buy_entries(data: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
+    """Yield every buy-list entry across all snapshot schema variants."""
+    for key in _BUY_LIST_KEYS:
+        for entry in (data.get(key) or []):
+            yield entry
+    for sector_list in (data.get("sector_picks") or {}).values():
+        for entry in (sector_list or []):
+            yield entry
+
+
 def load_archive_snapshot(path: Path) -> dict:
     """Load archive snapshot with schema version awareness.
 
     Applies a retroactive 0.6x score discount to pre-EU-Piotroski-gate EU/Asia
-    entries so the backtest IC is comparable across the schema regime boundary
-    (introduced Jun 03 2026).
+    entries (those missing quality_piotroski) so the backtest is comparable
+    across the schema regime boundary (gate introduced Jun 03 2026). The
+    discounted value is stored as ``final_score_adjusted`` and consumed by
+    ``_parse_snapshot`` for both the badge threshold and the recorded score.
     """
     d = json.loads(path.read_text(encoding="utf-8"))
     schema = d.get("schema_version", "legacy")
     piog_eu = d.get("piotroski_eu_gate_active", False)
 
     if not piog_eu:
-        for entry in d.get("top_buys", []):
+        adjusted = 0
+        for entry in _iter_buy_entries(d):
             region = entry.get("region") or entry.get("market", "")
             if region in ("EU", "Asia", "EUROPE", "ASIA"):
                 if entry.get("factors", {}).get("quality_piotroski") is None:
@@ -138,10 +164,12 @@ def load_archive_snapshot(path: Path) -> dict:
                     entry["final_score_adjusted"] = round(
                         float(entry.get("final_score", 0.0)) * 0.6, 4
                     )
-        log.info(
-            "Snapshot %s (schema=%s): pre-EU-gate, retroactive 0.6x applied to EU/Asia scores",
-            path.name, schema,
-        )
+                    adjusted += 1
+        if adjusted:
+            log.info(
+                "Snapshot %s (schema=%s): pre-EU-gate, retroactive 0.6x applied "
+                "to %d EU/Asia score(s)", path.name, schema, adjusted,
+            )
     return d
 
 
@@ -234,23 +262,14 @@ def _parse_snapshot(path: Path) -> List[SignalRecord]:
 
     weights = _normalize_weights(data.get("weights", {}))
 
-    # Collect every list section — legacy US artifact (top_buys, mid_caps,
-    # small_caps, sector_picks) AND combined cooked payload
-    # (top_buys_usa/_europe/_asia). watchlist is intentionally excluded:
-    # CAPITULATION survivors are force-badged WATCHLIST (not a buy signal)
-    # and would be dropped by the badge filter below anyway.
-    entries: List[Dict[str, Any]] = []
-    for key in ("top_buys", "top_buys_usa", "top_buys_europe", "top_buys_asia",
-                "mid_caps", "small_caps"):
-        entries.extend(data.get(key) or [])
-    for sector_list in (data.get("sector_picks") or {}).values():
-        entries.extend(sector_list or [])
-
     seen: set[str] = set()   # deduplicate ticker×date combos
-    for entry in entries:
+    for entry in _iter_buy_entries(data):
         ticker = entry.get("ticker", "").strip().upper()
         badge  = entry.get("badge", "")
-        score  = float(entry.get("final_score", 0.0))
+        # Consume the retroactive pre-EU-gate discount when present (set by
+        # load_archive_snapshot) so threshold and recorded score share one scale.
+        adj = entry.get("final_score_adjusted")
+        score = float(adj if adj is not None else entry.get("final_score", 0.0))
 
         if not ticker or badge not in _BADGE_THRESHOLDS:
             continue
@@ -319,9 +338,9 @@ def _trading_day_offset(prices: pd.Series, anchor_date: date, offset: int) -> Op
     if pos_arr >= len(idx):
         return None
 
-    # For same-day entry: use the bar ON anchor_date if it exists, else next
-    entry_pos = pos_arr if idx[pos_arr] == anchor_ts else pos_arr
-    target_pos = entry_pos + offset
+    # searchsorted(side="left") already lands on the bar ON anchor_date when it
+    # exists, else the first trading day after it — exactly the entry bar we want.
+    target_pos = pos_arr + offset
 
     if target_pos >= len(idx):
         return None
