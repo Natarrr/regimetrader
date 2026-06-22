@@ -101,6 +101,8 @@ def test_inst_flow_13f_is_us_only():
     ("SHEL.L",   "EU"),
     ("ASML.AS",  "EU"),
     ("ENI.MI",   "EU"),
+    ("NESN.SW",  "EU"),   # SIX Swiss Exchange (current suffix; .VX is obsolete)
+    ("AMS.SW",   "EU"),
     ("7203.T",   "ASIA"),
     ("005930.KS","ASIA"),
     ("0700.HK",  "ASIA"),

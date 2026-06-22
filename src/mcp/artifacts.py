@@ -27,6 +27,16 @@ _MARKET_BUCKETS = {
     "asia": "top_buys_asia",
 }
 
+# Small/mid sleeves: where INTL small-caps (eu/asia_mid_small) and the US SMID
+# leverage sleeve (top_buys_smid) live after cook — not in top_buys_*. Surfaced
+# so the MCP shows the full small/mid/large selection. Each carries its own
+# `market`; top_buys_smid is US, so it defaults there.
+_SLEEVE_BUCKETS = {
+    "eu_mid_small": "EUROPE",
+    "asia_mid_small": "ASIA",
+    "top_buys_smid": "USA",
+}
+
 
 class ArtifactStore:
     """Queries over the committed pipeline artifacts in a logs directory."""
@@ -51,15 +61,30 @@ class ArtifactStore:
         return rows if isinstance(rows, list) else []
 
     def _ranked_rows(self) -> List[Dict[str, Any]]:
-        """All top-list rows across markets (each carries final_score + market)."""
+        """All ranked rows across the large top-buys lists AND the small/mid
+        sleeves, deduped by ticker (core buckets win). Each row is tagged with
+        its source `bucket` and a `market` fallback so market filtering works."""
         doc = self._load(_TOPLISTS)
         if not isinstance(doc, dict):
             return []
         out: List[Dict[str, Any]] = []
-        for col in _MARKET_BUCKETS.values():
+        seen: set = set()
+        buckets = list(_MARKET_BUCKETS.values()) + list(_SLEEVE_BUCKETS)
+        for col in buckets:
             rows = doc.get(col)
-            if isinstance(rows, list):
-                out.extend(r for r in rows if isinstance(r, dict))
+            if not isinstance(rows, list):
+                continue
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                key = str(r.get("ticker", "")).upper()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                rr = dict(r)
+                rr.setdefault("bucket", col)
+                rr.setdefault("market", _SLEEVE_BUCKETS.get(col, ""))
+                out.append(rr)
         return out
 
     # ── public queries ───────────────────────────────────────────────────────

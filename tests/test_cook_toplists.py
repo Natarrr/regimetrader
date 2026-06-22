@@ -702,10 +702,11 @@ def test_intl_insider_meta_flows_engine_to_discord(cook_mod, registry, tmp_path)
     assert "vs SPY" not in eu_field["value"]
 
 
-def test_unregistered_intl_ticker_is_dropped(cook_mod, registry, tmp_path, capsys):
-    """Registry is authoritative: an unregistered ticker must be dropped with a
-    warning — never defaulted to EUROPE (which mislabeled it and could fail
-    audit check D, blocking the whole send)."""
+def test_unplaceable_intl_ticker_is_dropped(cook_mod, registry, tmp_path, capsys):
+    """Geographic-leakage guard: a ticker with no EU/ASIA suffix (GHOST → US/
+    unknown) is dropped with a warning — it cannot be placed in an INTL pool and
+    a silent EUROPE default could fail audit check D. A suffix-placeable name
+    (SAP.DE) survives even when absent from the registry (satellite/CSV core)."""
     us_path = tmp_path / "top_lists_us.json"
     us_path.write_text(json.dumps({
         "top_buys": [], "vix": 15.0, "vix_regime": "Normal", "kill_switch": False, "ticker_count": 0,
@@ -721,9 +722,9 @@ def test_unregistered_intl_ticker_is_dropped(cook_mod, registry, tmp_path, capsy
     all_intl = (result["top_buys_europe"] + result["top_buys_asia"]
                 + result["eu_mid_small"] + result["asia_mid_small"])
     tickers = {e["ticker"] for e in all_intl}
-    assert "GHOST" not in tickers
-    assert "SAP.DE" in tickers
-    assert "not in ticker_registry.json" in capsys.readouterr().out
+    assert "GHOST" not in tickers          # US/unknown suffix — dropped (leak guard)
+    assert "SAP.DE" in tickers             # placeable EU name — kept
+    assert "not placeable in EU/ASIA" in capsys.readouterr().out
 
 
 def test_pipeline_key_preserved_in_intl_entries(cook_mod, registry, tmp_path):
@@ -1033,3 +1034,38 @@ class TestCookOnDemand:
         result = self._run(cook_mod, tmp_path, "SAP.DE",
                            intl_input=intl_payload, registry_path=registry)
         assert audit(result) is True
+
+
+# ── _resolve_intl_meta: honor scored metadata for names absent from the registry
+# (satellite small-caps + broad CSV core). Drop only truly unplaceable tickers.
+
+def test_resolve_meta_registered_prefers_registry(cook_mod, registry):
+    m = cook_mod._build_registry_map(registry)
+    tk = next(iter(m))
+    assert cook_mod._resolve_intl_meta({"ticker": tk}, m) == m[tk]
+
+
+def test_resolve_meta_unregistered_eu_smallcap(cook_mod):
+    meta = cook_mod._resolve_intl_meta({"ticker": "XYZ.DE", "market_cap": 1.5e9}, {})
+    assert meta is not None
+    assert meta["market"] == "EUROPE"
+    assert meta["cap_tier"] == "small"
+
+
+def test_resolve_meta_unregistered_asia_midcap(cook_mod):
+    meta = cook_mod._resolve_intl_meta({"ticker": "9999.HK", "market_cap": 5e9}, {})
+    assert meta["market"] == "ASIA"
+    assert meta["cap_tier"] == "mid"
+
+
+def test_resolve_meta_us_or_unknown_is_none(cook_mod):
+    # Geographic-leakage guard preserved: a US/suffixless ticker can't be placed.
+    assert cook_mod._resolve_intl_meta({"ticker": "AAPL"}, {}) is None
+
+
+def test_normalize_unregistered_smallcap_survives(cook_mod):
+    raw = {"ticker": "XYZ.DE", "composite_score": 0.6,
+           "market_cap": 1.2e9, "factor_snapshots": {}}
+    out = cook_mod._normalize_intl_entry(raw, {}, vix=15.0)
+    assert out["market"] == "EUROPE"
+    assert out["cap_tier"] == "small"

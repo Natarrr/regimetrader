@@ -200,7 +200,10 @@ def _piotroski_gate_multiplier(raw: int | None) -> float:
 # ── Region classifier ─────────────────────────────────────────────────────────
 _EU_SUFFIXES: frozenset[str] = frozenset({
     ".PA", ".DE", ".L", ".AS", ".MI", ".MC", ".BR",
-    ".VX", ".LS", ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
+    ".VX", ".SW", ".LS", ".OL", ".ST", ".HE", ".CO", ".F", ".BE",
+    # .SW = SIX Swiss Exchange (current); .VX is the obsolete virt-x suffix.
+    # Without .SW the SMID satellite's Swiss small/mid names were misclassified
+    # as US and dropped by cook's geographic-leakage guard.
 })
 
 _ASIA_SUFFIXES: frozenset[str] = frozenset({

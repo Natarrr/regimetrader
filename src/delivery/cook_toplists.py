@@ -14,6 +14,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.config.weights import get_region
 from src.risk.regime import (
     RiskRegime,
     apply_capitulation_filter,
@@ -181,16 +182,57 @@ def _build_registry_map(registry_path: Path) -> dict:
     return mapping
 
 
+_MARKET_BY_REGION = {"EU": "EUROPE", "ASIA": "ASIA"}
+
+
+def _cap_tier_from_mcap(mcap: float) -> str:
+    """3-way cap tier from market cap (matches FMPFetcher._v3_cap_tier)."""
+    if mcap >= 10e9:
+        return "large"
+    if mcap >= 2e9:
+        return "mid"
+    return "small"
+
+
+def _resolve_intl_meta(raw: dict, ticker_market_map: dict) -> dict | None:
+    """Per-ticker {market, cap_tier, sector} for an INTL entry.
+
+    The curated registry is authoritative when it lists the ticker. Otherwise —
+    for SMID-satellite small-caps and the broad CSV-sourced core, which are
+    legitimately scored but absent from ticker_registry.json — derive the market
+    from the ticker suffix (get_region: EU→EUROPE, ASIA→ASIA) and the cap tier
+    from the scored market cap. Returns None ONLY when the ticker cannot be
+    placed in an EU/ASIA pool (US/unknown suffix) — the geographic-leakage guard
+    that previously dropped ALL unregistered names is preserved for that case.
+    """
+    ticker = raw.get("ticker", "")
+    if ticker in ticker_market_map:
+        return ticker_market_map[ticker]
+    market = _MARKET_BY_REGION.get(get_region(ticker))
+    if market is None:
+        return None
+    mcap = float(raw.get("market_cap") or 0.0)
+    return {
+        "market": market,
+        "cap_tier": _cap_tier_from_mcap(mcap) if mcap > 0 else "large",
+        "sector": raw.get("sector", ""),
+    }
+
+
 def _normalize_intl_entry(raw: dict, ticker_market_map: dict, vix: float) -> dict:
     """Convert StrategyEngine entry to audit_payload-compatible format.
 
     Applies VIX dampening to final_score. congress is forced to 0.0 (audit check E).
     """
     ticker = raw.get("ticker", "")
-    # No fallback: the caller (cook) drops unregistered tickers before this
-    # point — a silent EUROPE default mislabeled unknown tickers and could
-    # block the whole send via audit check D (GeographicLeakageError).
-    _registry_meta = ticker_market_map[ticker]
+    # Registry is authoritative when present; otherwise the metadata is derived
+    # from the ticker suffix + scored market cap (_resolve_intl_meta), so
+    # satellite small-caps and CSV-core names are NOT dropped. None only for
+    # US/unknown suffixes (geographic-leakage guard) — caller drops those first.
+    _registry_meta = _resolve_intl_meta(raw, ticker_market_map)
+    if _registry_meta is None:
+        raise ValueError(
+            f"{ticker!r} not placeable in EU/ASIA (US/unknown suffix)")
     market = _registry_meta["market"]
     cap_tier = _registry_meta.get("cap_tier", "large")
     composite_score = float(raw.get("composite_score", 0.0))
@@ -286,12 +328,13 @@ def cook(
     eu_mid_small: list = []
     asia_mid_small: list = []
     for raw_entry in intl_raw:
-        # Registry is authoritative: unregistered tickers are dropped LOUDLY.
-        # (The previous EUROPE default mislabeled them and could fail the
-        # combined audit's geographic-leakage check, blocking the send.)
-        if raw_entry.get("ticker") not in ticker_market:
-            print(f"[COOK] WARN: {raw_entry.get('ticker')!r} not in "
-                  f"ticker_registry.json — entry dropped")
+        # Honor scored metadata: registry names use the registry; satellite
+        # small-caps + CSV-core names (absent from the registry) are placed by
+        # suffix + scored cap. Only genuinely unplaceable (US/unknown) tickers
+        # are dropped — the geographic-leakage guard for the combined audit.
+        if _resolve_intl_meta(raw_entry, ticker_market) is None:
+            print(f"[COOK] WARN: {raw_entry.get('ticker')!r} not placeable in "
+                  f"EU/ASIA (US/unknown suffix) — entry dropped")
             continue
         normalized = _normalize_intl_entry(raw_entry, ticker_market, vix)
         cap = normalized["cap_tier"]
