@@ -1069,3 +1069,69 @@ def test_normalize_unregistered_smallcap_survives(cook_mod):
     out = cook_mod._normalize_intl_entry(raw, {}, vix=15.0)
     assert out["market"] == "EUROPE"
     assert out["cap_tier"] == "small"
+
+
+# ---------------------------------------------------------------------------
+# Selection churn — rotate over-tenured leaders out of the displayed desks
+# ---------------------------------------------------------------------------
+
+
+def _e(ticker, score, **kw):
+    e = {"ticker": ticker, "final_score": score, "factors": {}}
+    e.update(kw)
+    return e
+
+
+def test_churn_rotates_over_tenured_leader(cook_mod, tmp_path):
+    """A non-whale leader at tenure >= max_tenure is rotated out for one run and
+    the next contender is promoted into the displayed top-N."""
+    state = tmp_path / "state.json"
+    audit = tmp_path / "churn.ndjson"
+    state.write_text(json.dumps({"AAA": 3}))   # AAA has held a slot 3 runs
+    regions = {
+        "USA": ([_e("AAA", 0.90), _e("BBB", 0.80)],
+                [_e("CCC", 0.70), _e("DDD", 0.60)]),
+    }
+    filtered, cooled = cook_mod._churn_regional_desks(
+        regions, desk_n=3, max_tenure=3, state_path=state, audit_path=audit)
+    primary_tickers = [e["ticker"] for e in filtered["USA"][0]]
+    assert "AAA" not in primary_tickers          # rotated out
+    assert {e["ticker"] for e in cooled} == {"AAA"}
+    assert primary_tickers == ["BBB", "CCC", "DDD"]   # next contenders promoted
+    # Tenure round-trips: cooled name reset to 0 (eligible next run).
+    new_state = json.loads(state.read_text())
+    assert new_state["AAA"] == 0
+    assert new_state["BBB"] == 1
+
+
+def test_churn_exempts_whale_signal(cook_mod, tmp_path):
+    """A whale-signal name is never rotated out, even at high tenure."""
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"WHALE": 9}))   # way past max_tenure
+    regions = {
+        "USA": ([_e("WHALE", 0.90, factors={"inst_flow_13f": 0.85}),
+                 _e("BBB", 0.80)],
+                [_e("CCC", 0.70)]),
+    }
+    filtered, cooled = cook_mod._churn_regional_desks(
+        regions, desk_n=3, max_tenure=3, state_path=state, audit_path=tmp_path / "a.ndjson")
+    assert "WHALE" in [e["ticker"] for e in filtered["USA"][0]]
+    assert "WHALE" not in {e["ticker"] for e in cooled}
+
+
+def test_churn_no_op_when_under_tenure(cook_mod, tmp_path):
+    """No rotation until a name reaches max_tenure; selection is unchanged."""
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"AAA": 1, "BBB": 1}))
+    regions = {"USA": ([_e("AAA", 0.9), _e("BBB", 0.8)], [_e("CCC", 0.7)])}
+    filtered, cooled = cook_mod._churn_regional_desks(
+        regions, desk_n=3, max_tenure=3, state_path=state, audit_path=tmp_path / "a.ndjson")
+    assert cooled == []
+    assert [e["ticker"] for e in filtered["USA"][0]] == ["AAA", "BBB", "CCC"]
+
+
+def test_has_whale_signal_thresholds(cook_mod):
+    assert cook_mod._has_whale_signal(_e("X", 0.5, factors={"inst_flow_13f": 0.80}))
+    assert cook_mod._has_whale_signal(_e("X", 0.5, insider_npr={"spike": 0.30}))
+    assert not cook_mod._has_whale_signal(_e("X", 0.5, factors={"inst_flow_13f": 0.79}))
+    assert not cook_mod._has_whale_signal(_e("X", 0.5))
