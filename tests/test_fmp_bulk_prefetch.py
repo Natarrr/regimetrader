@@ -12,6 +12,8 @@ from src.ingestion.fmp_bulk_prefetch import (
     _coerce_csv_value,
     _parse_response,
     build_ticker_index_with_ambiguous,
+    is_endpoint_usable,
+    read_prefetch_status,
 )
 
 
@@ -215,3 +217,50 @@ class TestPrefetchStatusVisibility:
         )
         results = bp.prefetch([ep], tmp_path, ttl_hours=23, api_key="x", rps=50)
         assert results[ep] == "fresh"  # served from valid cache, no fetch attempted
+
+
+class TestReadPrefetchStatus:
+    """The consumer (run_pipeline) must be able to read the status marker so a
+    stale/failed bulk snapshot is gated out instead of scored as fresh (F3)."""
+
+    def _write_status(self, tmp_path, endpoints):
+        import json
+        (tmp_path / "bulk_prefetch_status.json").write_text(
+            json.dumps({"_written_at": "2026-06-22T00:00:00+00:00",
+                        "endpoints": endpoints}),
+            encoding="utf-8",
+        )
+
+    def test_reads_endpoint_statuses(self, tmp_path):
+        self._write_status(tmp_path, {
+            "ratios-ttm-bulk": {"status": "stale", "cached_at": "x", "age_hours": 50},
+            "upgrades-downgrades-consensus-bulk": {"status": "fresh", "cached_at": "y"},
+        })
+        status = read_prefetch_status(tmp_path)
+        assert status["ratios-ttm-bulk"] == "stale"
+        assert status["upgrades-downgrades-consensus-bulk"] == "fresh"
+
+    def test_absent_file_returns_empty(self, tmp_path):
+        assert read_prefetch_status(tmp_path) == {}
+
+    def test_malformed_file_returns_empty(self, tmp_path):
+        (tmp_path / "bulk_prefetch_status.json").write_text("<not json>", encoding="utf-8")
+        assert read_prefetch_status(tmp_path) == {}
+
+
+class TestIsEndpointUsable:
+    """Gate predicate: stale/failed ⇒ skip bulk (per-ticker fallback engages).
+    Unknown/missing status ⇒ usable, preserving prior behavior when no marker
+    exists (e.g. an old cache dir written before status tracking)."""
+
+    def test_fresh_is_usable(self):
+        assert is_endpoint_usable({"ratios-ttm-bulk": "fresh"}, "ratios-ttm-bulk") is True
+
+    def test_stale_is_not_usable(self):
+        assert is_endpoint_usable({"ratios-ttm-bulk": "stale"}, "ratios-ttm-bulk") is False
+
+    def test_failed_is_not_usable(self):
+        assert is_endpoint_usable({"ratios-ttm-bulk": "failed"}, "ratios-ttm-bulk") is False
+
+    def test_missing_status_is_usable(self):
+        assert is_endpoint_usable({}, "ratios-ttm-bulk") is True
