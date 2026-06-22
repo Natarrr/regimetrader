@@ -379,12 +379,22 @@ def _catalyst_stale(entry: Dict[str, Any]) -> bool:
     return int(entry.get("earnings_surprise_days") or 0) > _PEAD_STALE_DAYS
 
 
-def _off_actionable_desk(entry: Dict[str, Any]) -> bool:
+def _off_actionable_desk(entry: Dict[str, Any], *,
+                         apply_target_gate: bool = True) -> bool:
     """Name removed from the actionable buy desk → WATCH section when any of:
     already extended (recent 5d run-up), analyst target already passed (no upside
     left), OR its earnings/PEAD catalyst is spent (drift window elapsed).
-    Display/risk gate only — never mutates the score."""
-    return _is_extended(entry) or _target_passed(entry) or _catalyst_stale(entry)
+    Display/risk gate only — never mutates the score.
+
+    A name showing an active whale signal (top-decile 13F inflow / insider spike)
+    is EXEMPT from the target-passed gate: extreme institutional accumulation is
+    independent evidence that overrides a stale/below-spot analyst target (the
+    whale proposition the desk exists to surface). ``apply_target_gate=False``
+    drops the target gate entirely — used by the SMID leverage sleeve, a
+    flow/momentum desk rather than an analyst-target play."""
+    target_gate = (apply_target_gate and _target_passed(entry)
+                   and not _whale_signal(entry))
+    return _is_extended(entry) or target_gate or _catalyst_stale(entry)
 
 
 def _freshness_token(entry: Dict[str, Any]) -> str:
@@ -788,6 +798,21 @@ def _whale_badge(entry: Dict[str, Any]) -> str:
     return ""
 
 
+def _quarter_label(date_str: Optional[str]) -> str:
+    """Compact ``Q{n}'YY`` label for a 13F filing quarter-end date
+    (e.g. "2026-03-31" → "Q1'26"). Empty when the date is absent or
+    unparseable — older artifacts without an `as_of` field omit the tag.
+    13F is quarterly SEC data, so a fixed quarter is expected, not stale."""
+    if not date_str:
+        return ""
+    try:
+        y, m, _d = str(date_str)[:10].split("-")
+        q = (int(m) - 1) // 3 + 1
+        return f"Q{q}'{y[2:]}"
+    except (ValueError, IndexError):
+        return ""
+
+
 def _niche_alpha_strip(entry: Dict[str, Any]) -> str:
     """[NICHE ALPHA] evidence line — the institutional 13F flow + insider
     acquired/disposed velocity behind a whale trigger (CLAUDE.md §5 evidence-first)."""
@@ -797,7 +822,9 @@ def _niche_alpha_strip(entry: Dict[str, Any]) -> str:
         ev = entry.get("inst_13f_evidence") or {}
         dih = ev.get("investors_holding_change")
         tail = f" ({int(dih):+d} holders)" if isinstance(dih, (int, float)) and dih else ""
-        bits.append(f"🐋 13F {_safe_float(flow):.2f}{tail}")
+        asof = _quarter_label(ev.get("as_of"))
+        asof_tail = f" · as-of {asof}" if asof else ""
+        bits.append(f"🐋 13F {_safe_float(flow):.2f}{tail}{asof_tail}")
     npr = entry.get("insider_npr") or {}
     if npr:
         spike = _safe_float(npr.get("spike"))
@@ -945,9 +972,13 @@ class DiscordPayloadBuilder:
     # Lists whose entries are displayed names — a target-passed (no-upside) name
     # is stripped from ALL of them so it is hidden from the brief entirely (desk,
     # WATCH, sector exposure, factor matrix, percentile pool). User request:
-    # surfacing a "buy" with no remaining upside makes no sense.
+    # surfacing a "buy" with no remaining upside makes no sense. EXEMPTIONS: a
+    # name with an active whale signal is kept (extreme 13F/insider accumulation
+    # overrides a stale/below-spot analyst target); and `top_buys_smid` is omitted
+    # entirely (the SMID leverage sleeve is a flow/momentum desk, not a target
+    # play, so the target gate must never hide it).
     _SUPPRESS_NO_UPSIDE_KEYS: Tuple[str, ...] = (
-        "top_buys_usa", "top_buys_europe", "top_buys_asia", "top_buys_smid",
+        "top_buys_usa", "top_buys_europe", "top_buys_asia",
         "usa_overflow", "eu_overflow", "asia_overflow",
         "eu_mid_small", "asia_mid_small", "watchlist",
     )
@@ -955,13 +986,16 @@ class DiscordPayloadBuilder:
     @classmethod
     def _suppress_no_upside(cls, data: Dict[str, Any]) -> Dict[str, Any]:
         """Shallow-copy `data` with target-passed names removed from every
-        displayed list (never mutates the caller's dict)."""
+        displayed list — except names showing an active whale signal, which are
+        kept (their institutional accumulation overrides a below-spot target).
+        `top_buys_smid` is exempt by omission. Never mutates the caller's dict."""
         out = dict(data)
         for k in cls._SUPPRESS_NO_UPSIDE_KEYS:
             lst = data.get(k)
             if isinstance(lst, list):
                 out[k] = [e for e in lst
-                          if not (isinstance(e, dict) and _target_passed(e))]
+                          if not (isinstance(e, dict) and _target_passed(e)
+                                  and not _whale_signal(e))]
         return out
 
     # ── Validation ────────────────────────────────────────────────────────────
@@ -1035,10 +1069,41 @@ class DiscordPayloadBuilder:
     def _region_entries(self, key: str) -> List[Dict[str, Any]]:
         return list(self.data.get(key) or [])
 
-    def _fresh_entries(self, key: str) -> List[Dict[str, Any]]:
+    def _fresh_entries(self, key: str, *,
+                       apply_target_gate: bool = True) -> List[Dict[str, Any]]:
         """Region entries still actionable to enter — none of: run-up extended,
-        spent earnings/PEAD catalyst, or analyst target already passed."""
-        return [e for e in self._region_entries(key) if not _off_actionable_desk(e)]
+        spent earnings/PEAD catalyst, or analyst target already passed. Pass
+        ``apply_target_gate=False`` to retain target-passed names (SMID sleeve)."""
+        return [e for e in self._region_entries(key)
+                if not _off_actionable_desk(e, apply_target_gate=apply_target_gate)]
+
+    # Region → ranked pools the actionable desk draws from: primary picks first,
+    # then the sector-cap overflow (+ EU/Asia mid/small sleeves) so the desk still
+    # fills to MAX_DESK_ENTRIES when its top names are gated off. Mirrors
+    # _SECTOR_REGION_POOLS.
+    _DESK_POOLS: Dict[str, List[str]] = {
+        "top_buys_usa":    ["top_buys_usa", "usa_overflow"],
+        "top_buys_europe": ["top_buys_europe", "eu_overflow", "eu_mid_small"],
+        "top_buys_asia":   ["top_buys_asia", "asia_overflow", "asia_mid_small"],
+    }
+
+    def _desk_entries(self, key: str) -> List[Dict[str, Any]]:
+        """Score-ranked, freshness-filtered, deduped desk candidates across the
+        region's primary + overflow pools — so a desk fills to MAX_DESK_ENTRIES
+        even when its top names are gated off the desk (target-passed / extended /
+        spent catalyst). Backfilling from overflow can surface >2 names of one
+        sector; depth (≥3 actionable per market) is the intended priority."""
+        seen: set = set()
+        out: List[Dict[str, Any]] = []
+        for pool in self._DESK_POOLS.get(key, [key]):
+            for e in self._region_entries(pool):
+                ticker = e.get("ticker")
+                if ticker in seen or _off_actionable_desk(e):
+                    continue
+                seen.add(ticker)
+                out.append(e)
+        out.sort(key=lambda e: _safe_float(e.get("final_score")), reverse=True)
+        return out
 
     def _extended_entries(self, key: str) -> List[Dict[str, Any]]:
         """WATCH-section names: run-up extended OR spent catalyst — but NEVER
@@ -1185,8 +1250,9 @@ class DiscordPayloadBuilder:
                     show_drivers: bool = True,
                     show_lifecycle: bool = True) -> Optional[Dict[str, Any]]:
         # Already-moved names are split off to the ⏱ EXTENDED section — the desk
-        # carries only still-actionable (fresh) entries.
-        entries = self._fresh_entries(key)
+        # carries only still-actionable (fresh) entries, backfilled from the
+        # sector-cap overflow so it fills to ``max_entries`` (≥3 per market).
+        entries = self._desk_entries(key)
         if not entries:
             return None
         lines: List[str] = []
@@ -1202,8 +1268,9 @@ class DiscordPayloadBuilder:
 
     def _smid_field(self, max_entries: int) -> Optional[Dict[str, Any]]:
         """SMID leverage desk — plain ``` block, graceful None when the key
-        is absent/empty (backward compat with pre-SMID artifacts)."""
-        entries = self._fresh_entries("top_buys_smid")
+        is absent/empty (backward compat with pre-SMID artifacts). Exempt from
+        the analyst-target gate: a flow/momentum sleeve, not a target play."""
+        entries = self._fresh_entries("top_buys_smid", apply_target_gate=False)
         if not entries:
             return None
         rows = [_SMID_HEADER] + [_smid_row(e) for e in entries[:max_entries]]

@@ -77,9 +77,14 @@ logs/*
 !logs/archive/**
 # IC backtest snapshot store — persisted across CI runs so the live IC path
 # (src.research.historical_loader.load_historical_snapshots) can accumulate the
-# 60+ daily snapshots it requires. Runtime churn audit stays ignored.
+# 60+ daily snapshots it requires.
 !logs/historical/
 !logs/historical/**
+# Selection-churn tenure state + audit — persisted across CI runs so cooldown
+# tenure accumulates (ephemeral runners start cold; without this, rotation never
+# triggers). See cook_toplists._churn_regional_desks.
+!logs/universe_state.json
+!logs/universe_churn.ndjson
 
 # ── Trading runtime files ─────────────────────────────────────────────────────
 # (manual deletion required to resume after HALT_ALL)

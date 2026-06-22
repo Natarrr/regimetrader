@@ -698,6 +698,12 @@ jobs:
       contents: write
     env:
       PYTHONPATH: ${{ github.workspace }}
+      # Selection churn: rotate over-tenured leaders out of the displayed desks so
+      # the top-N is not byte-identical every run. Centralized in cook_toplists.py
+      # (one job, one persisted tenure state). Whale picks are exempt. Set the
+      # UNIVERSE_CHURN repo variable to '0' to disable.
+      UNIVERSE_CHURN: ${{ vars.UNIVERSE_CHURN || '1' }}
+      UNIVERSE_CHURN_MAX_TENURE: ${{ vars.UNIVERSE_CHURN_MAX_TENURE || '3' }}
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -712,6 +718,10 @@ jobs:
           git fetch origin main --depth=20
           git checkout origin/main -- logs/archive/ 2>/dev/null \
             || echo "No archive directory in git yet — [NEW] tags expected on first run"
+          # Prior churn tenure state — required for cooldown to accumulate across
+          # the ephemeral runners (first run seeds it).
+          git checkout origin/main -- logs/universe_state.json logs/universe_churn.ndjson 2>/dev/null \
+            || echo "No churn state yet — first churn run will seed it"
 
       # ── 2. Python 3.11 ───────────────────────────────────────────────────────
       - name: Set up Python 3.11
@@ -778,31 +788,38 @@ jobs:
       # ── 8b. Archive combined snapshot (first run of day only) ───────────────
       # Writes logs/archive/YYYY-MM-DD_top_lists.json to git so send_discord.py
       # can load yesterday's EU/Asia scores for ▲/▼ delta display (not [NEW]).
-      - name: Archive combined snapshot
+      - name: Archive snapshot + persist churn state
         run: |
           TODAY=$(date -u '+%Y-%m-%d')
           DEST="logs/archive/${TODAY}_top_lists.json"
-          if [ ! -f logs/top_lists.json ]; then
-            echo "top_lists.json not found — skipping archive"
-            exit 0
-          fi
-          if git ls-files --error-unmatch "$DEST" 2>/dev/null; then
-            echo "Archive already exists for $TODAY — skipping"
-            exit 0
-          fi
-          mkdir -p logs/archive
-          cp logs/top_lists.json "$DEST"
-          # Persist the per-day factor snapshot too, so the IC backtest's live
-          # path (logs/historical/) survives ephemeral CI runners and matures
-          # toward the 60-snapshot floor load_historical_snapshots() requires.
           HIST="logs/historical/${TODAY}/intel_source_status.json"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
-          git add "$DEST"
-          [ -f "$HIST" ] && git add "$HIST"
-          git commit -m "chore(archive): combined snapshot $TODAY"
-          git push
+          # Daily combined snapshot — FIRST run of the day only (so send_discord
+          # can load yesterday's EU/Asia scores for ▲/▼ deltas, not [NEW]).
+          if [ -f logs/top_lists.json ] && ! git ls-files --error-unmatch "$DEST" 2>/dev/null; then
+            mkdir -p logs/archive
+            cp logs/top_lists.json "$DEST"
+            git add "$DEST"
+            # Per-day factor snapshot for the IC backtest live path.
+            [ -f "$HIST" ] && git add "$HIST"
+          else
+            echo "Archive already exists for $TODAY (or no top_lists) — snapshot skipped"
+          fi
+          # Churn tenure state — committed EVERY run so cooldown tenure accumulates
+          # across the 3 daily cycles (ephemeral runners start cold; without this,
+          # rotation never triggers). Whitelisted in .gitignore. universe_state.json
+          # is TRACKED and cook modifies it, so commit BEFORE rebasing (a pull
+          # --rebase aborts on unstaged changes to a tracked file).
+          [ -f logs/universe_state.json ]  && git add logs/universe_state.json
+          [ -f logs/universe_churn.ndjson ] && git add logs/universe_churn.ndjson
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore(archive): snapshot + churn state $TODAY"
+            git pull --rebase origin main
+            git push
+          fi
 
       # ── 9. Combined pre-flight audit (RT-QA-2026-REV5) ──────────────────────
       # Validates the combined top_lists.json across all seven checks:

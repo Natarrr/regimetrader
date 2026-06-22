@@ -1307,3 +1307,89 @@ class TestExtensionGateRender:
                  + sum(len(f["name"]) + len(f["value"]) for f in e["fields"])
                  + len((e.get("footer") or {}).get("text", "")))
         assert total <= 6000, f"total embed chars {total} > 6000"
+
+
+# ── Target-passed gate: whale exemption + ≥3 overflow backfill ─────────────────
+
+class TestTargetGateAndBackfill:
+    """A target-passed (target < price) name is normally hidden from the desk,
+    but a whale-signal name is EXEMPT (kept), and each desk backfills from the
+    sector-cap overflow so it still shows up to 3 actionable names."""
+
+    def test_whale_target_passed_stays_on_desk(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("WHL", 0.82, cap_tier="mid", target_price=50.0,
+                   current_price=60.0,  # target already passed
+                   factors={"inst_flow_13f": 0.85}),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        assert "WHL" in desk["value"]                  # not hidden
+        assert "WHALE ACCUMULATION" in desk["value"]   # badge surfaced
+
+    def test_nonwhale_target_passed_backfilled_past(self):
+        e = _embed(_build(
+            top_buys_usa=[_entry("PASS", 0.75, cap_tier="large",
+                                 target_price=50.0, current_price=60.0)],
+            usa_overflow=[_entry("FRESH", 0.70, cap_tier="large",
+                                 target_price=90.0, current_price=60.0)],
+            top_buys_europe=[], top_buys_asia=[],
+        ))
+        desk = _field(e, "ALPHA DESK")
+        assert desk is not None
+        assert "PASS" not in desk["value"]    # no-upside name hidden
+        assert "FRESH" in desk["value"]       # backfilled from overflow
+
+    def test_desk_fills_to_three_from_overflow(self):
+        e = _embed(_build(
+            top_buys_usa=[_entry("AAA", 0.78, cap_tier="large"),
+                          _entry("BBB", 0.74, cap_tier="large")],
+            usa_overflow=[_entry("CCC", 0.70, cap_tier="large"),
+                          _entry("DDD", 0.66, cap_tier="large")],
+            top_buys_europe=[], top_buys_asia=[],
+        ))
+        desk = _field(e, "ALPHA DESK")
+        medals = [ln for ln in desk["value"].splitlines()
+                  if ln[:1] in ("🥇", "🥈", "🥉")]
+        assert len(medals) == 3   # backfilled past the 2 primary names
+
+    def test_smid_desk_keeps_target_passed_name(self):
+        e = _embed(_build(
+            top_buys_usa=[], top_buys_europe=[], top_buys_asia=[],
+            top_buys_smid=[_entry("SMD", 0.65, cap_tier="mid",
+                                  target_price=50.0, current_price=60.0,
+                                  leverage_score=0.9, return_5d=0.01)],
+        ))
+        smid = _field(e, "LEVERAGE DESK")
+        assert smid is not None and "SMD" in smid["value"]
+
+
+class TestWhaleAsOfQuarter:
+    """13F is quarterly SEC data — the [NICHE ALPHA] line labels the as-of quarter
+    so a fixed quarter reads as expected, not stale."""
+
+    def test_quarter_label_helper(self):
+        from src.delivery.send_discord import _quarter_label
+        assert _quarter_label("2026-03-31") == "Q1'26"
+        assert _quarter_label("2025-12-31") == "Q4'25"
+        assert _quarter_label(None) == ""
+        assert _quarter_label("garbage") == ""
+
+    def test_niche_alpha_renders_as_of_quarter(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("WHL", 0.82, cap_tier="mid",
+                   factors={"inst_flow_13f": 0.85},
+                   inst_13f_evidence={"investors_holding_change": 21,
+                                      "as_of": "2026-03-31"}),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        assert "NICHE ALPHA" in desk["value"]
+        assert "as-of Q1'26" in desk["value"]
+
+    def test_niche_alpha_omits_label_when_as_of_absent(self):
+        e = _embed(_build(top_buys_usa=[
+            _entry("WHL", 0.82, cap_tier="mid",
+                   factors={"inst_flow_13f": 0.85},
+                   inst_13f_evidence={"investors_holding_change": 21}),
+        ], top_buys_europe=[], top_buys_asia=[]))
+        desk = _field(e, "ALPHA DESK")
+        assert "as-of" not in desk["value"]   # backward-compat with old artifacts

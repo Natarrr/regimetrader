@@ -10,6 +10,7 @@ Schema transformation for INTL StrategyEngine output:
 """
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,104 @@ _SMID_PEAD_WINDOW_DAYS = 60
 _SMID_PEAD_BOOST       = 1.10
 
 _BADGE_THRESHOLDS = [(0.80, "HIGH BUY"), (0.60, "TACTICAL BUY"), (0.00, "WATCHLIST")]
+
+# ── Selection churn (rotate over-tenured leaders out of the displayed desks) ───
+# Breaks the "always the same top-3" trap: a name that holds a top-N desk slot for
+# >= max_tenure consecutive runs sits out the next run so a fresh contender shows.
+# Centralized here (one cook job, one state file) so US/EU/Asia rotate from a
+# single persisted tenure map — avoids cross-job state coordination. Gated by the
+# UNIVERSE_CHURN flag (default off → selection is byte-identical to legacy).
+_WHALE_FLOW_MIN      = 0.80   # mirror send_discord._WHALE_FLOW_MIN
+_WHALE_NPR_SPIKE_MIN = 0.30   # mirror send_discord._WHALE_NPR_SPIKE_MIN
+_CHURN_STATE_PATH = Path("logs/universe_state.json")
+_CHURN_AUDIT_PATH = Path("logs/universe_churn.ndjson")
+
+
+def _has_whale_signal(entry: dict) -> bool:
+    """Mirror send_discord._whale_signal — extreme top-decile 13F inflow or an
+    insider acquired/disposed spike. Whale names are EXEMPT from churn cooldown:
+    the high-conviction accumulation signal the desk exists to surface must never
+    be rotated out (consistent with the send-side target-gate exemption)."""
+    flow = (entry.get("factors") or {}).get("inst_flow_13f")
+    try:
+        if flow is not None and float(flow) >= _WHALE_FLOW_MIN:
+            return True
+    except (TypeError, ValueError):
+        pass
+    npr = entry.get("insider_npr") or {}
+    try:
+        return float(npr.get("spike") or 0.0) >= _WHALE_NPR_SPIKE_MIN
+    except (TypeError, ValueError):
+        return False
+
+
+def _churn_regional_desks(
+    regions: dict,
+    desk_n: int,
+    max_tenure: int,
+    state_path: Path = _CHURN_STATE_PATH,
+    audit_path: Path = _CHURN_AUDIT_PATH,
+) -> tuple[dict, list]:
+    """Rotate over-tenured leaders out of each region's displayed top-`desk_n`.
+
+    `regions` maps a region label → (primary_list, overflow_list); the candidate
+    pool per region is primary+overflow (score-ranked by cooled_top_n). A name that
+    has held a top-`desk_n` slot for >= max_tenure runs is rotated out for one run
+    (returned in `cooled_entries`) UNLESS it shows an active whale signal. Tenure
+    persists in `state_path`; rotation events append to `audit_path`. Returns
+    (filtered_regions, cooled_entries) — cooled names are stripped from primary AND
+    overflow so the send-side ≥3 backfill cannot resurrect them this run.
+    """
+    from src.scoring.churn import cooled_top_n, update_tenure  # noqa: PLC0415
+    try:
+        prev_state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        prev_state = {}
+    # Whale names are never on cooldown — drop them from the tenure map before the
+    # cooldown test so they stay eligible every run.
+    whale_tickers = {
+        e.get("ticker")
+        for primary, overflow in regions.values()
+        for e in (primary + overflow)
+        if _has_whale_signal(e)
+    }
+    eff_state = {t: v for t, v in prev_state.items() if t not in whale_tickers}
+
+    selected_all: list = []
+    cooled_entries: list = []
+    events_all: list = []
+    filtered: dict = {}
+    for label, (primary, overflow) in regions.items():
+        pool = [e for e in (primary + overflow)
+                if isinstance(e.get("final_score"), (int, float))]
+        selected, events = cooled_top_n(pool, eff_state, max_tenure, n=desk_n)
+        cooled = {ev["ticker"] for ev in events if ev["action"] == "cooldown"}
+        sel_set = {e.get("ticker") for e in selected}
+        selected_all += [e["ticker"] for e in selected]
+        cooled_entries += [e for e in pool if e.get("ticker") in cooled]
+        events_all += [{**ev, "region": label} for ev in events]
+        # Promote the post-churn top-N into primary (rotated-in names included) and
+        # keep the remaining non-cooled names as overflow — so MVO, sector exposure
+        # and the audit see the rotated desk, and the send-side ≥3 backfill stays
+        # consistent. Cooled names are dropped from both (returned for WATCH).
+        filtered[label] = (
+            selected,
+            [e for e in pool
+             if e.get("ticker") not in sel_set and e.get("ticker") not in cooled],
+        )
+
+    new_state = update_tenure(
+        eff_state, selected_all, [e.get("ticker") for e in cooled_entries])
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(new_state, indent=2), encoding="utf-8")
+    if events_all:
+        with audit_path.open("a", encoding="utf-8") as fh:
+            for ev in events_all:
+                fh.write(json.dumps(ev) + "\n")
+        n_cool = sum(1 for ev in events_all if ev["action"] == "cooldown")
+        print(f"[COOK] Universe churn: {n_cool} cooldown rotation(s), "
+              f"max_tenure={max_tenure}")
+    return filtered, cooled_entries
 
 
 def _apply_sector_count_cap(
@@ -405,6 +504,28 @@ def cook(
         smid_candidates += (list(us_data.get("mid_caps") or [])
                             + list(us_data.get("small_caps") or []))
     top_buys_smid = _build_smid_leverage_pool(smid_candidates)
+
+    # ── Selection churn ───────────────────────────────────────────────────────
+    # Rotate over-tenured leaders out of the displayed desks so the top-N is not
+    # byte-identical every run. Applied AFTER the SMID sleeve is built (the SMID
+    # leverage desk is intentionally exempt) and BEFORE MVO so portfolio
+    # construction sees the rotated desks. Skipped under CAPITULATION (no desks).
+    if (regime != RiskRegime.CAPITULATION
+            and os.getenv("UNIVERSE_CHURN", "").lower() in ("1", "true", "yes")):
+        _max_tenure = int(os.getenv("UNIVERSE_CHURN_MAX_TENURE", "3"))
+        _desk_n = int(os.getenv("UNIVERSE_CHURN_DESK_N", "3"))
+        _filtered, _cooled = _churn_regional_desks(
+            {
+                "USA":    (top_buys_usa, usa_overflow),
+                "EUROPE": (top_buys_europe, eu_overflow),
+                "ASIA":   (top_buys_asia, asia_overflow),
+            },
+            desk_n=_desk_n, max_tenure=_max_tenure,
+        )
+        top_buys_usa,    usa_overflow  = _filtered["USA"]
+        top_buys_europe, eu_overflow   = _filtered["EUROPE"]
+        top_buys_asia,   asia_overflow = _filtered["ASIA"]
+        watchlist.extend(_cooled)   # cooled names sit out the desk → WATCH section
 
     # ── 3-tier capital allocation ─────────────────────────────────────────────
     mvo_pools: dict = {}

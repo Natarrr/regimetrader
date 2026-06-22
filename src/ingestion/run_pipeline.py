@@ -1768,6 +1768,10 @@ def run(
                     "ownership_pct_change":     _inst_13f_summary.get("ownershipPercentChange"),
                     "increased_positions":      _inst_13f_summary.get("increasedPositions"),
                     "reduced_positions":        _inst_13f_summary.get("reducedPositions"),
+                    # 13F filing quarter-end (e.g. "2026-03-31") — surfaced so the
+                    # brief can label the whale signal's as-of quarter (13F is
+                    # quarterly SEC data; a fixed quarter is expected, not stale).
+                    "as_of":                    _inst_13f_summary.get("date"),
                 } if _inst_13f_summary else {},
                 # Insider acquired-vs-disposed spike (NPR overlay — badge/display)
                 "insider_npr":               insider_npr,
