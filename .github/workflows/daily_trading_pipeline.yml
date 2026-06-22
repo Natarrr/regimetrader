@@ -391,7 +391,7 @@ jobs:
     name: INTL — FMP 10-Factor Scoring (EU + Asia)
     needs: warm_shared_cache
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30   # raised from 12 — broader CSV-sourced core (INTL_UNIVERSE_MAX)
     permissions:
       contents: read
     env:
@@ -494,14 +494,34 @@ jobs:
           except Exception as exc:
               log.warning("Bulk index load failed: %s — falling back to per-ticker FMP", exc)
 
+          # Core universe: the broad ADV-ranked CSVs (config/universe_eu.csv,
+          # universe_apac.csv — sorted by ADV in build_universes), capped per
+          # region by INTL_UNIVERSE_MAX. The curated ticker_registry.json is the
+          # fallback when a CSV is absent/empty. (Fetcher is sequential, so the
+          # cap bounds runtime; raise it + the job timeout for the full universe.)
+          import csv as _csv
+          _cap = int(os.environ.get("INTL_UNIVERSE_MAX", "120"))
+
+          def _csv_tickers(path: str) -> list[str]:
+              p = Path(path)
+              if not p.exists():
+                  return []
+              with p.open(encoding="utf-8", newline="") as fh:
+                  return [r["ticker"].strip() for r in _csv.DictReader(fh)
+                          if r.get("ticker", "").strip()]
+
           reg_path = Path("config/ticker_registry.json")
-          if not reg_path.exists():
-              log.error("ticker_registry.json not found — aborting")
+          registry = json.loads(reg_path.read_text(encoding="utf-8")) if reg_path.exists() else {}
+          eu_tickers = _csv_tickers("config/universe_eu.csv")[:_cap] or \
+              [e["ticker"] for e in registry.get("europe", []) + registry.get("europe_mid", [])]
+          asia_tickers = _csv_tickers("config/universe_apac.csv")[:_cap] or \
+              [e["ticker"] for e in registry.get("asia", []) + registry.get("asia_mid", [])]
+          if not eu_tickers and not asia_tickers:
+              log.error("No INTL tickers from CSV or registry — aborting")
               sys.exit(1)
-          registry = json.loads(reg_path.read_text(encoding="utf-8"))
-          eu_tickers   = [e["ticker"] for e in registry.get("europe", []) + registry.get("europe_mid", [])]
-          asia_tickers = [e["ticker"] for e in registry.get("asia",   []) + registry.get("asia_mid",   [])]
-          log.info("Registry: %d EU + %d Asia tickers (incl. mid/small)", len(eu_tickers), len(asia_tickers))
+          _src = "csv" if Path("config/universe_eu.csv").exists() else "registry"
+          log.info("Core universe: %d EU + %d Asia (cap=%d/region, source=%s)",
+                   len(eu_tickers), len(asia_tickers), _cap, _src)
 
           # Phase 2 SMID — add the small/mid leverage sleeve per region. The US
           # path gets this via resolve_universe; INTL seeds from the registry
