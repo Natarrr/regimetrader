@@ -22,3 +22,9 @@
 {"date": "2026-06-23", "ticker": "EQT.ST", "action": "added", "reason": "promoted into top-3 at score 0.4228", "score": 0.4228, "region": "EUROPE"}
 {"date": "2026-06-23", "ticker": "316140.KS", "action": "cooldown", "reason": "held top-3 for 3 runs >= max_tenure 3 \u2014 rotated out for one run", "prior_tenure": 3, "score": 0.4823, "region": "ASIA"}
 {"date": "2026-06-23", "ticker": "016360.KS", "action": "added", "reason": "promoted into top-3 at score 0.4665", "score": 0.4665, "region": "ASIA"}
+{"date": "2026-06-23", "ticker": "LGND", "action": "added", "reason": "promoted into top-3 at score 0.7771", "score": 0.7771, "region": "USA"}
+{"date": "2026-06-23", "ticker": "ULTA", "action": "added", "reason": "promoted into top-3 at score 0.7167", "score": 0.7167, "region": "USA"}
+{"date": "2026-06-23", "ticker": "TER", "action": "added", "reason": "promoted into top-3 at score 0.7029", "score": 0.7029, "region": "USA"}
+{"date": "2026-06-23", "ticker": "BHP.L", "action": "added", "reason": "promoted into top-3 at score 0.4590", "score": 0.459, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "PRU.L", "action": "added", "reason": "promoted into top-3 at score 0.4376", "score": 0.4376, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "316140.KS", "action": "added", "reason": "promoted into top-3 at score 0.4823", "score": 0.4823, "region": "ASIA"}
