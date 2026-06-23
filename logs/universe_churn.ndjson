@@ -11,3 +11,14 @@
 {"date": "2026-06-22", "ticker": "BARC.L", "action": "added", "reason": "promoted into top-3 at score 0.4498", "score": 0.4498, "region": "EUROPE"}
 {"date": "2026-06-23", "ticker": "000270.KS", "action": "added", "reason": "promoted into top-3 at score 0.4664", "score": 0.4664, "region": "ASIA"}
 {"date": "2026-06-23", "ticker": "267250.KS", "action": "added", "reason": "promoted into top-3 at score 0.4645", "score": 0.4645, "region": "ASIA"}
+{"date": "2026-06-23", "ticker": "ULTA", "action": "cooldown", "reason": "held top-3 for 3 runs >= max_tenure 3 \u2014 rotated out for one run", "prior_tenure": 3, "score": 0.7163, "region": "USA"}
+{"date": "2026-06-23", "ticker": "TER", "action": "cooldown", "reason": "held top-3 for 3 runs >= max_tenure 3 \u2014 rotated out for one run", "prior_tenure": 3, "score": 0.7034, "region": "USA"}
+{"date": "2026-06-23", "ticker": "RDDT", "action": "added", "reason": "promoted into top-3 at score 0.6680", "score": 0.668, "region": "USA"}
+{"date": "2026-06-23", "ticker": "HAL", "action": "added", "reason": "promoted into top-3 at score 0.6620", "score": 0.662, "region": "USA"}
+{"date": "2026-06-23", "ticker": "ALV.DE", "action": "cooldown", "reason": "held top-3 for 3 runs >= max_tenure 3 \u2014 rotated out for one run", "prior_tenure": 3, "score": 0.4573, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "ASML.AS", "action": "added", "reason": "promoted into top-3 at score 0.4468", "score": 0.4468, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "PRU.L", "action": "cooldown", "reason": "held top-3 for 3 runs >= max_tenure 3 \u2014 rotated out for one run", "prior_tenure": 3, "score": 0.4376, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "BNC.L", "action": "added", "reason": "promoted into top-3 at score 0.4374", "score": 0.4374, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "EQT.ST", "action": "added", "reason": "promoted into top-3 at score 0.4228", "score": 0.4228, "region": "EUROPE"}
+{"date": "2026-06-23", "ticker": "316140.KS", "action": "cooldown", "reason": "held top-3 for 3 runs >= max_tenure 3 \u2014 rotated out for one run", "prior_tenure": 3, "score": 0.4823, "region": "ASIA"}
+{"date": "2026-06-23", "ticker": "016360.KS", "action": "added", "reason": "promoted into top-3 at score 0.4665", "score": 0.4665, "region": "ASIA"}
