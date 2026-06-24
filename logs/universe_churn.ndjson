@@ -28,3 +28,6 @@
 {"date": "2026-06-23", "ticker": "BHP.L", "action": "added", "reason": "promoted into top-3 at score 0.4590", "score": 0.459, "region": "EUROPE"}
 {"date": "2026-06-23", "ticker": "PRU.L", "action": "added", "reason": "promoted into top-3 at score 0.4376", "score": 0.4376, "region": "EUROPE"}
 {"date": "2026-06-23", "ticker": "316140.KS", "action": "added", "reason": "promoted into top-3 at score 0.4823", "score": 0.4823, "region": "ASIA"}
+{"date": "2026-06-24", "ticker": "BKR", "action": "added", "reason": "promoted into top-3 at score 0.6776", "score": 0.6776, "region": "USA"}
+{"date": "2026-06-24", "ticker": "005830.KS", "action": "added", "reason": "promoted into top-3 at score 0.4924", "score": 0.4924, "region": "ASIA"}
+{"date": "2026-06-24", "ticker": "016360.KS", "action": "added", "reason": "promoted into top-3 at score 0.4223", "score": 0.4223, "region": "ASIA"}
