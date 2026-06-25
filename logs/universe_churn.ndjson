@@ -56,3 +56,5 @@
 {"date": "2026-06-25", "ticker": "ASML.AS", "action": "added", "reason": "promoted into top-3 at score 0.4486", "score": 0.4486, "region": "EUROPE"}
 {"date": "2026-06-25", "ticker": "267250.KS", "action": "added", "reason": "promoted into top-3 at score 0.4574", "score": 0.4574, "region": "ASIA"}
 {"date": "2026-06-25", "ticker": "015760.KS", "action": "added", "reason": "promoted into top-3 at score 0.4255", "score": 0.4255, "region": "ASIA"}
+{"date": "2026-06-25", "ticker": "PRU.L", "action": "added", "reason": "promoted into top-3 at score 0.4874", "score": 0.4874, "region": "EUROPE"}
+{"date": "2026-06-25", "ticker": "BARC.L", "action": "added", "reason": "promoted into top-3 at score 0.4570", "score": 0.457, "region": "EUROPE"}
